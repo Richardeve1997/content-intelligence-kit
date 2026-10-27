@@ -17,7 +17,15 @@ node_modules/
 /me/
 /work/
 /research/
-/models/
+
+# Model weights are downloaded at run time and never committed, wherever they land.
+# These patterns have no leading slash on purpose: a weights folder can sit under kit/ or a skill.
+models/
+*.pth
+*.pt
+*.onnx
+*.tflite
+*.safetensors
 
 # Fetched at setup by bin/fetch_gsap.sh
 kit/vendor/gsap*

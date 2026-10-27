@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "onboarded": true,
+  "name": "Example Studio",
+  "handles": {
+    "instagram": "@examplestudio",
+    "tiktok": "@examplestudio",
+    "youtube": "@examplestudio",
+    "facebook": "examplestudio",
+    "linkedin": "example-studio",
+    "twitter": "@examplestudio"
+  },
+  "niche": "Growing food on balconies and windowsills",
+  "credibility": "Six years of growing vegetables on a three metre balcony",
+  "audience": {
+    "who": "People in small flats who want to grow some of their own food",
+    "wants": "Simple projects that work without a garden, a big budget or much spare time"
+  },
+  "cta": {
+    "type": "comment",
+    "keyword": "GROW",
+    "payload": "the balcony planting checklist",
+    "comment_platforms": ["instagram", "facebook"]
+  },
+  "platforms": ["instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter"],
+  "timezone": "Europe/London",
+  "posting_times": {
+    "instagram": "18:00",
+    "tiktok": "19:00",
+    "youtube": "17:00",
+    "facebook": "18:30",
+    "linkedin": "08:30",
+    "twitter": "12:00"
+  },
+  "colours": {
+    "canvas": "#f7f5f0",
+    "ink": "#1d2420",
+    "accent": "#177245",
+    "field_dark": "#16302b",
+    "field_light": "#eaf1e4"
+  },
+  "fonts": {
+    "display": "Inter Tight",
+    "body": "Inter",
+    "mono": "JetBrains Mono"
+  },
+  "logo": null,
+  "styles": ["ui-story", "mini-me"],
+  "voice_over": "record",
+  "image_provider": "manual",
+  "hashtags": {
+    "base": ["#balconygarden", "#growyourown", "#smallspaces"]
+  }
+}

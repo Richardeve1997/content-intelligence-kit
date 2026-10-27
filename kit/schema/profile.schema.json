@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Creator profile",
+  "description": "The creator's profile, written by onboarding to me/profile.json. Each description below finishes the sentence 'It should be ...', and kit.config reuses it as the hint in its error messages.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "onboarded",
+    "name",
+    "handles",
+    "niche",
+    "credibility",
+    "audience",
+    "cta",
+    "platforms",
+    "timezone",
+    "posting_times",
+    "colours",
+    "fonts",
+    "logo",
+    "styles",
+    "voice_over",
+    "image_provider",
+    "hashtags"
+  ],
+  "$defs": {
+    "platform": {
+      "enum": ["instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter"]
+    },
+    "hex": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "time": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
+    "hashtag": {
+      "type": "string",
+      "pattern": "^#[^\\s#]+$"
+    }
+  },
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "the profile format number, which is 1"
+    },
+    "onboarded": {
+      "type": "boolean",
+      "description": "true once onboarding has finished"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "the name of the creator or brand, as it should appear on screen"
+    },
+    "handles": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "a group with one account name per platform, left empty for a platform you do not use",
+      "properties": {
+        "instagram": {
+          "type": "string",
+          "description": "your Instagram account name, such as @yourname"
+        },
+        "tiktok": {
+          "type": "string",
+          "description": "your TikTok account name, such as @yourname"
+        },
+        "youtube": {
+          "type": "string",
+          "description": "your YouTube channel handle, such as @yourname"
+        },
+        "facebook": {
+          "type": "string",
+          "description": "your Facebook page name"
+        },
+        "linkedin": {
+          "type": "string",
+          "description": "your LinkedIn page or profile name"
+        },
+        "twitter": {
+          "type": "string",
+          "description": "your X (Twitter) account name, such as @yourname"
+        }
+      }
+    },
+    "niche": {
+      "type": "string",
+      "minLength": 1,
+      "description": "a sentence on what your videos are about"
+    },
+    "credibility": {
+      "type": "string",
+      "minLength": 1,
+      "description": "a sentence on why people should listen to you"
+    },
+    "audience": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["who", "wants"],
+      "description": "a group that says who your videos are for and what they want",
+      "properties": {
+        "who": {
+          "type": "string",
+          "minLength": 1,
+          "description": "a sentence on who your videos are for"
+        },
+        "wants": {
+          "type": "string",
+          "minLength": 1,
+          "description": "a sentence on what that audience wants from you"
+        }
+      }
+    },
+    "cta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "description": "a group that says how your videos end: with a plain follow, or with a comment keyword",
+      "properties": {
+        "type": {
+          "enum": ["follow", "comment"],
+          "description": "how your videos end, either follow or comment"
+        },
+        "keyword": {
+          "type": ["string", "null"],
+          "description": "the word people comment to get your offer, such as GROW, or null for a plain follow"
+        },
+        "payload": {
+          "type": ["string", "null"],
+          "description": "what you send to people who comment, or null for a plain follow"
+        },
+        "comment_platforms": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/platform" },
+          "description": "a list of the platforms where you answer comments with your offer, such as instagram, or an empty list for a plain follow"
+        }
+      },
+      "if": {
+        "required": ["type"],
+        "properties": { "type": { "const": "comment" } }
+      },
+      "then": {
+        "required": ["keyword", "comment_platforms"],
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "minLength": 1,
+            "description": "the word people comment to get your offer, such as GROW, which a comment call to action needs"
+          },
+          "comment_platforms": {
+            "minItems": 1,
+            "description": "a list with at least one platform where you answer comments with your offer, such as instagram, which a comment call to action needs"
+          }
+        }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/platform" },
+      "description": "a list of the platforms you post on, chosen from instagram, tiktok, youtube, facebook, linkedin and twitter"
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "description": "your time zone as an Area/City name, such as Europe/London"
+    },
+    "posting_times": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/platform" },
+      "additionalProperties": {
+        "$ref": "#/$defs/time",
+        "description": "a time in 24 hour HH:MM form, such as 18:00"
+      },
+      "description": "a group with your default posting time for each platform, in 24 hour HH:MM form such as 18:00, or an empty group if you post by hand"
+    },
+    "colours": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canvas", "ink", "accent", "field_dark", "field_light"],
+      "description": "a group holding the five brand colours: canvas, ink, accent, field_dark and field_light",
+      "properties": {
+        "canvas": {
+          "$ref": "#/$defs/hex",
+          "description": "the light colour behind graphics and captions, as a hex code with six digits such as #f7f5f0"
+        },
+        "ink": {
+          "$ref": "#/$defs/hex",
+          "description": "the dark colour for text on the canvas, as a hex code with six digits such as #1d2420"
+        },
+        "accent": {
+          "$ref": "#/$defs/hex",
+          "description": "the one bright colour used for highlights, as a hex code with six digits such as #177245"
+        },
+        "field_dark": {
+          "$ref": "#/$defs/hex",
+          "description": "the dark background colour, as a hex code with six digits such as #16302b"
+        },
+        "field_light": {
+          "$ref": "#/$defs/hex",
+          "description": "the light background colour, as a hex code with six digits such as #eaf1e4"
+        }
+      }
+    },
+    "fonts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display", "body", "mono"],
+      "description": "a group naming the display, body and mono fonts",
+      "properties": {
+        "display": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the font for headlines and captions: the name of a font that comes with the kit, or the path of your own font file inside your me folder, such as brand/fonts/YourFont.woff2"
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the font for body text and small labels, named the same way as the display font"
+        },
+        "mono": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the font for code and numbers, named the same way as the display font"
+        }
+      }
+    },
+    "logo": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "the path of your logo file inside your me folder, such as brand/logo/logo.png, or null if you have no logo"
+    },
+    "styles": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["ui-story", "mini-me"] },
+      "description": "a list of the video styles you use, chosen from ui-story and mini-me"
+    },
+    "voice_over": {
+      "enum": ["record", "elevenlabs", "clone"],
+      "description": "how you make a voice-over: record (you record it), elevenlabs (a stock ElevenLabs voice) or clone (a copy of your own voice, which records your consent)"
+    },
+    "image_provider": {
+      "enum": ["manual", "openai", "gemini", "codex"],
+      "description": "the tool that draws your character: manual (you paste prompts into an image tool yourself), openai, gemini or codex"
+    },
+    "hashtags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base"],
+      "description": "a group holding your base hashtags",
+      "properties": {
+        "base": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/hashtag" },
+          "description": "a list of the hashtags that go on every post, each starting with # and with no spaces, such as #yourtag"
+        }
+      }
+    },
+    "research": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "an optional group of research settings, left out to use the defaults",
+      "properties": {
+        "cost_cap": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "a group with the most one research run may spend on each platform, in US dollars",
+          "properties": {
+            "instagram": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.25,
+              "description": "an amount in US dollars: the most one research run may spend on Instagram"
+            },
+            "tiktok": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0.5,
+              "description": "an amount in US dollars: the most one research run may spend on TikTok"
+            }
+          }
+        }
+      }
+    }
+  }
+}

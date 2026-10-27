@@ -1,0 +1,40 @@
+/* Brand tokens. Generated from profile.json by kit.brand.write_tokens.
+   Change the profile, not this file: edits here are overwritten. */
+
+@font-face {
+  font-family: "Inter Tight";
+  src: url("../../kit/fonts/inter-tight/InterTight-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("../../kit/fonts/inter/Inter-Variable.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../kit/fonts/jetbrains-mono/JetBrainsMono-Variable.ttf") format("truetype");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  --canvas: #f7f5f0;
+  --ink: #1d2420;
+  --accent: #177245;
+  --on-accent: #ffffff;
+  --field-dark: #16302b;
+  --field-light: #eaf1e4;
+  --on-field-dark: #ffffff;
+  --grid: #eae8e4;
+  --font-display: "Inter Tight", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}

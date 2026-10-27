@@ -1,0 +1,29 @@
+{
+  "description": "The fonts that ship with the kit. A profile names one of these families, or points at a font file of its own.",
+  "source_repository": "https://github.com/google/fonts",
+  "source_commit": "ddf386ba1b9fbc6b2c818f1ddcd9148f54ced94b",
+  "licence": "SIL Open Font License 1.1. Each folder holds its own OFL.txt.",
+  "families": {
+    "Inter Tight": {
+      "dir": "inter-tight",
+      "file": "InterTight-Variable.ttf",
+      "weight": "100 900",
+      "sha256": "b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f",
+      "source": "https://github.com/google/fonts/blob/ddf386ba1b9fbc6b2c818f1ddcd9148f54ced94b/ofl/intertight/InterTight%5Bwght%5D.ttf"
+    },
+    "Inter": {
+      "dir": "inter",
+      "file": "Inter-Variable.ttf",
+      "weight": "100 900",
+      "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+      "source": "https://github.com/google/fonts/blob/ddf386ba1b9fbc6b2c818f1ddcd9148f54ced94b/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf"
+    },
+    "JetBrains Mono": {
+      "dir": "jetbrains-mono",
+      "file": "JetBrainsMono-Variable.ttf",
+      "weight": "100 800",
+      "sha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda",
+      "source": "https://github.com/google/fonts/blob/ddf386ba1b9fbc6b2c818f1ddcd9148f54ced94b/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf"
+    }
+  }
+}
