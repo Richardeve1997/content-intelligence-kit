@@ -1,0 +1,212 @@
+"""Scaffold checks.
+
+They guard the decisions made when the repo was created: secrets stay out of git,
+Python and HyperFrames stay pinned, every dependency group is declared up front,
+and the licence names its holder.
+"""
+
+import json
+import re
+import shutil
+import subprocess
+import tomllib
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+
+ENV_NAMES = {
+    "APIFY_TOKEN",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "ZERNIO_API_KEY",
+}
+
+README_HEADINGS = [
+    "What it does",
+    "What's included",
+    "Not included",
+    "What you need",
+    "Quick start",
+    "Costs",
+    "Codex",
+    "Updating",
+    "Credits",
+]
+
+
+def _pyproject() -> dict:
+    return tomllib.loads((ROOT / "pyproject.toml").read_text())
+
+
+def _package_json() -> dict:
+    return json.loads((ROOT / "package.json").read_text())
+
+
+def _dep_names(specs: list[str]) -> set[str]:
+    """Normalised distribution names from a list of PEP 508 strings."""
+    names = set()
+    for spec in specs:
+        found = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", spec)
+        assert found, f"cannot read a package name from {spec!r}"
+        names.add(re.sub(r"[-_.]+", "-", found.group(0)).lower())
+    return names
+
+
+def _git_ignored(path: str) -> bool:
+    """True when the .gitignore patterns ignore `path`. The index is not consulted."""
+    result = subprocess.run(["git", "check-ignore", "-q", "--no-index", path], cwd=ROOT)
+    if result.returncode == 128:
+        pytest.skip("not a git checkout")
+    return result.returncode == 0
+
+
+# --- secrets -----------------------------------------------------------------
+
+
+def test_env_example_names_only():
+    lines = [line.strip() for line in (ROOT / ".env.example").read_text().splitlines()]
+    entries = [line for line in lines if line and not line.startswith("#")]
+    for line in entries:
+        assert re.fullmatch(r"[A-Z][A-Z0-9_]*=", line), f"not a bare NAME= line: {line!r}"
+    names = [line[:-1] for line in entries]
+    assert len(names) == len(set(names)), "a name is listed twice"
+    assert set(names) == ENV_NAMES
+
+
+def test_env_is_ignored():
+    assert _git_ignored(".env")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env",
+        ".env.local",
+        ".venv/bin/python",
+        "node_modules/hyperframes/package.json",
+        "me/profile.json",
+        "work/demo/final.mp4",
+        "research/runs/2026-01-01/ideas.json",
+        "models/matting.pth",
+        "kit/vendor/gsap.min.js",
+        ".DS_Store",
+        "docs/.DS_Store",
+    ],
+)
+def test_private_and_fetched_paths_are_ignored(path):
+    assert _git_ignored(path), f"{path} should be ignored"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".env.example",
+        "me.example/profile.json",
+        "kit/__init__.py",
+        "kit/research/__init__.py",
+        ".claude/skills/research/SKILL.md",
+        "bin/fetch_gsap.sh",
+    ],
+)
+def test_shipped_paths_are_not_ignored(path):
+    # kit/research/ and the research skill share a name with the creator's research/ folder.
+    assert not _git_ignored(path), f"{path} must stay tracked"
+
+
+# --- pins and dependencies ---------------------------------------------------
+
+
+def test_python_pinned():
+    assert _pyproject()["project"]["requires-python"] == ">=3.11,<3.12"
+
+
+def test_hyperframes_pinned():
+    version = _package_json()["devDependencies"]["hyperframes"]
+    assert "^" not in version and "~" not in version
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), f"not an exact version: {version!r}"
+
+
+def test_third_party_records_the_hyperframes_pin():
+    version = _package_json()["devDependencies"]["hyperframes"]
+    text = (ROOT / "THIRD_PARTY.md").read_text()
+    assert "hyperframes" in text.lower()
+    assert version in text, "THIRD_PARTY.md must name the pinned version"
+
+
+def test_dependency_groups_declared():
+    data = _pyproject()
+    assert _dep_names(data["project"]["dependencies"]) == {"requests", "jsonschema"}
+    groups = data["dependency-groups"]
+    assert _dep_names(groups["dev"]) >= {"pytest"}
+    assert _dep_names(groups["video"]) >= {
+        "numpy",
+        "pillow",
+        "opencv-python-headless",
+        "num2words",
+        "scipy",
+        "faster-whisper",
+        "whisperx",
+        "torch",
+        "mediapipe",
+        "playwright",
+        "mlx-whisper",
+    }
+    assert _dep_names(groups["character"]) >= {
+        "numpy",
+        "pillow",
+        "scipy",
+        "scikit-image",
+        "scikit-learn",
+    }
+    assert _dep_names(groups["research"]) >= {"yt-dlp"}
+
+
+def test_mlx_whisper_is_apple_silicon_only():
+    specs = [s for s in _pyproject()["dependency-groups"]["video"] if _dep_names([s]) == {"mlx-whisper"}]
+    assert len(specs) == 1
+    assert "sys_platform == 'darwin'" in specs[0]
+    assert "platform_machine == 'arm64'" in specs[0]
+
+
+def test_pytest_markers_registered(pytestconfig):
+    registered = {line.split(":")[0].split("(")[0].strip() for line in pytestconfig.getini("markers")}
+    assert {"mac", "heavy"} <= registered
+
+
+# --- files -------------------------------------------------------------------
+
+
+def test_license_holder():
+    text = (ROOT / "LICENSE").read_text()
+    # The holder is written backwards so the name appears in plain text only in LICENSE.
+    holder = "evE drahciR"[::-1]
+    assert f"Copyright (c) 2026 {holder}" in text.splitlines()
+    assert text.startswith("MIT License")
+    assert "Permission is hereby granted, free of charge" in text
+    assert 'THE SOFTWARE IS PROVIDED "AS IS"' in text
+
+
+def test_readme_has_the_planned_headings():
+    text = (ROOT / "README.md").read_text()
+    found = [h for h in re.findall(r"^## (.+)$", text, re.M) if h in README_HEADINGS]
+    assert found == README_HEADINGS
+
+
+def test_fetch_gsap_targets_kit_vendor(tmp_path):
+    script = ROOT / "bin" / "fetch_gsap.sh"
+    assert script.stat().st_mode & 0o111, "bin/fetch_gsap.sh must be executable"
+    assert "brand/vendor" not in script.read_text()
+
+    # Offline: with the file already in place the script reports it and stops.
+    (tmp_path / "bin").mkdir()
+    copy = tmp_path / "bin" / "fetch_gsap.sh"
+    shutil.copy(script, copy)
+    vendor = tmp_path / "kit" / "vendor"
+    vendor.mkdir(parents=True)
+    (vendor / "gsap.min.js").write_text("// placeholder\n")
+    result = subprocess.run(["bash", str(copy)], capture_output=True, text=True, check=True)
+    assert "kit/vendor/gsap.min.js" in result.stdout
+    assert "Nothing to do" in result.stdout

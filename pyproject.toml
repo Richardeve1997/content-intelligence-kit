@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "content-intelligence-kit"
+version = "0.1.0"
+description = "Brand-agnostic short-form video content kit for Claude Code and Codex."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.12"
+# The base install stays light. Everything heavy sits in a dependency group below.
+dependencies = [
+    "requests>=2.31",
+    "jsonschema>=4.21",
+]
+
+[dependency-groups]
+# Installed by a plain `uv sync`.
+dev = [
+    "pytest>=8",
+]
+# Install a group on demand: `uv sync --group video`.
+video = [
+    "numpy",
+    "Pillow",
+    "opencv-python-headless",
+    "num2words",
+    "scipy",
+    "faster-whisper",
+    "whisperx",
+    "torch",
+    "mediapipe",
+    "playwright",
+    "mlx-whisper; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+character = [
+    "numpy",
+    "Pillow",
+    "scipy",
+    "scikit-image",
+    "scikit-learn",
+]
+research = [
+    "yt-dlp",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "mac: runs only on a local Apple silicon Mac",
+    "heavy: renders or other heavy jobs",
+]

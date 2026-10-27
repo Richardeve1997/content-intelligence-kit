@@ -1,0 +1,27 @@
+# Secrets. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node
+node_modules/
+
+# Creator-owned folders at the repo root. The leading slash matters: without it
+# these patterns would also hide kit/research/ and the research skill.
+/me/
+/work/
+/research/
+/models/
+
+# Fetched at setup by bin/fetch_gsap.sh
+kit/vendor/gsap*
+
+# Local files
+.DS_Store
+.claude/settings.local.json

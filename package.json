@@ -1,0 +1,13 @@
+{
+  "name": "content-intelligence-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pinned Node tooling for the content intelligence kit.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "hyperframes": "0.8.68"
+  }
+}
