@@ -209,9 +209,10 @@ def test_zernios_own_sentence_is_shown_as_it_is(profile, fake_zernio):
     # kit.zernio raises a KitError whose message is already one plain sentence, so nothing is added to it
     fake_zernio.pages = KitError(f"Zernio returned HTTP 401: the key {KEY} was not accepted.")
     result = performance.collect(profile, key=KEY, now=NOW)
-    assert result == {"status": "skipped", "message": "Performance skipped: Zernio returned HTTP 401: the key <key> was not accepted."}
+    # it keeps its words but gives up its own full stop, since the line it ends has none, like every notice
+    assert result == {"status": "skipped", "message": "Performance skipped: Zernio returned HTTP 401: the key <key> was not accepted"}
     fake_zernio.pages = KitError("Zernio did not answer in time.")
-    assert performance.collect(profile, key=KEY, now=NOW)["message"] == "Performance skipped: Zernio did not answer in time."
+    assert performance.collect(profile, key=KEY, now=NOW)["message"] == "Performance skipped: Zernio did not answer in time"
 
 
 def test_a_copy_of_the_kit_without_zernio_carries_on(profile, monkeypatch):

@@ -341,6 +341,13 @@ def http_download(url, dest, *, timeout=60, limit=VIDEO_BYTES):
     return dest
 
 
+def clause(text) -> str:
+    """A sentence made ready to sit inside a notice, which never ends in a full stop: its own last full stop goes, so a
+    reason in brackets at the end reads "(no sound)" and not "(no sound.)". An ellipsis stays."""
+    text = str(text).strip()
+    return text[:-1].rstrip() if text.endswith(".") and not text.endswith("..") else text
+
+
 def why(exc: BaseException) -> str:
     """A short plain reason for a failure. Addresses are cut out, because they can carry keys.
 

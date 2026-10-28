@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from kit import config
+from kit import transcribe as real_transcribe
 from kit.research import common
 from research_helpers import NOW
 
@@ -149,6 +150,7 @@ def fake_speech(monkeypatch):
     recorder.free_calls = []
 
     transcribe = types.ModuleType("kit.transcribe")
+    transcribe.AudioProblem = real_transcribe.AudioProblem  # the error for one file that cannot be read
 
     def words(audio, *, align=True):
         recorder.events.append(f"words:{Path(audio).name}:align={align}")

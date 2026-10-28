@@ -383,7 +383,7 @@ def _apify_platform(platform: str, creators: list[str], account: _Account, cap: 
         return [], source, f"{label} skipped: {exc}"
     except Exception as exc:
         source["status"] = "failed"
-        return [], source, f"{label} skipped: {common.why(exc)}"
+        return [], source, f"{label} skipped: {common.clause(common.why(exc))}"
 
     items, rows = (_instagram_items if platform == "instagram" else _tiktok_items)(raw, creators)
     stopped = meta.get("stopped_by")
@@ -565,7 +565,7 @@ def pull(profile, watchlist: dict, *, token, use_apify: bool = True, budget: flo
                     outcomes[name] = job.result()
                 except Exception as exc:  # a platform that blows up must not take the others with it
                     label = common.PLATFORM_LABEL[name]
-                    outcomes[name] = ([], {"status": "failed", "tool": "", "creators": [], "videos": 0}, f"{label} skipped: {common.why(exc)}")
+                    outcomes[name] = ([], {"status": "failed", "tool": "", "creators": [], "videos": 0}, f"{label} skipped: {common.clause(common.why(exc))}")
 
     for platform in common.RESEARCH_PLATFORMS:
         if platform not in outcomes:

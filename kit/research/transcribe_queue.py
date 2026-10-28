@@ -12,7 +12,9 @@ For each recent video from this run, in order of its score:
 A step that cannot run (the speech tools are missing, the disk is nearly full) leaves a plain sentence
 and the run carries on with the transcripts it has. The speech tools come with the video group, so a
 research-only install does not have them: that is checked before the first download, and a first answer
-of "not installed" from the tools stops the queue after one video, not after twelve.
+of "not installed" from the tools stops the queue after one video, not after twelve. A file the tools
+cannot read is that one video's failure, and the rest carry on. Three failed transcriptions in a row stop
+the queue, and so do three failed downloads in a row, since each download can wait out a network timeout.
 """
 
 from __future__ import annotations
@@ -139,7 +141,7 @@ def fetch_audio(item: dict, workdir) -> Path | None:
 
 
 def _sentence(exc: BaseException) -> str:
-    return str(exc).strip() or type(exc).__name__
+    return common.clause(str(exc).strip() or type(exc).__name__)
 
 
 def _order(video: dict) -> float:
@@ -197,7 +199,8 @@ def _transcribe_here(todo: list[dict], workdir: Path, fetch, outcome: Outcome) -
     shutil.rmtree(workdir, ignore_errors=True)  # anything here is left over from a run that was stopped
     workdir.mkdir(parents=True, exist_ok=True)
     working = False  # becomes True once the speech tools have turned one video into text
-    failed = in_a_row = no_download = 0
+    one_file = getattr(transcribe, "AudioProblem", ())  # the error for a single file the tools cannot read
+    failed = in_a_row = no_download = downloads_in_a_row = 0
     last_reason = ""
     for video in todo:
         try:
@@ -206,18 +209,24 @@ def _transcribe_here(todo: list[dict], workdir: Path, fetch, outcome: Outcome) -
             audio = None
         if audio is None:
             no_download += 1  # a video that cannot be had says nothing about the speech tools
+            downloads_in_a_row += 1
+            if downloads_in_a_row >= MAX_FAILS_IN_A_ROW:
+                outcome.notices.append(f"Speech to text stopped after {MAX_FAILS_IN_A_ROW} videos in a row could not be downloaded")
+                return
             continue
+        downloads_in_a_row = 0
         try:
             with media.heavy_slot():
                 spoken = transcribe.words(audio, align=False)
             text = " ".join(word.text.strip() for word in spoken if word.text.strip())
         except (ImportError, KitError) as exc:
-            if not working:  # the very first answer was "not installed", or "no room": it will be the same for every video
+            if not working and not isinstance(exc, one_file):
+                # the very first answer was "not installed", or "no room": it will be the same for every video
                 outcome.notices.append(INSTALL_VIDEO_TOOLS if isinstance(exc, ImportError) else f"{SKIPPED} {_sentence(exc)}")
                 return
-            failed, in_a_row, last_reason = failed + 1, in_a_row + 1, common.why(exc)
+            failed, in_a_row, last_reason = failed + 1, in_a_row + 1, common.clause(common.why(exc))
         except Exception as exc:
-            failed, in_a_row, last_reason = failed + 1, in_a_row + 1, common.why(exc)
+            failed, in_a_row, last_reason = failed + 1, in_a_row + 1, common.clause(common.why(exc))
         else:
             working, in_a_row = True, 0
             if is_usable(text):

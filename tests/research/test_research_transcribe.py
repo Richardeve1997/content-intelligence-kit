@@ -239,7 +239,7 @@ def test_a_full_disk_found_by_the_heavy_slot_stops_the_queue_with_its_own_words(
     calls = []
     outcome = queue.attach([clip("a"), clip("b")], {}, workdir=tmp_path / "media", fetch=stub_fetch(calls))
     assert calls == ["ig:a"]
-    assert outcome.notices == [f"Speech to text skipped: {sentence}"]
+    assert outcome.notices == [f"Speech to text skipped: {sentence[:-1]}"], "a notice never ends in a full stop"
 
 
 def test_a_problem_with_one_video_after_the_tools_have_worked_does_not_stop_the_rest(tmp_path, fake_speech, monkeypatch):
@@ -255,21 +255,59 @@ def test_a_problem_with_one_video_after_the_tools_have_worked_does_not_stop_the_
     outcome = queue.attach(videos, {}, workdir=tmp_path / "media", fetch=stub_fetch())
     assert [bool(v.get("transcript")) for v in videos] == [True, False, True]
     assert outcome.local == 2
-    assert outcome.notices == ["Speech to text failed for 1 video (ig_b.wav has no sound ffmpeg can read.)"]
+    # the reason keeps its words but not its own full stop, which would end the notice in two: "(... read.)"
+    assert outcome.notices == ["Speech to text failed for 1 video (ig_b.wav has no sound ffmpeg can read)"]
 
 
-def test_failed_downloads_never_stop_the_queue(tmp_path, fake_speech):
+def test_a_bad_file_first_is_that_files_failure_and_the_rest_carry_on(tmp_path, fake_speech, monkeypatch):
+    # A sound file that cannot be read says nothing about the speech tools, even when it comes first.
+    spoken = types.SimpleNamespace
+    bad = sys.modules["kit.transcribe"].AudioProblem
+
+    def words(audio, *, align=True):
+        if audio.name == "ig_a.wav":
+            raise bad("ig_a.wav has no sound ffmpeg can read.")
+        return [spoken(text=w, start=0.0, end=0.0) for w in LONG.split()]
+
+    monkeypatch.setattr(sys.modules["kit.transcribe"], "words", words)
+    videos = [clip("a", 9.0), clip("b", 8.0), clip("c", 7.0)]
+    outcome = queue.attach(videos, {}, workdir=tmp_path / "media", fetch=stub_fetch())
+    assert [bool(v.get("transcript")) for v in videos] == [False, True, True]
+    assert outcome.local == 2
+    assert outcome.notices == ["Speech to text failed for 1 video (ig_a.wav has no sound ffmpeg can read)"]
+
+
+def test_the_stand_in_speech_tools_name_the_bad_file_error_the_real_ones_raise():
+    assert issubclass(transcribe.AudioProblem, KitError)
+
+
+def test_downloads_that_fail_in_a_row_stop_the_queue(tmp_path, fake_speech):
+    # Each attempt can wait out a network timeout, so a run of failed downloads is cut short, as failed
+    # transcriptions are. A failed download still says nothing about the speech tools.
     calls = []
 
     def fetch(item, workdir):
         calls.append(item["id"])
-        return None if len(calls) <= 5 else stub_fetch()(item, workdir)
+        return None
+
+    outcome = queue.attach([clip(f"v{n}", float(20 - n)) for n in range(8)], {}, workdir=tmp_path / "media", fetch=fetch)
+    assert len(calls) == queue.MAX_FAILS_IN_A_ROW == 3
+    assert outcome.notices == ["Speech to text stopped after 3 videos in a row could not be downloaded"]
+    assert [e for e in fake_speech.events if e.startswith("words")] == []
+
+
+def test_a_download_that_works_starts_the_count_again(tmp_path, fake_speech):
+    calls = []
+
+    def fetch(item, workdir):
+        calls.append(item["id"])
+        return stub_fetch()(item, workdir) if len(calls) in (3, 6) else None  # two fail, one works, and again
 
     videos = [clip(f"v{n}", float(20 - n)) for n in range(8)]
     outcome = queue.attach(videos, {}, workdir=tmp_path / "media", fetch=fetch)
-    assert len(calls) == 8  # five downloads failed in a row and it still tried the next
-    assert outcome.local == 3
-    assert outcome.notices == ["5 videos could not be downloaded"]
+    assert len(calls) == 8, "never three failed downloads in a row, so it tried them all"
+    assert outcome.local == 2
+    assert outcome.notices == ["6 videos could not be downloaded"]
 
 
 def test_when_every_download_fails_it_says_so_and_never_asks_the_speech_tools(tmp_path, fake_speech):

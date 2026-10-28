@@ -26,7 +26,7 @@ SKIPPED_NO_KEY = "Performance skipped: add ZERNIO_API_KEY to .env to include you
 
 
 def _skipped(reason: str) -> dict:
-    return {"status": "skipped", "message": f"Performance skipped: {reason}"}
+    return {"status": "skipped", "message": f"Performance skipped: {common.clause(reason)}"}
 
 
 def collect(profile, *, key, offline: bool = False, now=None) -> dict:

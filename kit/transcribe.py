@@ -48,6 +48,7 @@ from kit import media
 from kit.config import KitError
 
 __all__ = [
+    "AudioProblem",
     "NON_COMMERCIAL_ALIGNMENT",
     "NO_SPEECH_MODEL",
     "Word",
@@ -84,6 +85,10 @@ NON_COMMERCIAL_NOTE = (
 )
 
 
+class AudioProblem(KitError):
+    """One file has no sound the kit can read, or is not there. It says nothing about the speech tools."""
+
+
 @dataclass(frozen=True)
 class Word:
     text: str
@@ -103,7 +108,7 @@ def audio_samples(path: Path):
         capture_output=True,
     )
     if done.returncode != 0:
-        raise KitError(f"{Path(path).name} has no sound ffmpeg can read.")
+        raise AudioProblem(f"{Path(path).name} has no sound ffmpeg can read.")
     return np.frombuffer(done.stdout, np.float32).copy()
 
 
@@ -339,7 +344,7 @@ def words(
     """Every spoken word in `audio` with its start and end in seconds, in order."""
     audio = Path(audio)
     if not audio.is_file():
-        raise KitError(f"{audio} does not exist, so there is nothing to transcribe.")
+        raise AudioProblem(f"{audio} does not exist, so there is nothing to transcribe.")
     with media.heavy_slot(label=f"transcribe {audio.name}"):
         samples = audio_samples(audio)
         chunks = speech_chunks(samples)

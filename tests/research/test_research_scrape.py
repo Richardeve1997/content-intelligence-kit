@@ -456,6 +456,14 @@ def test_a_platform_with_no_creators_on_the_list_is_left_alone(profile, web):
     assert pull.sources["instagram"]["status"] == "skipped" and pull.notices == []
 
 
+def test_a_sentence_from_the_kit_ends_a_notice_without_a_second_full_stop(profile, web):
+    # Notices end with no full stop, so a kit sentence placed at the end of one gives up its own.
+    web.add("GET", "/users/me/limits", config.KitError("The Apify account could not be read."))
+    web.add("POST", "/runs", config.KitError("The Apify account could not be read."))
+    pull = scrape.pull(profile, IG_ONLY, token=TOKEN)
+    assert pull.notices == ["Instagram skipped: The Apify account could not be read"]
+
+
 def test_no_error_text_ever_carries_the_token(profile, web):
     web.add("GET", "/users/me/limits", RuntimeError(f"boom {TOKEN} https://api.apify.com/v2/x?token={TOKEN}"))
     web.add("POST", "/runs", RuntimeError(f"boom {TOKEN}"))
