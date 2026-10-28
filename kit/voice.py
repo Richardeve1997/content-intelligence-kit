@@ -11,9 +11,13 @@ The paths:
 
 * from_recording(path, slug): the creator records the narration on their phone (free, and the default).
   A light chain cleans it: a high-pass for rumble, a gentle noise reduction, a soft compressor.
-* from_elevenlabs(text, slug, voice_id=None): ElevenLabs reads the narration with the creator's key
-  (ELEVENLABS_API_KEY, read through kit.config.env and never printed). With no voice id it uses one of
-  the account's stock voices, chosen the same way every time, so no id is ever written into the kit.
+* from_elevenlabs(text, slug, voice_id=None, voice=None): ElevenLabs reads the narration with the creator's
+  key (ELEVENLABS_API_KEY, read through kit.config.env and never printed). With no voice id it uses one of
+  the account's stock voices: the one named for this video, else the one the creator picked (saved by name
+  in me/voice/elevenlabs.json), else the first by name, with a sentence on how to choose another. No id is
+  ever written into the kit or the creator's files.
+* stock_voices() and pick(name): the account's stock voices by name, with ElevenLabs's labels and a link to
+  hear each, and saving the creator's pick. A copy of a voice, the creator's or anyone's, is never listed.
 * from_say(text, slug): a scratch voice from macOS `say`, for test clips and drafts only.
 * clone(name, samples): an ElevenLabs copy of the creator's own voice. It runs only when the profile
   records their consent (voice_over is "clone"), and saves the new voice in me/voice/elevenlabs.json. The saved
@@ -33,10 +37,12 @@ and its words together. The work is heavy (an encode and a transcription), so it
 
 Command line:
 
-    python -m kit.voice auto <video> [--keep-pace]      whatever this video has: a recording in take/,
-                                                        else ElevenLabs when the profile chose it
+    python -m kit.voice auto <video> [--keep-pace] [--voice NAME]  whatever this video has: a recording in
+                                                        take/, else ElevenLabs when the profile chose it
     python -m kit.voice record <video> [<file>]         from a recording (the newest file in take/)
-    python -m kit.voice elevenlabs <video> [--voice-id ID]  from the narration in script.md
+    python -m kit.voice elevenlabs <video> [--voice NAME | --voice-id ID]  from the narration in script.md
+    python -m kit.voice voices                          the account's stock voices, to choose from
+    python -m kit.voice pick '<name>'                   read every voice-over in this stock voice from now on
     python -m kit.voice say <video>                     a scratch voice with macOS say
     python -m kit.voice clone <name> <sample files...>  a copy of the creator's voice, with consent
 
@@ -112,6 +118,14 @@ PACED = (
     "runs at. To keep your own pace, make the voice-over again with --keep-pace."
 )
 RECORD = "Record the voice-over on your phone and drop it in work/{slug}/take/, then say go on."
+STOCK_KEY = "stock"  # me/voice/elevenlabs.json: the name of the stock voice the creator picked
+CHOOSE = ("To choose another, list them with: uv run python -m kit.voice voices, then save one with: "
+          "uv run python -m kit.voice pick '<name>'")
+NOT_IN_ACCOUNT = ("Your ElevenLabs account has no stock voice called {name!r}. See the ones it has with: "
+                  "uv run python -m kit.voice voices")
+NO_KEY_TO_LIST = ("No ElevenLabs key, so there are no voices to list. Add ELEVENLABS_API_KEY to .env, or record "
+                  "the voice-over on your phone.")
+LABEL_ORDER = ("gender", "age", "accent", "descriptive", "description", "use_case")
 KEY_REFUSED = (
     "ElevenLabs turned down the key in .env ({name}). Check that it is a current API key from your ElevenLabs "
     "account, or record the voice-over on your phone instead."
@@ -421,16 +435,71 @@ def _key(slug: str) -> str:
     return key
 
 
-def _stock_voice(key: str) -> tuple[str, str]:
-    """(id, name) of the account's first stock voice by name, so the same voice is chosen every time."""
+def _stock_list(key: str) -> list[dict]:
+    """The account's stock voices, by name. A copy of a voice (cloned or professional) is never one of them."""
     answer, _ = _call("GET", "/v1/voices", key)
     voices = answer.get("voices", []) if isinstance(answer, dict) else []
-    stock = sorted((v for v in voices if v.get("category") == "premade" and v.get("voice_id")),
-                   key=lambda v: (str(v.get("name", "")).lower(), v["voice_id"]))
+    return sorted((v for v in voices if v.get("category") == "premade" and v.get("voice_id") and v.get("name")),
+                  key=lambda v: (str(v["name"]).lower(), v["voice_id"]))
+
+
+def _plain(name) -> str:
+    return " ".join(str(name).split()).casefold()
+
+
+def _find(stock: list[dict], name: str) -> dict | None:
+    """The stock voice called `name`: its whole name, or the name before its description ("Alice" for "Alice - Clear,
+    Engaging Educator") when only one voice has it. Any case."""
+    wanted = _plain(name)
+    whole = [v for v in stock if _plain(v["name"]) == wanted]
+    if whole:
+        return whole[0]
+    short = [v for v in stock if _plain(re.split(r"\s+-\s+", str(v["name"]), maxsplit=1)[0]) == wanted]
+    return short[0] if len(short) == 1 else None
+
+
+def _stock_voice(key: str, name: str | None = None) -> tuple[str, str, bool]:
+    """(id, name, picked) of the stock voice to read in: the one named, else the creator's pick, else the account's
+    first by name, the same one every time (picked is then False)."""
+    stock = _stock_list(key)
     if not stock:
         raise KitError("Your ElevenLabs account lists no stock voices. Pick a voice in ElevenLabs and give its id "
                        "with --voice-id.")
-    return stock[0]["voice_id"], str(stock[0].get("name", "stock voice"))
+    wanted = name or saved_stock()
+    if wanted:
+        found = _find(stock, wanted)
+        if found is None:
+            raise KitError(NOT_IN_ACCOUNT.format(name=wanted))
+        return found["voice_id"], str(found["name"]), True
+    return stock[0]["voice_id"], str(stock[0]["name"]), False
+
+
+def stock_voices() -> list[dict]:
+    """The account's stock voices for the creator to choose from: {"name", "labels", "preview", "picked"} each, the
+    labels as ElevenLabs gives them (gender, age, accent, what it suits). Never an id."""
+    key = config.env(KEY_NAME)
+    if not key:
+        raise KitError(NO_KEY_TO_LIST)
+    picked = _plain(saved_stock() or "")
+    shown = []
+    for v in _stock_list(key):
+        labels = v.get("labels") if isinstance(v.get("labels"), dict) else {}
+        words = [str(labels[k]).replace("_", " ") for k in LABEL_ORDER if labels.get(k)]
+        shown.append({"name": str(v["name"]), "labels": words, "preview": v.get("preview_url") or None,
+                      "picked": bool(picked) and _plain(v["name"]) == picked})
+    return shown
+
+
+def pick(name: str) -> str:
+    """Save the stock voice called `name` (checked against the account) as the creator's voice, by its whole name."""
+    key = config.env(KEY_NAME)
+    if not key:
+        raise KitError(NO_KEY_TO_LIST)
+    found = _find(_stock_list(key), name)
+    if found is None:
+        raise KitError(NOT_IN_ACCOUNT.format(name=name))
+    _save({STOCK_KEY: str(found["name"])})
+    return str(found["name"])
 
 
 def _model(key: str) -> str:
@@ -488,18 +557,19 @@ def _speech(text: str, voice_id: str, model: str, settings: dict, key: str, work
     raise last or KitError("ElevenLabs offered no audio format this kit can use.")
 
 
-def from_elevenlabs(text: str, slug: str, voice_id: str | None = None) -> VO:
-    """The voice-over read by ElevenLabs: the given voice (a copy of the creator's), or a stock voice."""
+def from_elevenlabs(text: str, slug: str, voice_id: str | None = None, *, voice: str | None = None) -> VO:
+    """The voice-over read by ElevenLabs: the given voice id (a copy of the creator's), or a stock voice: the one
+    called `voice`, else the creator's pick, else the account's first by name."""
     config.work_dir(slug)
     key = _key(slug)
     text = narration(text)
     if not text:
         raise KitError(f"There is no narration to read. Write it in work/{slug}/script.md under ## Narration.")
-    stock = not voice_id
+    stock, picked = not voice_id, True
     if voice_id:
         voice_name = "your saved voice" if voice_id == saved_voice() else "the voice you named"
     else:
-        voice_id, voice_name = _stock_voice(key)
+        voice_id, voice_name, picked = _stock_voice(key, voice)
     model = _model(key)
     settings, tempo = _settings(model)
     folder = config.work_dir(slug)
@@ -507,7 +577,8 @@ def from_elevenlabs(text: str, slug: str, voice_id: str | None = None) -> VO:
     work = Path(tempfile.mkdtemp(prefix=".speech-", dir=folder))
     try:
         speech = _speech(text, voice_id, model, settings, key, work)
-        meta = {"source": "elevenlabs", "model": model, "voice": voice_name, "stock": stock, "speed": settings.get("speed")}
+        meta = {"source": "elevenlabs", "model": model, "voice": voice_name, "stock": stock, "picked": picked,
+                "speed": settings.get("speed")}
         if abs(tempo - 1.0) > 1e-6:
             meta["tempo"] = tempo
         return _make(speech, slug, clean=False, tighten=True, tempo=tempo, meta=meta)
@@ -569,12 +640,31 @@ def _saved_path() -> Path:
     return config.me_dir() / "voice" / "elevenlabs.json"
 
 
+def _saved() -> dict:
+    """me/voice/elevenlabs.json: the copy of the creator's voice and the stock voice they picked, or {}."""
+    try:
+        data = json.loads(_saved_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save(fields: dict) -> Path:
+    """Write these fields into me/voice/elevenlabs.json, keeping the others."""
+    out = _saved_path()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({**_saved(), **fields}, indent=2) + "\n", encoding="utf-8")
+    return out
+
+
 def saved_voice() -> str | None:
     """The id of the copy of the creator's voice, from me/voice/elevenlabs.json, or None."""
-    try:
-        return json.loads(_saved_path().read_text(encoding="utf-8")).get("voice_id") or None
-    except (OSError, ValueError, AttributeError):
-        return None
+    return _saved().get("voice_id") or None
+
+
+def saved_stock() -> str | None:
+    """The name of the stock voice the creator picked, from me/voice/elevenlabs.json, or None."""
+    return _saved().get(STOCK_KEY) or None
 
 
 def clone(name: str, samples: list[Path]) -> str:
@@ -619,11 +709,8 @@ def clone(name: str, samples: list[Path]) -> str:
     voice_id = (answer or {}).get("voice_id")
     if not voice_id:
         raise KitError("ElevenLabs did not send back a voice for the copy. Try again in a minute.")
-    out = _saved_path()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"name": name, "voice_id": voice_id, "made": date.today().isoformat(),
-                               "consent": "voice_over is clone in me/profile.json"}, indent=2) + "\n",
-                   encoding="utf-8")
+    _save({"name": name, "voice_id": voice_id, "made": date.today().isoformat(),
+           "consent": "voice_over is clone in me/profile.json"})  # a stock voice picked earlier stays saved too
     return voice_id
 
 
@@ -638,8 +725,13 @@ def _report(vo: VO) -> None:
     except (OSError, ValueError):
         return
     if meta.get("source") == "elevenlabs" and meta.get("voice"):
-        stock = "the stock voice " if meta.get("stock") else ""
-        print(f"Read by ElevenLabs in {stock}{meta['voice']}.")
+        if not meta.get("stock"):
+            print(f"Read by ElevenLabs in {meta['voice']}.")
+        elif meta.get("picked", True):
+            print(f"Read by ElevenLabs in the stock voice {meta['voice']}.")
+        else:
+            print(f"Read by ElevenLabs in the stock voice {meta['voice']}, the first in your account's list, because "
+                  f"no voice is picked yet. {CHOOSE}")
 
 
 def _script(slug: str) -> str:
@@ -654,7 +746,7 @@ def chosen_voice(profile) -> str | None:
     return saved_voice() if profile.voice_over == "clone" else None
 
 
-def _auto(slug: str, keep_pace: bool = False) -> int:
+def _auto(slug: str, keep_pace: bool = False, voice: str | None = None) -> int:
     profile = config.load_profile()
     recording = take(slug)
     if recording is not None:
@@ -666,11 +758,11 @@ def _auto(slug: str, keep_pace: bool = False) -> int:
         if not config.env(KEY_NAME):
             print(NO_KEY.format(slug=slug))
             return WAITING
-        voice_id = chosen_voice(profile)
-        if profile.voice_over == "clone" and voice_id is None:
+        voice_id = None if voice else chosen_voice(profile)  # a voice named for this video is asked for outright
+        if profile.voice_over == "clone" and voice_id is None and not voice:
             print(NO_COPY.format(slug=slug))  # never a stock voice in place of the copy they asked for
             return WAITING
-        _report(from_elevenlabs(_script(slug), slug, voice_id))
+        _report(from_elevenlabs(_script(slug), slug, voice_id, voice=voice))
         return 0
     print(RECORD.format(slug=slug))
     return WAITING
@@ -682,14 +774,20 @@ def main(argv: list[str] | None = None) -> int:
     auto = sub.add_parser("auto", help="the voice-over from whatever this video has")
     auto.add_argument("slug")
     auto.add_argument("--keep-pace", action="store_true", help="keep a recording's own pace and pauses")
+    auto.add_argument("--voice", help="a stock voice by name, for this video only (see: python -m kit.voice voices)")
     record = sub.add_parser("record", help="the voice-over from a recording")
     record.add_argument("slug")
     record.add_argument("file", nargs="?", type=Path, help="the recording (default: the newest file in take/)")
     record.add_argument("--keep-pace", action="store_true", help="keep the recording's own pace and pauses")
     eleven = sub.add_parser("elevenlabs", help="the voice-over read by ElevenLabs from script.md")
     eleven.add_argument("slug")
-    eleven.add_argument("--voice-id", help="an ElevenLabs voice id (default: your saved copy when voice_over is clone, "
-                        "else a stock voice)")
+    which = eleven.add_mutually_exclusive_group()
+    which.add_argument("--voice", help="a stock voice by name, for this video only (see: python -m kit.voice voices)")
+    which.add_argument("--voice-id", help="an ElevenLabs voice id (default: your saved copy when voice_over is clone, "
+                       "else your picked stock voice)")
+    sub.add_parser("voices", help="the stock voices in your ElevenLabs account, with a link to hear each")
+    chosen = sub.add_parser("pick", help="read every voice-over in this stock voice from now on")
+    chosen.add_argument("name", help="the voice's name as voices lists it, or the part before its description")
     say = sub.add_parser("say", help="a scratch voice-over with macOS say")
     say.add_argument("slug")
     copy = sub.add_parser("clone", help="a copy of your voice, with your consent")
@@ -698,7 +796,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     try:
         if args.command == "auto":
-            return _auto(args.slug, args.keep_pace)
+            return _auto(args.slug, args.keep_pace, args.voice)
+        if args.command == "voices":
+            listed = stock_voices()
+            if not listed:
+                print("Your ElevenLabs account lists no stock voices.")
+                return 0
+            print("Stock voices in your ElevenLabs account. Pick one with: uv run python -m kit.voice pick '<name>'")
+            for v in listed:
+                mark = " (your pick)" if v["picked"] else ""
+                about = f": {', '.join(v['labels'])}" if v["labels"] else ""
+                print(f"- {v['name']}{mark}{about}")
+                if v["preview"]:
+                    print(f"  hear it: {v['preview']}")
+            return 0
+        if args.command == "pick":
+            name = pick(args.name)
+            print(f"Saved {name} as your voice. Voice-overs read in it from now on, until you pick another.")
+            return 0
         if args.command == "record":
             recording = args.file or take(args.slug)
             if recording is None:
@@ -708,7 +823,8 @@ def main(argv: list[str] | None = None) -> int:
             _report(from_recording(recording, args.slug, **options))
             return 0
         if args.command == "elevenlabs":
-            _report(from_elevenlabs(_script(args.slug), args.slug, args.voice_id or chosen_voice(config.load_profile())))
+            voice_id = args.voice_id or (None if args.voice else chosen_voice(config.load_profile()))
+            _report(from_elevenlabs(_script(args.slug), args.slug, voice_id, voice=args.voice))
             return 0
         if args.command == "say":
             _report(from_say(_script(args.slug), args.slug))
