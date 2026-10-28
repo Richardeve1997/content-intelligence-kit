@@ -133,6 +133,23 @@ def test_captions_over_the_canvas_take_the_light_theme(tmp_path, hf_with_layout)
         assert not (g["start"] < cut < g["end"] - 1e-6), f"a group crosses the layout cut: {g}"
 
 
+def test_corrections_in_the_captions_folder_are_used_by_default(tmp_path, hf_with_layout):
+    words, _ = word_file(tmp_path, words="we planted the basel seeds in march".split())
+    captions = tmp_path / "captions"
+    captions.mkdir()
+    (captions / "corrections.json").write_text(json.dumps({"basel": "basil", "in march": "in March"}))
+    done = run_kit("build_captions.py", "--words", words, "--hf", hf_with_layout,
+                   "--layout", tmp_path / "layout.resolved.json", "--captions-dir", captions)
+    assert done.returncode == 0, done.stderr
+    block = (hf_with_layout / "index.html").read_text().split("<!-- CAPTIONS:BEGIN -->")[1]
+    assert ">basil<" in block and ">basel<" not in block
+    assert ">March<" in block
+    transcript = json.loads((captions / "transcript.json").read_text())
+    assert "basil" in " ".join(c["text"] for c in transcript["captions"])
+    # the words the cues match stay as they were heard
+    assert '"basel"' in (hf_with_layout / "lib" / "words.js").read_text()
+
+
 def test_caption_size_is_measured_with_the_creators_display_font(tmp_path, example_me):
     build_captions = load("build_captions")
     from kit import brand, config

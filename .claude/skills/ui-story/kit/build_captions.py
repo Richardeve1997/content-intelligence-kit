@@ -25,7 +25,8 @@ Writes
   <captions-dir>/transcript.json   {"captions": [{text, start, end, words}]}         (the speech gate reads it)
 
 corrections.json ({"misheard": "correct"}) fixes words the speech model spells wrong, on screen only;
-lib/words.js keeps the words as heard, so cue phrases are written the way the model heard them.
+lib/words.js keeps the words as heard, so cue phrases are written the way the model heard them. The file is
+read from --corrections, or else from <captions-dir>/corrections.json when that exists.
 
     python build_captions.py --words <base.words.json> --hf <hf dir> --layout <layout.resolved.json>
         [--captions-dir <dir>] [--corrections corrections.json] [--duration D] [--blocks blocks.json]
@@ -180,7 +181,7 @@ def main():
     ap.add_argument("--layout", help="layout.resolved.json: the caption theme follows the layout windows")
     ap.add_argument("--light-modes", default="canvas", help="layout modes, comma separated, that take the light caption")
     ap.add_argument("--captions-dir")
-    ap.add_argument("--corrections")
+    ap.add_argument("--corrections", help="default: <captions-dir>/corrections.json when it exists")
     ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--max-words", type=int, default=3)
     ap.add_argument("--max-chars", type=int, default=18)
@@ -194,6 +195,10 @@ def main():
     a = ap.parse_args()
 
     hf = Path(a.hf)
+    if not a.corrections and a.captions_dir and (Path(a.captions_dir) / "corrections.json").is_file():
+        a.corrections = str(Path(a.captions_dir) / "corrections.json")
+    if a.corrections:
+        print(f"corrections: {a.corrections}")
     rules = load_corrections(a.corrections)
     raw_words = load_words(a.words)  # as heard: lib/words.js keeps these for UIS.cue and check_cues.py
     words = phrase_fix(raw_words, a.corrections)
