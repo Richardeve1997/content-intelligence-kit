@@ -268,3 +268,13 @@ def test_the_lint_warnings_the_kit_causes_on_purpose_are_named_as_expected():
     assert "duplicate_media_discovery_risk" in lint and "<img>" in lint, lint
     assert "expected" in lint and "error" in lint, lint
     assert "timeline_track_too_dense" not in text(SKILLS["ui-story"]), "the caption track no longer causes it"
+
+
+def test_the_cleanup_waits_for_the_render_gate_and_the_review():
+    """The snapshots were once deleted before the render, because the note said "after the composite passes";
+    snap_render_gate.py needs them after the render, and every ship reads gfx.webm."""
+    notes = text(SKILLS["ui-story"]).split("Notes on the recipe:")[1].split("## The kit")[0]
+    cleanup = next(line for line in notes.splitlines() if "delete `build/gfx.webm`" in line)
+    assert "After the composite passes" not in cleanup, cleanup
+    assert "snap_render_gate.py" in cleanup and "review" in cleanup, cleanup
+    assert cleanup.index("review") < cleanup.index("delete `build/gfx.webm`"), "the order comes first"

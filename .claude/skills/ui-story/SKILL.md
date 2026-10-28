@@ -208,7 +208,7 @@ Notes on the recipe:
 - `npx hyperframes lint` gives two warnings that come from how the kit builds a Reel, and both are expected: `composition_file_too_large`, because the Reel is one `index.html` with one timeline, and `duplicate_media_discovery_risk` for an `<img>` shown in two scenes, because scenes are plain layers with no start time of their own. Fix every error and any other warning. The same duplicate warning about a `<video>` is real: give each video its own `id` and start.
 - `ship.py` keeps the bed this video already has. The first ship picks one with `kit.music.pick()` (skipping the last track used) and logs it, and the ledger keeps one row per video, so every re-ship sounds the same. Pass `--mood <folder>` to pick from another mood, or `--music none` for no bed.
 - The new render becomes `final.mp4` only after it passes the speech gate. At that moment `ship.py` deletes `review/review.json`, because the review passed the previous final and has to run again. A render that fails stays as `build/final.next.mp4` to listen to, and `final.mp4` is left as it was.
-- After the composite passes, delete `build/gfx.webm`, the snapshots and the test windows. Keep the base, the zoomed base, the matte and the words until the creator has signed off.
+- Clean up only once the review passes, never before the render: `snap_render_gate.py` compares the render with the snapshots, and every ship reads `build/gfx.webm`. Then delete `build/gfx.webm`, the snapshots and the test windows. Keep the base, the zoomed base, the matte and the words until the creator has signed off.
 
 ## The kit
 
