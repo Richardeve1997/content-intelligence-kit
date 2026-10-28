@@ -1175,13 +1175,31 @@ def test_the_voice_skill_does_not_copy_the_example_creator_into_a_real_model():
 
 def test_onboarding_guide_has_the_fallback_prompt_the_time_and_the_optional_keys():
     guide = read(ROOT / "ONBOARDING.md")
-    assert "Set me up: run the onboard skill from the start." in guide
+    assert "Read .claude/skills/onboard/SKILL.md and follow it from step 1." in guide
     assert re.search(r"\b\d+ (to \d+ )?minutes\b", guide)
     for name in ("APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"):
         assert name in guide
     assert "optional" in guide.lower()
     assert "Built by" not in guide, "the README carries the credit line"
     assert EM_DASH not in guide and EN_DASH not in guide and MARKER not in guide
+
+
+def test_the_fallback_prompt_names_a_file_that_is_there():
+    guide = read(ROOT / "ONBOARDING.md")
+    prompt = re.search(r"```\n(Read (\S+) and follow it from step 1\.)\n```", guide)
+    assert prompt, "the fallback prompt sits alone in a code block"
+    assert (ROOT / prompt.group(2)).is_file()
+
+
+def test_the_skill_and_the_guide_describe_the_one_optional_keys_line_the_doctor_prints():
+    skill = read(SKILLS / "onboard" / "SKILL.md")
+    guide = read(ROOT / "ONBOARDING.md")
+    assert "one line naming the optional keys that are not set yet" in skill
+    assert "once it is set" in skill, "setting a key makes it leave that line"
+    assert "Under the table, one line names the optional keys that are not set yet." in guide
+    assert "and only the rows" in guide, "the JSON carries no key information"
+    for words in ("lists the key names that are set", "listed as set", "see that `ZERNIO_API_KEY` is set"):
+        assert words not in skill + guide, "the old wording, from when each key was a row"
 
 
 def test_onboarding_guide_covers_every_step_in_plain_words():

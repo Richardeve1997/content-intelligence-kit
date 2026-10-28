@@ -13,7 +13,7 @@ How to talk during setup:
 - Use plain words. The creator does not see field names, file names or JSON unless they ask. Say "your accent colour", not `colours.accent`.
 - After each step, say in a few lines what you saved, in their words.
 - If they do not know an optional answer, offer a default and move on. If one answer is still open at the end of a step, ask for it in plain text and carry on with whatever does not depend on it.
-- Keys go in `.env`, and the creator types them there themselves: `cp -n .env.example .env`, open `.env` in any text editor, paste the key after the `=`, save. Never print a key, never repeat one back, and never write one anywhere except `.env`. If a key lands in the chat anyway, put it in `.env` without repeating it. `python3 bin/doctor.py` lists the key names that are set and never shows a value.
+- Keys go in `.env`, and the creator types them there themselves: `cp -n .env.example .env`, open `.env` in any text editor, paste the key after the `=`, save. Never print a key, never repeat one back, and never write one anywhere except `.env`. If a key lands in the chat anyway, put it in `.env` without repeating it. `python3 bin/doctor.py` ends its table with one line naming the optional keys that are not set yet, and never shows a value.
 
 ## Steps
 
@@ -50,7 +50,7 @@ Nothing is saved yet. Steps 1 and 2 are saved together when the machine check pa
 2. Show the table: each check, its status and, when it is not ok, its fix. Say in one plain line what each missing row is for. ffmpeg builds and checks the video. Node and HyperFrames render the animations. The Python tools transcribe speech and line the captions up with the words.
 3. Ask permission before you run any fix, and name what it installs. Fix the rows in the order shown, because later rows depend on earlier ones. Run one fix at a time and read its result before the next. If Homebrew's installer asks for the Mac password, ask the creator to run that one command in their own Terminal window and tell you when it finishes.
 4. The Python tools (`uv sync`) come to around 2 GB and take several minutes, and Chromium adds a few hundred megabytes more. That install can run in the background while you start the questions in step 3. Save nothing until it has finished.
-5. Run the doctor again. Repeat until no row says `missing`. A `warn` row can stay: low disk space (heavy jobs need at least 5 GB free, and 20 GB is comfortable) and optional keys. Ask whether they want to use any optional key now. If so, walk them through `.env` as above, then run the doctor to see the key listed as set. If not, move on. They can add a key whenever they like.
+5. Run the doctor again. Repeat until no row says `missing`. A `warn` row can stay: low disk space (heavy jobs need at least 5 GB free, and 20 GB is comfortable). The line under the table about optional keys is information, not a problem. Ask whether they want to use any of those keys now. If so, walk them through `.env` as above, then run the doctor again: the key is gone from that line once it is set. If not, move on. They can add a key whenever they like.
 6. The matting model is not in the table. Its weights download the first time a video needs them, so say so if they ask.
 7. If the Mac does not have an Apple silicon chip, say plainly that version 1 runs only on Apple silicon and that nothing in setup will change that. Stop there.
 8. When no row is missing, save both steps:
@@ -140,7 +140,7 @@ Ask whether they want the kit to post for them through Zernio.
 
 If they do:
 
-1. Their Zernio key goes in `.env`, typed by them, as described above. Run the doctor to see that `ZERNIO_API_KEY` is set.
+1. Their Zernio key goes in `.env`, typed by them, as described above. Run the doctor: `ZERNIO_API_KEY` is gone from its optional keys line once it is set.
 2. Check which platforms they have connected inside Zernio with `kit.post.accounts_check()`. In a shell: `uv run python -c "from kit import post; print(post.accounts_check())"`. If `kit.post` is not there yet in this copy of the kit, say so in one plain sentence, keep their key and posting times, and go on. For a platform that is not connected, tell them to connect it inside Zernio. The kit reports a platform that is not connected and skips it. It never routes around it.
 3. Ask for their default posting time on each platform, as a 24 hour time such as 18:00 in their own time zone. If they have no preference, suggest 18:00 as a starting point and tell them they can change it later.
 

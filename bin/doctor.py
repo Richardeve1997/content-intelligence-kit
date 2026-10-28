@@ -8,14 +8,18 @@ Each row is {"check": ..., "status": "ok" | "missing" | "warn", "fix": ...}.
 
   ok       the check passes, and "fix" is empty.
   missing  a required check fails. "fix" is the exact command to run, or a sentence when no command can help.
-  warn     worth a look but it does not stop anything: low disk space, or an optional key that is not set.
+  warn     worth a look but it does not stop anything: low disk space.
+
+Under the table, one line names the optional keys that are not set yet (Apify, an image model,
+ElevenLabs, Zernio). A key that is not set is not a problem, so it is a line and not a row, and
+the JSON holds the rows only.
 
 The command exits 0 when no row is missing and 1 otherwise. Rows come in the order the fixes have to
 be made, so working down the table works.
 
 It uses only the Python standard library and nothing from the kit, so the Python that ships with a
-Mac can run it on a fresh clone, before the kit's own environment exists. Keys are shown by name
-only: a value is never printed.
+Mac can run it on a fresh clone, before the kit's own environment exists. Keys are named and never
+shown: a value is never printed.
 """
 
 from __future__ import annotations
@@ -38,7 +42,6 @@ DISK_WARN_GB = 20
 DISK_FAIL_GB = 5
 NODE_MIN = 22
 BREW_PREFIX = "/opt/homebrew/"
-OPTIONAL = "(optional)"
 
 # The fixes that are commands. ONBOARDING.md shows every one of them.
 FIX_BREW = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
@@ -83,29 +86,8 @@ FIX_DISK = (
     "Empty the Trash, then move old videos and downloads to an external drive or cloud storage."
 )
 
-# What each optional key is for, and the free way round it. The names themselves come from .env.example.
-OPTIONAL_KEYS = {
-    "APIFY_TOKEN": (
-        "Instagram and TikTok research",
-        "Without it, research uses YouTube creators and the links you paste.",
-    ),
-    "OPENAI_API_KEY": (
-        "drawing the mini me character with OpenAI",
-        "Without it, use Gemini or a signed-in Codex CLI, or paste the kit's prompts into an image tool yourself.",
-    ),
-    "GEMINI_API_KEY": (
-        "drawing the mini me character with Gemini",
-        "Without it, use OpenAI or a signed-in Codex CLI, or paste the kit's prompts into an image tool yourself.",
-    ),
-    "ELEVENLABS_API_KEY": (
-        "a stock or cloned voice in mini me",
-        "Without it, record the voice-over on your phone.",
-    ),
-    "ZERNIO_API_KEY": (
-        "scheduling posts",
-        "Without it, you post the MP4 and the caption files by hand.",
-    ),
-}
+# The optional keys. The names that count come from .env.example, and these are the ones to use when that file cannot be read.
+KNOWN_KEYS = ("APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY")
 
 # Run by the kit's own Python. It prints one line, KIT_DOCTOR_REPORT followed by JSON, saying for each
 # package whether it is "ok", "missing" or "broken" (installed but it will not import).
@@ -154,8 +136,9 @@ Result = Tuple[str, str]  # (status, fix)
 class Probe:
     """Everything the checks learn about this Mac. Tests hand the checks a fake one instead."""
 
-    def __init__(self, root: Path = ROOT):
+    def __init__(self, root: Path = ROOT, progress: bool = True):
         self.root = Path(root)
+        self.progress = progress  # say so on stderr before the slow part. JSON mode turns this off
 
     def system(self) -> str:
         return platform.system()
@@ -221,7 +204,8 @@ class Probe:
         python = self.kit_python()
         if not python:
             return None
-        sys.stderr.write("Checking the Python tools. The first run after an install can take a minute...\n")
+        if self.progress:
+            sys.stderr.write("Checking the Python tools. The first run after an install can take a minute...\n")
         result = self.run([python, "-I", "-c", REPORT_SCRIPT], timeout=300)
         if result is None or result[0] != 0:
             return None
@@ -294,13 +278,19 @@ def check_node(probe: Probe) -> Result:
 
 
 def pinned_hyperframes(probe: Probe) -> Optional[str]:
-    """The HyperFrames version package.json pins, or None when it cannot be read."""
-    text = probe.read_text("package.json")
+    """The HyperFrames version package.json pins, from devDependencies or dependencies. None when there is none."""
     try:
-        pin = json.loads(text or "")["devDependencies"]["hyperframes"]
-    except (ValueError, KeyError, TypeError):
+        packages = json.loads(probe.read_text("package.json") or "")
+    except ValueError:
         return None
-    return pin.lstrip("^~=v") if isinstance(pin, str) else None
+    if not isinstance(packages, dict):
+        return None
+    for section in ("devDependencies", "dependencies"):
+        group = packages.get(section)
+        pin = group.get("hyperframes") if isinstance(group, dict) else None
+        if isinstance(pin, str) and pin.strip():
+            return pin.strip().lstrip("^~=v")
+    return None
 
 
 def check_hyperframes(probe: Probe, pin: Optional[str]) -> Result:
@@ -369,7 +359,7 @@ def key_names(example: Optional[str]) -> List[str]:
     for name, _ in _dotenv_lines(example):
         if name not in names:
             names.append(name)
-    return names or list(OPTIONAL_KEYS)
+    return names or list(KNOWN_KEYS)
 
 
 def keys_that_are_set(probe: Probe, names: Sequence[str]) -> List[str]:
@@ -385,23 +375,22 @@ def keys_that_are_set(probe: Probe, names: Sequence[str]) -> List[str]:
     return found
 
 
-def optional_rows(probe: Probe) -> List[Row]:
+def optional_keys_not_set(probe: Probe) -> List[str]:
+    """The optional keys that have no value yet, by name and in the order .env.example lists them."""
     names = key_names(probe.read_text(".env.example"))
-    set_names = keys_that_are_set(probe, names)
-    rows = []
-    for name in names:
-        purpose, alternative = OPTIONAL_KEYS.get(name, ("", ""))
-        label = f"{name} {OPTIONAL}" + (f": {purpose}" if purpose else "")
-        if name in set_names:
-            rows.append({"check": label, "status": "ok", "fix": ""})
-            continue
-        want = f" for {purpose}" if purpose else ""
-        fix = f"Add {name}=your key to .env{want}."
-        if alternative:
-            fix += f" {alternative}"
-        fix += " Create .env with: cp -n .env.example .env"
-        rows.append({"check": label, "status": "warn", "fix": fix})
-    return rows
+    have = set(keys_that_are_set(probe, names))
+    return [name for name in names if name not in have]
+
+
+def footer_line(probe: Probe) -> Optional[str]:
+    """The one line under the table about optional keys, or None when every one of them is set."""
+    try:
+        missing = optional_keys_not_set(probe)
+    except Exception:  # the footer is a courtesy and must never stop the checks
+        return None
+    if not missing:
+        return None
+    return "Optional keys not set: " + ", ".join(missing) + ". Add them to .env when you want those features."
 
 
 # --- putting the rows together --------------------------------------------------------------------------------
@@ -442,12 +431,7 @@ def collect(probe: Probe) -> List[Row]:
         ("yt-dlp", lambda: check_package(report, "yt_dlp")),
         ("Free disk space", lambda: check_disk(probe)),
     ]
-    rows = [_row(label, True, check) for label, check in checks]
-    try:
-        rows += optional_rows(probe)
-    except Exception:
-        pass
-    return rows
+    return [_row(label, True, check) for label, check in checks]
 
 
 def format_table(rows: List[Row]) -> str:
@@ -479,12 +463,16 @@ def main(argv: Optional[List[str]] = None, probe: Optional[Probe] = None, out: A
     args = parser.parse_args(argv)
 
     out = out or sys.stdout
-    rows = collect(probe or Probe())
+    probe = probe or Probe(progress=not args.json)
+    rows = collect(probe)
     if args.json:
         print(json.dumps(rows, indent=2), file=out)
     else:
         print("Machine check for the content intelligence kit\n", file=out)
         print(format_table(rows), file=out)
+        footer = footer_line(probe)
+        if footer:
+            print("\n" + footer, file=out)
         print("\n" + summary(rows), file=out)
     return 1 if any(row["status"] == "missing" for row in rows) else 0
 

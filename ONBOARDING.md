@@ -12,7 +12,7 @@ Progress is saved after every step. You can stop whenever you like, close the wi
 Both agents read the kit's skills from this folder, so the `onboard` skill starts when you say that. If yours does not, paste this as your first message:
 
 ```
-Set me up: run the onboard skill from the start.
+Read .claude/skills/onboard/SKILL.md and follow it from step 1.
 ```
 
 ## What you need
@@ -45,7 +45,7 @@ You can run it yourself at any time. It changes nothing:
 python3 bin/doctor.py
 ```
 
-It lists each check with its status (ok, missing or warn) and the fix for anything missing. Fix the rows in the order shown, because later ones depend on earlier ones, then run it again. `python3 bin/doctor.py --json` prints the same rows as JSON.
+It lists each check with its status (ok, missing or warn) and the fix for anything missing. Fix the rows in the order shown, because later ones depend on earlier ones, then run it again. Under the table, one line names the optional keys that are not set yet. `python3 bin/doctor.py --json` prints the rows as JSON, and only the rows.
 
 | Check | What it is for | Fix when it is missing |
 |---|---|---|
@@ -81,7 +81,7 @@ Keys live in a file called `.env` in this folder. Git ignores it, and it never l
 2. Open `.env` in any text editor.
 3. Paste each key after its `=` and save.
 
-Do not paste a key into the chat. The machine check lists the key names that are set and never shows a value.
+Do not paste a key into the chat. The machine check names the optional keys that are not set yet and never shows a value.
 
 ## Where your answers go
 

@@ -190,11 +190,33 @@ def test_a_healthy_mac_passes_every_required_check(doctor, fake):
 
 def test_the_hyperframes_row_names_the_pinned_version(doctor, fake):
     assert PIN in find(rows_of(doctor, fake()), "HyperFrames")["check"]
+
+
+@pytest.mark.parametrize("section", ["devDependencies", "dependencies"])
+@pytest.mark.parametrize("written, pin", [("0.9.1", "0.9.1"), ("^0.9.1", "0.9.1"), ("~0.9.1", "0.9.1")])
+def test_the_hyperframes_pin_is_read_from_either_dependency_section(doctor, fake, section, written, pin):
     probe = fake()
-    probe.texts["package.json"] = json.dumps({"devDependencies": {"hyperframes": "0.9.1"}})
-    probe.outputs["npx --no-install hyperframes --version"] = (0, "0.9.1\n")
+    probe.texts["package.json"] = json.dumps({"name": "x", section: {"hyperframes": written}})
+    probe.outputs["npx --no-install hyperframes --version"] = (0, pin + "\n")
     row = find(rows_of(doctor, probe), "HyperFrames")
-    assert (row["status"], "0.9.1" in row["check"]) == ("ok", True)
+    assert (row["status"], row["check"]) == ("ok", f"HyperFrames CLI {pin}")
+
+
+@pytest.mark.parametrize("packages", [{}, {"dependencies": {"left-pad": "1.0.0"}}, {"devDependencies": []}, {"dependencies": {"hyperframes": 7}}])
+def test_a_package_json_that_does_not_pin_hyperframes_gives_a_plain_row(doctor, fake, packages):
+    probe = fake()
+    probe.texts["package.json"] = json.dumps(packages)
+    row = find(rows_of(doctor, probe), "HyperFrames")
+    assert (row["status"], row["fix"]) == ("missing", "npm ci")
+    assert row["check"] == "HyperFrames CLI at the pinned version"
+
+
+def test_a_package_json_that_cannot_be_read_gives_the_same_plain_row(doctor, fake):
+    probe = fake()
+    probe.texts.pop("package.json")
+    assert find(rows_of(doctor, probe), "HyperFrames")["check"] == "HyperFrames CLI at the pinned version"
+    probe.texts["package.json"] = "not json"
+    assert find(rows_of(doctor, probe), "HyperFrames")["status"] == "missing"
 
 
 COMMAND_FIXES = [
@@ -419,70 +441,100 @@ def test_a_warning_does_not_fail_the_run_but_a_missing_row_does(doctor, fake, ca
 
 # --- optional keys ----------------------------------------------------------------------------------------
 
-
-def test_optional_keys_show_by_name_and_never_fail_the_run(doctor, fake):
-    rows = rows_of(doctor, fake())
-    for name in KEYS:
-        row = find(rows, name)
-        assert "(optional)" in row["check"]
-        assert row["status"] == "warn"
-        assert name in row["fix"] and ".env" in row["fix"]
-    assert "missing" not in {row["status"] for row in rows}
+FOOTER_START = "Optional keys not set: "
+FOOTER_END = ". Add them to .env when you want those features."
 
 
-def test_a_key_in_dotenv_is_present_and_its_value_is_never_shown(doctor, fake, capsys):
+def table_text(doctor, probe, capsys) -> str:
+    doctor.main([], probe=probe)
+    return capsys.readouterr().out
+
+
+def footer_names(text: str):
+    """The key names on the footer line under the table, or None when there is no footer."""
+    lines = [line for line in text.splitlines() if line.startswith(FOOTER_START)]
+    assert len(lines) <= 1, "one footer line, never one line for each key"
+    if not lines:
+        return None
+    assert lines[0].endswith(FOOTER_END)
+    return lines[0][len(FOOTER_START) : -len(FOOTER_END)].split(", ")
+
+
+def test_optional_keys_are_one_footer_line_and_never_rows(doctor, fake, capsys):
+    probe = fake()
+    rows = rows_of(doctor, probe)
+
+    assert [row for row in rows if any(name in row["check"] + row["fix"] for name in KEYS)] == []
+    assert "optional" not in " ".join(row["check"] + row["fix"] for row in rows).lower()
+    assert footer_names(table_text(doctor, probe, capsys)) == KEYS
+    assert doctor.main(["--json"], probe=probe) == 0, "a key that is not set never fails the run"
+    assert json.loads(capsys.readouterr().out) == rows, "JSON holds the rows and nothing about keys"
+
+
+def test_the_footer_sits_under_the_table_and_above_the_summary(doctor, fake, capsys):
+    lines = table_text(doctor, fake(), capsys).splitlines()
+    footer = next(i for i, line in enumerate(lines) if line.startswith(FOOTER_START))
+    assert lines[footer - 1] == "" and lines[footer + 1] == ""
+    assert lines[footer - 2].startswith("warn") is False
+    assert any(line.startswith("ok") for line in lines[:footer])
+    assert lines[-1] == "Everything the kit needs is installed.", "a key that is not set does not change the summary"
+
+
+def test_the_footer_lists_only_the_keys_that_are_not_set_and_never_a_value(doctor, fake, capsys):
     secret = "fake-value-for-tests"
     probe = fake()
     probe.texts[".env"] = f"# keys\nAPIFY_TOKEN={secret}\nZERNIO_API_KEY=\nexport GEMINI_API_KEY='{secret}-two'\n"
-    rows = rows_of(doctor, probe)
 
-    assert find(rows, "APIFY_TOKEN")["status"] == "ok"
-    assert find(rows, "GEMINI_API_KEY")["status"] == "ok"
-    assert find(rows, "ZERNIO_API_KEY")["status"] == "warn"
-    assert find(rows, "OPENAI_API_KEY")["status"] == "warn"
-    doctor.main([], probe=probe)
+    text = table_text(doctor, probe, capsys)
     doctor.main(["--json"], probe=probe)
-    shown = json.dumps(rows) + capsys.readouterr().out
-    assert secret not in shown
+    text += capsys.readouterr().out
+
+    assert footer_names(text.split("[")[0]) == ["OPENAI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"]
+    assert secret not in text
 
 
-def test_a_key_in_the_environment_counts_too(doctor, fake):
+def test_a_key_in_the_environment_counts_too(doctor, fake, capsys):
     probe = fake()
     probe.env = {"OPENAI_API_KEY": "not-a-real-key", "ELEVENLABS_API_KEY": "   "}
-    rows = rows_of(doctor, probe)
-    assert find(rows, "OPENAI_API_KEY")["status"] == "ok"
-    assert find(rows, "ELEVENLABS_API_KEY")["status"] == "warn", "a blank value is not a key"
-    assert "not-a-real-key" not in json.dumps(rows)
+    text = table_text(doctor, probe, capsys)
+    assert footer_names(text) == ["APIFY_TOKEN", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"]
+    assert "not-a-real-key" not in text
 
 
-def test_a_later_blank_line_in_dotenv_clears_an_earlier_value(doctor, fake):
+def test_a_later_blank_line_in_dotenv_clears_an_earlier_value(doctor, fake, capsys):
     probe = fake()
     probe.texts[".env"] = "APIFY_TOKEN=fake-value-for-tests\nAPIFY_TOKEN=\n"
-    assert find(rows_of(doctor, probe), "APIFY_TOKEN")["status"] == "warn"
+    assert "APIFY_TOKEN" in footer_names(table_text(doctor, probe, capsys))
 
 
-def test_quoted_and_commented_values_are_read_like_the_kit_reads_them(doctor, fake):
+def test_quoted_and_commented_values_are_read_like_the_kit_reads_them(doctor, fake, capsys):
     probe = fake()
     probe.texts[".env"] = 'APIFY_TOKEN=""\nOPENAI_API_KEY=   # nothing yet\nGEMINI_API_KEY="fake-value-for-tests"\n'
-    rows = rows_of(doctor, probe)
-    assert find(rows, "APIFY_TOKEN")["status"] == "warn"
-    assert find(rows, "OPENAI_API_KEY")["status"] == "warn"
-    assert find(rows, "GEMINI_API_KEY")["status"] == "ok"
+    names = footer_names(table_text(doctor, probe, capsys))
+    assert "APIFY_TOKEN" in names and "OPENAI_API_KEY" in names
+    assert "GEMINI_API_KEY" not in names
 
 
-def test_the_key_names_come_from_dotenv_example(doctor, fake):
+def test_when_every_key_is_set_there_is_no_footer(doctor, fake, capsys):
+    probe = fake()
+    probe.texts[".env"] = "".join(f"{name}=fake-value-for-tests\n" for name in KEYS)
+    text = table_text(doctor, probe, capsys)
+    assert footer_names(text) is None
+    assert "Optional" not in text
+
+
+def test_the_key_names_come_from_dotenv_example(doctor, fake, capsys):
     probe = fake()
     probe.texts[".env.example"] = "SOME_NEW_KEY=\nAPIFY_TOKEN=\n"
-    rows = rows_of(doctor, probe)
-    assert find(rows, "SOME_NEW_KEY")["status"] == "warn"
-    assert [row for row in rows if "OPENAI" in row["check"]] == []
+    assert footer_names(table_text(doctor, probe, capsys)) == ["SOME_NEW_KEY", "APIFY_TOKEN"]
 
 
-def test_a_missing_dotenv_example_does_not_stop_the_other_checks(doctor, fake):
+def test_a_missing_dotenv_example_falls_back_to_the_five_known_names_and_stops_nothing(doctor, fake, capsys):
     probe = fake()
     probe.texts.pop(".env.example")
-    rows = rows_of(doctor, probe)
-    assert find(rows, "Homebrew")["status"] == "ok"
+    text = table_text(doctor, probe, capsys)
+    assert footer_names(text) == KEYS
+    assert re.search(r"^ok\s+Homebrew$", text, re.M)
 
 
 # --- the command ------------------------------------------------------------------------------------------
@@ -518,6 +570,7 @@ def test_the_table_lists_every_check_with_its_fix(doctor, fake, capsys):
     assert re.search(r"^ok\s+Homebrew$", text, re.M), "a row that passes has no fix after it"
     assert "1 check needs fixing" in text
     assert "python3 bin/doctor.py again" in text
+    assert footer_names(text) == KEYS
     assert "Traceback" not in text
     assert EM_DASH not in text and EN_DASH not in text
 
@@ -543,6 +596,13 @@ def test_the_summary_when_everything_is_there(doctor, fake, capsys):
     probe.texts[".env"] = "".join(f"{name}=fake-value-for-tests\n" for name in KEYS)
     assert doctor.main([], probe=probe) == 0
     assert capsys.readouterr().out.rstrip().splitlines()[-1] == "Everything the kit needs is installed."
+
+
+def test_the_summary_ignores_keys_that_are_not_set(doctor, fake, capsys):
+    assert doctor.main([], probe=fake()) == 0
+    out = capsys.readouterr().out.rstrip().splitlines()
+    assert out[-1] == "Everything the kit needs is installed."
+    assert out[-3].startswith(FOOTER_START)
 
 
 def test_an_unknown_option_is_refused_with_usage(doctor, fake, capsys):
@@ -672,6 +732,28 @@ def test_a_report_that_cannot_be_read_is_none(doctor, tmp_path, monkeypatch, bod
     capsys.readouterr()
 
 
+def test_the_real_probe_stays_quiet_when_asked_to(doctor, tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
+    write_python(tmp_path / ".venv" / "bin" / "python", "echo 'KIT_DOCTOR_REPORT {\"torch\": \"ok\"}'\n")
+    assert doctor.Probe(tmp_path, progress=False).python_report() == {"torch": "ok"}
+    assert capsys.readouterr().err == ""
+
+
+def test_json_mode_asks_for_no_progress_line_and_the_table_keeps_it(doctor, fake, monkeypatch):
+    made = []
+
+    class Recording(fake):
+        def __init__(self, root=None, progress=True):
+            super().__init__()
+            self.progress = progress
+            made.append(self)
+
+    monkeypatch.setattr(doctor, "Probe", Recording)
+    doctor.main(["--json"], out=io.StringIO())
+    doctor.main([], out=io.StringIO())
+    assert [probe.progress for probe in made] == [False, True]
+
+
 def test_the_real_probe_without_an_environment_has_no_report(doctor, tmp_path, monkeypatch):
     monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
     assert doctor.Probe(tmp_path).python_report() is None
@@ -744,6 +826,33 @@ def test_the_script_runs_in_a_fresh_clone_with_no_environment(tmp_path):
     assert not (tmp_path / "node_modules").exists(), "checking must not install anything"
 
 
+def test_json_keeps_both_streams_clean_when_the_environment_answers(tmp_path):
+    (tmp_path / "bin").mkdir()
+    shutil.copy(SCRIPT, tmp_path / "bin" / "doctor.py")
+    shutil.copy(ROOT / "package.json", tmp_path / "package.json")
+    shutil.copy(ROOT / ".env.example", tmp_path / ".env.example")
+    write_python(tmp_path / ".venv" / "bin" / "python", 'echo \'KIT_DOCTOR_REPORT {"torch": "ok"}\'\n')
+    env = {k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"}
+
+    def run(*flags):
+        return subprocess.run(
+            [sys.executable, str(tmp_path / "bin" / "doctor.py"), *flags],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=120,
+        )
+
+    quiet = run("--json")
+    assert quiet.stderr == "", "no progress line in JSON mode"
+    assert isinstance(json.loads(quiet.stdout), list)
+    chatty = run()
+    assert "Checking the Python tools" in chatty.stderr
+    assert "Optional keys not set: " in chatty.stdout
+
+
 # --- this Mac -----------------------------------------------------------------------------------------------
 
 
@@ -766,8 +875,6 @@ def test_doctor_on_this_mac():
     assert problems == [], problems
     assert done.returncode == 0
     for row in rows:
-        if "(optional)" in row["check"]:
-            continue
         if "Free disk" in row["check"]:
             assert row["status"] in {"ok", "warn"}, row
         else:
