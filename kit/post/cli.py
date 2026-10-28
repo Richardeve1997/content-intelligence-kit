@@ -124,8 +124,19 @@ def _times(profile, args, platforms: list[str]) -> dict[datetime, list[str]]:
 # --- the commands ------------------------------------------------------------------------------------------
 
 
+NO_KEY_CHECK = (
+    "There is no Zernio key, so you post by hand: each video gets a file with its captions and times. "
+    "To have the kit schedule posts instead, add a line ZERNIO_API_KEY=your key to the .env file in the kit folder."
+)
+
+
 def _check(args) -> int:
-    for name, state in post.accounts_check().items():
+    try:
+        states = post.accounts_check()
+    except post.NoZernio:
+        print(NO_KEY_CHECK)  # posting by hand is a choice the creator made, so this is an answer, not a failure
+        return 0
+    for name, state in states.items():
         print(f"{post.captions.display_name(name)}: {state}")
     return 0
 

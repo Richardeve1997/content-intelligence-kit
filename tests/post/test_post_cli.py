@@ -59,9 +59,10 @@ def test_check_lists_each_platform_and_nothing_private(keyed, capsys):
 
 
 def test_check_without_a_key_says_so_in_one_sentence(studio, capsys):
+    """Posting by hand is a choice, not a failure: one sentence, and exit 0 so a script reads it as an answer."""
     status, out, err = say(capsys, "check")
-    assert status == 1 and out == ""
-    assert "ZERNIO_API_KEY" in err and err.count("\n") == 1
+    assert status == 0 and err == ""
+    assert "ZERNIO_API_KEY" in out and "by hand" in out and out.count("\n") == 1
 
 
 def test_lines_gives_each_platform_its_call_to_action_and_tags(reel, capsys):
