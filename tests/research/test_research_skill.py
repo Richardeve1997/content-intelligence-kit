@@ -129,6 +129,13 @@ def test_the_skill_says_what_the_paid_flag_means_and_not_to_copy_an_ads_angle(te
     assert "`paid` is true" in picking and "paid partnership" in picking and "null" in picking
 
 
+def test_the_skill_says_a_sample_run_goes_where_no_idea_picker_looks(text):
+    steps = sections(text)["Steps"]
+    offline = steps[steps.index("`--offline`") :].split("\n", 1)[0]
+    assert "`research/samples/<date>/`" in offline and "made-up" in offline
+    assert "reads" in offline, "it says that nothing picks ideas from there"
+
+
 def test_the_skill_says_the_first_transcription_downloads_a_speech_model(text):
     assert "downloads a speech model" in text
     assert "first time" in text

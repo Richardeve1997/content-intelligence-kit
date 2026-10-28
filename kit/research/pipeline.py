@@ -6,7 +6,9 @@ transcripts for the strongest, adds what it saw to the brain, and writes researc
 and report.html. The ideas come after: the skill reads items.json and writes ideas.json.
 
 The folder is named for the day in the creator's own time zone. Running again the same day replaces the
-pull and the report and keeps any ideas already written. An offline run never replaces a real one.
+pull and the report and keeps any ideas already written. An offline run, on made-up sample videos, writes to
+research/samples/<date>/ instead: no idea picker reads that folder, so a sample never replaces or shadows a
+real run, whatever its date.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ VERSION = 1
 # Fields that only mattered while fetching, or that are signed links that expire.
 _DROP = {"video_url", "caption_url", "subtitle_url", "thumb_url", "first_seen", "last_seen"}
 EMPTY_WATCHLIST = "Your watch list is empty. Add creators to me/watchlist.json, or say: set me up"
+SAMPLES = "samples"  # research/samples/<date>/: offline runs on made-up videos, a folder no idea picker reads
 
 
 def _trim(video: dict) -> dict:
@@ -39,15 +42,19 @@ def _trim(video: dict) -> dict:
 
 
 def _check_existing(run_dir: Path, offline: bool, day: str, label: str) -> bool:
-    """Refuse to put a sample over a real run. Returns True when an offline sample from earlier today was cleared away."""
+    """Never put a sample over a real run. Returns True when an offline sample from earlier today was cleared away.
+
+    A sample goes to research/samples/, so it never meets a real run there. The refusal is a guard all the same,
+    and its words send an agent to the creator, never to moving or deleting a folder.
+    """
     existing = common.read_json(run_dir / "items.json")
     if not isinstance(existing, dict):
         return False
     was_offline = existing.get("mode") == "offline"
     if offline and not was_offline:
         raise config.KitError(
-            f"There is already a research run for {day} with your real watch list. An offline run would replace it. "
-            f"Move or delete {label} first, or try again tomorrow"
+            f"{label} already holds a research run from your real watch list for {day}, so this sample run stopped "
+            "and changed nothing. Ask the creator what they want to do. Never move or delete a run folder on your own."
         )
     if was_offline and not offline:
         for name in ("items.json", "ideas.json", "report.html"):
@@ -72,7 +79,7 @@ def run(*, offline: bool = False, no_apify: bool = False, no_transcribe: bool = 
     now = common.utcnow()
     tz = common.tz_of(profile)
     day = common.run_date(profile, now)
-    run_dir = config.research_dir() / "runs" / day
+    run_dir = config.research_dir() / (SAMPLES if offline else "runs") / day
     label = common.kit_relative(run_dir)
     replaced_sample = _check_existing(run_dir, offline, day, label)
 
@@ -141,6 +148,11 @@ def run(*, offline: bool = False, no_apify: bool = False, no_transcribe: bool = 
 
     _summarise(data, say)
     _, problems = report.write(profile, run_dir)
+    if offline:
+        say(f"Wrote {label}/items.json and report.html")
+        say(f"This was a sample run on made-up videos, kept in {label} apart from your real research. No idea or video plan reads it.")
+        say(f"Next: open {label}/report.html to see the sample report, or say: run my research")
+        return run_dir
     kept_ideas = (run_dir / "ideas.json").is_file() and not replaced_sample
     if kept_ideas:
         say(f"Kept the ideas already written for today in {label}/ideas.json")

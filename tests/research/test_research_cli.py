@@ -33,8 +33,8 @@ def top_urls(run_dir, count=3):
 
 
 @pytest.fixture
-def with_ideas(offline_run):
-    profile, run_dir = offline_run
+def with_ideas(live_run):
+    profile, run_dir = live_run
     write_ideas(run_dir, top_urls(run_dir))
     return profile, run_dir
 
@@ -46,7 +46,7 @@ def test_run_offline_prints_the_summary(kit_tree, capsys):
     assert cli.main(["run", "--offline"]) == 0
     out, err = capsys.readouterr()
     assert out.startswith("Research for Example Studio, Wednesday 28 October 2026")
-    assert "Wrote research/runs/2026-10-28/items.json and report.html" in out
+    assert "Wrote research/samples/2026-10-28/items.json and report.html" in out
     assert err == ""
 
 
@@ -101,8 +101,8 @@ def test_report_rebuilds_the_page_from_the_pull_and_the_ideas(with_ideas, capsys
     assert "Idea 1 about basil" in text and "Idea 3 about basil" in text
 
 
-def test_report_with_a_bad_ideas_file_lists_the_problems_and_exits_one(offline_run, capsys):
-    _, run_dir = offline_run
+def test_report_with_a_bad_ideas_file_lists_the_problems_and_exits_one(live_run, capsys):
+    _, run_dir = live_run
     (run_dir / "ideas.json").write_text(json.dumps([{"n": 1, "title": "Half an idea"}]), encoding="utf-8")
     assert cli.main(["report"]) == 1
     err = capsys.readouterr().err
@@ -110,7 +110,7 @@ def test_report_with_a_bad_ideas_file_lists_the_problems_and_exits_one(offline_r
     assert "ideas.json needs fixing" in visible((run_dir / "report.html").read_text(encoding="utf-8"))  # and the page says so too
 
 
-def test_report_for_a_date_with_no_run(offline_run, capsys):
+def test_report_for_a_date_with_no_run(live_run, capsys):
     assert cli.main(["report", "--date", "2026-10-20"]) == 1
     assert capsys.readouterr().err == "There is no research run for 2026-10-20. The latest is 2026-10-28.\n"
 
@@ -121,13 +121,13 @@ def test_report_with_no_run_at_all(kit_tree, capsys):
 
 
 @pytest.mark.parametrize("date", ["tomorrow", "2026-13-40", "28/10/2026"])
-def test_a_date_that_is_not_a_date_is_explained(offline_run, capsys, date):
+def test_a_date_that_is_not_a_date_is_explained(live_run, capsys, date):
     assert cli.main(["report", "--date", date]) == 1
     assert "A date looks like 2026-10-28" in capsys.readouterr().err
 
 
-def test_a_named_date_picks_that_run(offline_run, kit_tree, capsys):
-    _, run_dir = offline_run
+def test_a_named_date_picks_that_run(live_run, kit_tree, capsys):
+    _, run_dir = live_run
     older = run_dir.parent / "2026-10-20"
     shutil.copytree(run_dir, older)
     assert cli.main(["report", "--date", "2026-10-20"]) == 0
@@ -151,7 +151,7 @@ def test_hooks_for_an_idea_that_is_not_there(with_ideas, capsys):
     assert capsys.readouterr().err == "There is no idea number 9 in research/runs/2026-10-28. It has ideas 1 to 3.\n"
 
 
-def test_hooks_before_any_ideas_are_written(offline_run, capsys):
+def test_hooks_before_any_ideas_are_written(live_run, capsys):
     assert cli.main(["hooks", "1"]) == 1
     err = capsys.readouterr().err
     assert err == "There are no ideas to work from yet. Ask Claude to write the ideas for the latest run first, or say: run my research.\n"

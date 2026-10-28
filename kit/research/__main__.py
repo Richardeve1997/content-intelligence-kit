@@ -100,7 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
 
     one = commands.add_parser("run", help="gather what the watch list posted, score it, and write items.json and report.html")
-    one.add_argument("--offline", action="store_true", help="use made-up sample videos and no network (for trying the kit)")
+    one.add_argument("--offline", action="store_true",
+                     help="use made-up sample videos and no network, written to research/samples/ (for trying the kit)")
     one.add_argument("--no-apify", action="store_true", help="skip Instagram and TikTok even if there is an Apify key")
     one.add_argument("--no-transcribe", action="store_true", help="do not turn videos into text on this machine")
 

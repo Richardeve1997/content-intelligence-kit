@@ -210,8 +210,32 @@ def fake_zernio(monkeypatch):
 
 @pytest.fixture
 def offline_run(kit_tree):
-    """Runs the sample (offline) research once and returns (profile, run folder)."""
+    """Runs the sample (offline) research once and returns (profile, run folder). The folder is
+    research/samples/2026-10-28, apart from the real runs."""
     from kit.research import pipeline
 
-    pipeline.run(offline=True, say=lambda *args, **kwargs: None)
-    return config.load_profile(), kit_tree / "research" / "runs" / "2026-10-28"
+    folder = pipeline.run(offline=True, say=lambda *args, **kwargs: None)
+    assert folder == kit_tree / "research" / "samples" / "2026-10-28"
+    return config.load_profile(), folder
+
+
+@pytest.fixture
+def live_run(kit_tree):
+    """A run in research/runs/2026-10-28 as a real pull leaves it, made from the sample videos so no test needs the
+    web. Returns (profile, run folder). The idea pickers, `report` and `hooks` read only these folders."""
+    import json
+    import shutil
+
+    from kit.research import offline as sample, pipeline, report
+
+    made = pipeline.run(offline=True, say=lambda *args, **kwargs: None)
+    folder = kit_tree / "research" / "runs" / made.name
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(made), str(folder))
+    data = json.loads((folder / "items.json").read_text(encoding="utf-8"))
+    data["mode"] = "live"
+    data["notices"] = [n for n in data["notices"] if n != sample.OFFLINE_NOTICE]
+    (folder / "items.json").write_text(json.dumps(data), encoding="utf-8")
+    profile = config.load_profile()
+    report.write(profile, folder)
+    return profile, folder

@@ -2,9 +2,11 @@
 
 import hashlib
 import importlib
+import importlib.util
 import json
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -15,22 +17,28 @@ from research_helpers import (
     NOW, apify, ig_post, make_yt_dlp, short_info, started, tt_post, visible, write_ideas_file, write_profile, write_watchlist,
 )
 
+ROOT = Path(__file__).resolve().parents[2]
 MISSING = "Instagram and TikTok skipped: add APIFY_TOKEN to .env to include them"
 TOKEN = "fake-value-for-tests"
 X_LINK = "https://x.com/example_account/status/1000000000000000001"
 HOME_PREFIX = "/".join(["", "Users", ""])  # a home folder path, built here so the source holds no such literal
 
 
-def run_dir_of(root, day="2026-10-28"):
-    return root / "research" / "runs" / day
+def run_dir_of(root, day="2026-10-28", folder="runs"):
+    return root / "research" / folder / day
 
 
-def items_of(root, day="2026-10-28"):
-    return json.loads((run_dir_of(root, day) / "items.json").read_text(encoding="utf-8"))
+def sample_dir_of(root, day="2026-10-28"):
+    """Where an offline run on made-up videos writes: apart from the real runs, where no idea picker looks."""
+    return run_dir_of(root, day, "samples")
 
 
-def page_of(root, day="2026-10-28"):
-    return (run_dir_of(root, day) / "report.html").read_text(encoding="utf-8")
+def items_of(root, day="2026-10-28", folder="runs"):
+    return json.loads((run_dir_of(root, day, folder) / "items.json").read_text(encoding="utf-8"))
+
+
+def page_of(root, day="2026-10-28", folder="runs"):
+    return (run_dir_of(root, day, folder) / "report.html").read_text(encoding="utf-8")
 
 
 def channel(*titles, **info):
@@ -65,9 +73,10 @@ def test_offline_runs_without_network(kit_tree, no_network, monkeypatch, capsys)
 
     assert cli.main(["run", "--offline"]) == 0
 
-    data = items_of(kit_tree)
+    data = items_of(kit_tree, folder="samples")
     assert data["mode"] == "offline" and data["videos"] and data["creators"]
-    assert (run_dir_of(kit_tree) / "report.html").is_file()
+    assert (sample_dir_of(kit_tree) / "report.html").is_file()
+    assert not (kit_tree / "research" / "runs").exists(), "a sample never goes where the real runs are"
     assert not (kit_tree / "research" / "brain").exists()  # made-up videos never become history
     touched = [name for name in imported if name.startswith(("kit.zernio", "kit.transcribe", "kit.media", "yt_dlp"))]
     assert touched == []
@@ -112,12 +121,12 @@ def test_x_link_failure_noted(kit_tree, me, web, capsys):
 def test_timezone_from_profile(kit_tree, me, zone, folder, long_day):
     write_profile(me, timezone=zone)  # 13:30 UTC on the 28th
     assert cli.main(["run", "--offline"]) == 0
-    assert (kit_tree / "research" / "runs" / folder / "report.html").is_file()
-    assert [p.name for p in (kit_tree / "research" / "runs").iterdir()] == [folder]
-    data = items_of(kit_tree, folder)
+    assert (sample_dir_of(kit_tree, folder) / "report.html").is_file()
+    assert [p.name for p in (kit_tree / "research" / "samples").iterdir()] == [folder]
+    data = items_of(kit_tree, folder, "samples")
     assert data["date"] == folder and data["timezone"] == zone
     assert common.parse_iso(data["generated_at"]).utcoffset().total_seconds() == 0  # stored in UTC, shown in the profile's zone
-    assert long_day in visible(page_of(kit_tree, folder))
+    assert long_day in visible(page_of(kit_tree, folder, "samples"))
 
 
 # --- what a run leaves behind --------------------------------------------------------------------------
@@ -125,7 +134,7 @@ def test_timezone_from_profile(kit_tree, me, zone, folder, long_day):
 
 def test_items_json_has_the_agreed_shape(kit_tree):
     pipeline.run(offline=True, say=lambda *a, **k: None)
-    data = items_of(kit_tree)
+    data = items_of(kit_tree, folder="samples")
     assert set(data) == {
         "version", "date", "generated_at", "timezone", "name", "mode", "window_days", "notices", "sources",
         "transcripts", "creators", "videos", "videos_total", "videos_recent", "x_posts", "notes", "performance",
@@ -248,24 +257,87 @@ def test_a_second_run_on_the_same_day_keeps_the_ideas_already_written(kit_tree, 
     assert "Idea that was kept" in page_of(kit_tree)  # and the report shows them
 
 
-def test_an_offline_run_will_not_replace_a_real_one(kit_tree, me, youtube, watching_youtube, capsys):
+def test_an_offline_run_on_the_day_of_a_real_one_leaves_it_alone(kit_tree, me, youtube, watching_youtube, capsys):
     pipeline.run(no_transcribe=True, say=lambda *a, **k: None)
-    before = (run_dir_of(kit_tree) / "items.json").read_bytes()
+    before = {p.name: p.read_bytes() for p in run_dir_of(kit_tree).iterdir()}
+    assert cli.main(["run", "--offline"]) == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert {p.name: p.read_bytes() for p in run_dir_of(kit_tree).iterdir()} == before
+    assert items_of(kit_tree, folder="samples")["mode"] == "offline"
+    # the printout says where the sample went and that its videos are made up
+    assert "Wrote research/samples/2026-10-28/items.json and report.html" in out
+    closing = out.strip().splitlines()[-2:]
+    assert any("made-up" in line and "research/samples/" in line for line in closing), closing
+
+
+def test_the_guard_against_a_sample_over_a_real_run_tells_an_agent_to_ask_first(kit_tree, me, capsys):
+    # A sample only ever goes to research/samples/, so this guard should never fire. If a real pull ever sits
+    # there, the run stops and changes nothing, and its words never send an agent to move or delete a folder.
+    folder = sample_dir_of(kit_tree)
+    folder.mkdir(parents=True)
+    (folder / "items.json").write_text(json.dumps({"mode": "live"}), encoding="utf-8")
     assert cli.main(["run", "--offline"]) == 1
     err = capsys.readouterr().err
-    assert "There is already a research run for 2026-10-28 with your real watch list" in err
-    assert "Move or delete research/runs/2026-10-28 first, or try again tomorrow" in err
-    assert (run_dir_of(kit_tree) / "items.json").read_bytes() == before
+    assert "Ask the creator" in err and "never move or delete" in err.lower()
+    assert "Move or delete" not in err
+    assert json.loads((folder / "items.json").read_text(encoding="utf-8")) == {"mode": "live"}
 
 
-def test_a_real_run_replaces_an_offline_sample_from_earlier_today(kit_tree, me, youtube, watching_youtube):
-    pipeline.run(offline=True, say=lambda *a, **k: None)
-    (run_dir_of(kit_tree) / "ideas.json").write_text(json.dumps([{"n": 1, "title": "Sample idea"}]), encoding="utf-8")
+def test_a_real_run_replaces_a_sample_left_among_the_runs_by_an_older_kit(kit_tree, me, youtube, watching_youtube):
+    folder = run_dir_of(kit_tree)
+    folder.mkdir(parents=True)
+    (folder / "items.json").write_text(json.dumps({"mode": "offline", "videos": []}), encoding="utf-8")
+    (folder / "ideas.json").write_text(json.dumps([{"n": 1, "title": "Sample idea"}]), encoding="utf-8")
     lines = []
     pipeline.run(no_transcribe=True, say=lines.append)
     assert items_of(kit_tree)["mode"] == "live"
-    assert not (run_dir_of(kit_tree) / "ideas.json").exists()  # the sample's ideas went with it
+    assert not (folder / "ideas.json").exists()  # the sample's ideas went with it
     assert "Replaced the offline sample from earlier today" in lines
+
+
+# --- a sample run never shadows the creator's real ideas ----------------------------------------------------------------
+
+
+REAL_IDEA = "Ask the plant what it needs before you water it"
+SAMPLE_IDEA = "A made-up idea from the sample videos"
+
+
+def an_idea_titled(title):
+    return [{"n": 1, "title": title, "angle": "a", "why": "w", "format": "Tutorial", "evidence": [], "hooks": ["One hook."]}]
+
+
+def load_skill_script(monkeypatch, skill, name):
+    """Import .claude/skills/<skill>/kit/<name>.py, with its own folder on the path as it has when it runs."""
+    folder = ROOT / ".claude" / "skills" / skill / "kit"
+    monkeypatch.syspath_prepend(str(folder))
+    spec = importlib.util.spec_from_file_location(f"research_test_{skill.replace('-', '_')}_{name}", folder / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("days_later", [0, 1])
+def test_a_sample_run_after_a_real_one_leaves_hooks_and_both_video_briefs_on_the_real_run(
+    kit_tree, me, youtube, watching_youtube, monkeypatch, capsys, days_later
+):
+    pipeline.run(no_transcribe=True, say=lambda *a, **k: None)
+    (run_dir_of(kit_tree) / "ideas.json").write_text(json.dumps(an_idea_titled(REAL_IDEA)), encoding="utf-8")
+
+    monkeypatch.setattr(common, "utcnow", lambda: NOW + timedelta(days=days_later))
+    sample = pipeline.run(offline=True, say=lambda *a, **k: None)
+    (sample / "ideas.json").write_text(json.dumps(an_idea_titled(SAMPLE_IDEA)), encoding="utf-8")  # as an agent might
+    capsys.readouterr()
+
+    assert cli.main(["hooks", "1"]) == 0
+    out = capsys.readouterr().out
+    assert f"Idea 1: {REAL_IDEA}" in out and "Run: research/runs/2026-10-28" in out and SAMPLE_IDEA not in out
+
+    for skill, script in (("ui-story", "plan_brief"), ("mini-me", "brief")):
+        module = load_skill_script(monkeypatch, skill, script)
+        slug = module.save_idea(1, f"from-{skill}")
+        saved = json.loads((config.work_dir(slug) / "idea.json").read_text(encoding="utf-8"))
+        assert saved["title"] == REAL_IDEA, skill
 
 
 # --- the brain ---------------------------------------------------------------------------------------------------
