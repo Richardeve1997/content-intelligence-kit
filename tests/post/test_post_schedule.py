@@ -626,6 +626,36 @@ def test_cancel_waits_its_turn_too(reel, stub, when, capsys):
     assert done["result"].status == "cancelled"
 
 
+def test_list_waits_its_turn_when_it_has_to_search_for_an_interrupted_post(reel, stub, when, capsys):
+    # The search keeps the post it finds in the record, so it takes the video's lock, as schedule, cancel and
+    # reschedule do. Another run could be writing the same record.
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    capsys.readouterr()
+    done = {}
+    with store.locked(reel.folder / ".post.lock"):
+        thread = threading.Thread(target=lambda: done.update(result=post.list_scheduled(reel.slug, client=stub.client())))
+        thread.start()
+        err = ""
+        for _ in range(500):
+            err += capsys.readouterr().err
+            if "Waiting for it to finish" in err:
+                break
+            time.sleep(0.01)
+        assert "Another run is posting this video." in err and "result" not in done
+    thread.join(10)
+    (listed,) = done["result"]
+    assert listed.status == "scheduled" and receipt(reel, "instagram")["post_id"] == listed.post_id
+
+
+def test_list_with_nothing_to_search_for_does_not_wait_for_the_lock(reel, stub, when, capsys):
+    run(reel, stub, ["instagram"], when)
+    capsys.readouterr()
+    with store.locked(reel.folder / ".post.lock"):
+        (listed,) = post.list_scheduled(reel.slug, client=stub.client())  # only reads, so it never waits
+    assert listed.status == "scheduled" and "Waiting" not in capsys.readouterr().err
+
+
 # --- the time ------------------------------------------------------------------------------------------------------
 
 

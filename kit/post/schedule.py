@@ -682,18 +682,32 @@ def _adopt_interrupted(
     )
 
 
+def _records(folder: Path) -> list[tuple[str, Path, dict]]:
+    """(platform, record file, record) for each platform this video has a record for."""
+    found = [(name, *_receipt(folder, name)) for name in config.PLATFORMS]
+    return [(name, path, receipt) for name, path, receipt in found if receipt]
+
+
 def list_scheduled(slug: str, *, client: zernio.Client | None = None) -> list[Result]:
     """What was scheduled for this video, as Zernio reports it now. Needs a key only when there is something to look up.
 
     A create whose answer never arrived may still have made its post, so `list` looks for it by its title, as
     `schedule`, `cancel` and `reschedule` do. A post it finds is kept in the record and said to have been found.
+    That search writes the record, so it holds the video's lock, as the others do; a list that only reads does not.
     """
     profile = config.load_profile()
     folder = _folder(slug)
-    records = [(name, *_receipt(folder, name)) for name in config.PLATFORMS]
-    records = [(name, path, receipt) for name, path, receipt in records if receipt]
+    records = _records(folder)
     if any(receipt.get("post_id") or receipt.get("create_attempted") for _, _, receipt in records) and client is None:
         client = zernio.Client.from_env()
+    if not any(receipt.get("create_attempted") and not receipt.get("post_id") for _, _, receipt in records):
+        return _listed(records, client, profile, slug)
+    with store.locked(folder / LOCK, WAITING):
+        # read again: the run that held the lock may have recorded the post in the meantime
+        return _listed(_records(folder), client, profile, slug)
+
+
+def _listed(records: list[tuple[str, Path, dict]], client, profile, slug: str) -> list[Result]:
     zone = ZoneInfo(profile.timezone)
     results = []
     for name, path, receipt in records:
