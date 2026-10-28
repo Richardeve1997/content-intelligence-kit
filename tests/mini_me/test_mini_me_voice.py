@@ -346,3 +346,18 @@ def test_clone_with_no_copy_yet_stops_instead_of_using_a_stock_voice(kit_home, e
     assert voice.main(["auto", "example-reel"]) == voice.WAITING
     out = capsys.readouterr().out
     assert "copy of your voice" in out and "python -m kit.voice clone" in out and "work/example-reel/take/" in out
+
+
+def test_the_voice_step_says_which_elevenlabs_voice_read_it(kit_home, example_me, heard, monkeypatch, capsys):
+    """The creator never picks the stock voice, so the step names it, and they can say if it is the wrong one."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    script = config.work_dir("example-reel") / "script.md"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# Basil\n\n## Narration\n\nFresh basil in March.\n")
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["auto", "example-reel"]) == 0
+    assert "Read by ElevenLabs in the stock voice Ash." in capsys.readouterr().out
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["elevenlabs", "example-reel", "--voice-id", "mine"]) == 0
+    assert "Read by ElevenLabs in the voice you named." in capsys.readouterr().out

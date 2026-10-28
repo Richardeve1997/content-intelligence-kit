@@ -495,6 +495,7 @@ def from_elevenlabs(text: str, slug: str, voice_id: str | None = None) -> VO:
     text = narration(text)
     if not text:
         raise KitError(f"There is no narration to read. Write it in work/{slug}/script.md under ## Narration.")
+    stock = not voice_id
     if voice_id:
         voice_name = "your saved voice" if voice_id == saved_voice() else "the voice you named"
     else:
@@ -506,7 +507,7 @@ def from_elevenlabs(text: str, slug: str, voice_id: str | None = None) -> VO:
     work = Path(tempfile.mkdtemp(prefix=".speech-", dir=folder))
     try:
         speech = _speech(text, voice_id, model, settings, key, work)
-        meta = {"source": "elevenlabs", "model": model, "voice": voice_name, "speed": settings.get("speed")}
+        meta = {"source": "elevenlabs", "model": model, "voice": voice_name, "stock": stock, "speed": settings.get("speed")}
         if abs(tempo - 1.0) > 1e-6:
             meta["tempo"] = tempo
         return _make(speech, slug, clean=False, tighten=True, tempo=tempo, meta=meta)
@@ -632,6 +633,13 @@ def clone(name: str, samples: list[Path]) -> str:
 def _report(vo: VO) -> None:
     seconds = media.probe(vo.audio).duration
     print(f"voice-over {vo.audio} ({seconds:.1f} s), {len(vo.words)} words in {vo.audio.parent / 'words.json'}")
+    try:
+        meta = json.loads((vo.audio.parent / "vo.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if meta.get("source") == "elevenlabs" and meta.get("voice"):
+        stock = "the stock voice " if meta.get("stock") else ""
+        print(f"Read by ElevenLabs in {stock}{meta['voice']}.")
 
 
 def _script(slug: str) -> str:

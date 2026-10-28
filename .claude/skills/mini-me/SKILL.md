@@ -61,7 +61,7 @@ A copy of the creator's voice is made only with their consent, which the profile
 
 The pace. The voice-over is made at its final pace before anything is timed to it, so the pictures land on the words as they are heard and the finish runs at 1.0. ElevenLabs reads at its speed setting of 1.15, which sounds more natural than stretching the sound afterwards. A recording gets the same 1.15 with a pitch-keeping tempo change, the factor a filmed Reel is sped up by. Pauses over 0.35 s are cut to 0.24 s, because the style has no dead air. `python -m kit.voice record <video> --keep-pace` keeps the creator's own pace when they ask for it. When a recording is paced, the voice step prints one line saying so. After the creator's first voice-over, tell them in one sentence that their recording was sped up to 1.15x with long pauses cut, and that they can keep their own pace (`python -m kit.voice auto <video> --keep-pace`, or say "keep my pace").
 
-The voice step writes `vo.m4a` at -13 LUFS, and `words.json` with every word timed by the speech model and aligned. Read `words.json` against the narration: a name the model spelt wrong is fine to leave, because the pages are edited by hand next.
+The voice step writes `vo.m4a` at -13 LUFS, and `words.json` with every word timed by the speech model and aligned. Read `words.json` against the narration: a name the model spelt wrong is fine to leave, because the pages are edited by hand next. With ElevenLabs the step also names the voice that read it. The creator never picks a stock voice, so after their first ElevenLabs voice-over, tell them its name.
 
 ## The pages
 
