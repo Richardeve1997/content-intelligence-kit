@@ -287,9 +287,11 @@ def check_uv(probe: Probe) -> Result:
 
 
 def check_python(probe: Probe) -> Result:
+    """Asks uv without its cache: an agent's sandbox cannot write the cache in the home folder, and uv then
+    fails as if Python 3.11 were missing."""
     if not probe.which("uv"):
         return "missing", FIX_PYTHON
-    result = probe.run(["uv", "python", "find", "3.11"], timeout=30)
+    result = probe.run(["uv", "python", "find", "--no-cache", "3.11"], timeout=30)
     if result and result[0] == 0 and result[1].strip():
         return "ok", ""
     return "missing", FIX_PYTHON

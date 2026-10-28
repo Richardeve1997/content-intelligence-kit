@@ -84,7 +84,7 @@ def fake(doctor):
             self.outputs = {
                 "ffmpeg -hide_banner -encoders": (0, ENCODERS),
                 "ffmpeg -hide_banner -filters": (0, FILTERS),
-                "uv python find 3.11": (0, "/opt/homebrew/bin/python3.11\n"),
+                "uv python find --no-cache 3.11": (0, "/opt/homebrew/bin/python3.11\n"),
                 "node --version": (0, "v22.11.0\n"),
                 "npx --no-install hyperframes --version": (0, PIN + "\n"),
             }
@@ -194,6 +194,15 @@ def test_a_healthy_mac_passes_every_required_check(doctor, fake):
     assert "missing" not in {row["status"] for row in rows}
 
 
+def test_the_python_row_asks_uv_without_its_cache(doctor, fake):
+    # An agent's sandbox (Codex runs commands in one) cannot write uv's cache in the home folder, and a plain
+    # `uv python find` then fails as if Python 3.11 were missing. Without the cache it answers in or out of one.
+    probe = fake()
+    assert find(rows_of(doctor, probe), "Python 3.11")["status"] == "ok"
+    assert "uv python find --no-cache 3.11" in probe.calls
+    assert "uv python find 3.11" not in probe.calls
+
+
 def test_the_hyperframes_row_names_the_pinned_version(doctor, fake):
     assert PIN in find(rows_of(doctor, fake()), "HyperFrames")["check"]
 
@@ -249,7 +258,7 @@ COMMAND_FIXES = [
     pytest.param("uv", lambda p: p.programs.pop("uv"), "brew install uv", id="no-uv"),
     pytest.param(
         "Python 3.11",
-        lambda p: p.outputs.update({"uv python find 3.11": (2, "error: no interpreter found\n")}),
+        lambda p: p.outputs.update({"uv python find --no-cache 3.11": (2, "error: no interpreter found\n")}),
         "uv python install 3.11",
         id="no-python-311",
     ),
