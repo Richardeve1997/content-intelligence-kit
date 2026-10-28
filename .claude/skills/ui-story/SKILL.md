@@ -25,7 +25,7 @@ Everything for one video lives in `work/<video>/`:
 1. Read the creator's rules for this skill with `kit.rules.read("ui-story")`. In a shell: `uv run python -m kit.rules read ui-story`. Follow them; they win over anything below.
 2. Work out which part they want. "Plan the video for number 2" is the plan. "Here's my raw take, edit it" is the edit. When `plan.md` exists and `take/` holds a file, it is the edit.
 3. For the plan, follow "The plan". Stop when `plan.md` is written and shown to the creator: filming is theirs.
-4. For the edit, follow "The look" and "The edit", in order. Run the checks in "Before handing over", then the `review` skill. Fix what it finds and review again, at most 5 cycles.
+4. For the edit, follow "The look" and "The edit", in order. A take that comes with no plan has no folder yet: agree a short video name with the creator (lower case words joined by dashes, such as `example-reel`), run `mkdir -p work/<video>/take/`, and link the take into it with `ln -s`, never a copy. Run the checks in "Before handing over", then the `review` skill. Fix what it finds and review again, at most 5 cycles.
 5. Give the creator the path to `work/<video>/final.mp4` and say what the review found.
 
 ## The plan

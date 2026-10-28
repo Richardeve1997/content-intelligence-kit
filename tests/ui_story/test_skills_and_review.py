@@ -243,3 +243,16 @@ def test_prep_makes_the_sources_folder_first(tmp_path, monkeypatch):
         prep.main(["example-reel"])
     assert "no take" in str(caught.value).lower()
     assert (tmp_path / "kit" / "work" / "example-reel" / "build" / "sources").is_dir()
+
+
+# --- the polish pass ---------------------------------------------------------------------------------------
+
+
+def test_an_edit_with_no_plan_names_the_video_and_links_the_take_first():
+    """A creator who filmed first and says "edit my take" has no work/<video>/ yet. The steps say how to name the
+    video and link the take before the recipe's prep.py, which expects the take in work/<video>/take/."""
+    steps = text(SKILLS["ui-story"]).split("## Steps")[1].split("## The plan")[0]
+    edit_step = next(line for line in steps.splitlines() if line.startswith("4. For the edit"))
+    assert "no plan" in edit_step, "the edit step covers a take that skipped the plan"
+    assert "video name" in edit_step and "work/<video>/take/" in edit_step and "ln -s" in edit_step, edit_step
+    assert "never" in edit_step and "copy" in edit_step, "the raw take is linked, never copied"
