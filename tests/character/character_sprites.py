@@ -143,16 +143,22 @@ def draw_figure(
     shirt: tuple[int, int, int] | None = None,
     hat: int = 0,
     hat_colour: tuple[int, int, int] = (176, 44, 44),
+    neck: int = 5,
+    collar: tuple[int, int, int] | None = None,
 ) -> tuple[np.ndarray, dict]:
     """One figure on a 120 x 170 transparent canvas. Returns (RGBA uint8 array, info).
 
-    info holds "face", "left_eye", "right_eye" and "mouth" as (x0, y0, x1, y1) inclusive canvas boxes, and "air",
-    how far the figure is lifted off the ground. The face box is the skin drawn around the eyes and mouth.
+    info holds "face", "left_eye", "right_eye", "mouth" and "body" (the top, from the shoulders down) as
+    (x0, y0, x1, y1) inclusive canvas boxes, and "air", how far the figure is lifted off the ground. The face
+    box is the skin drawn around the eyes and mouth.
 
     Options draw other looks: `skin`, `hair` and `mouth` colours (the cheeks are a shade of the skin); `glasses`,
     dark frames round both eyes joined by a bridge and running out to the hair, so the eyes are not closed in by
     skin; `beard`, a beard in that colour over the jaw and chin with a moustache and the mouth showing through;
-    `shirt`, the colour of the top; `hat`, a hat that many rows tall on top of the hair, with a brim.
+    `shirt`, the colour of the top; `hat`, a hat that many rows tall on top of the hair, with a brim; `neck`, how
+    many rows of neck show between the chin and the top (5, or fewer for a short neck, 0 for none: the body moves
+    up to meet the head); `collar`, a high collar in that colour over the neck, wider than the neck and touching
+    the chin, like a turtleneck.
     """
     body: dict[tuple[int, int], tuple[int, int, int]] = {}
     air = 10 if pose == "celebrate" else 0
@@ -201,16 +207,23 @@ def draw_figure(
     if hat:
         _box(body, 6, -hat, 49, 1, hat_colour)  # the crown, over the top of the hair
         _box(body, 2, 2, 53, 3, hat_colour)  # the brim
-    # body
-    _box(body, 24, 37, 31, 41, skin)  # neck
-    _box(body, 15, 42, 40, 77, shirt)
-    _arms(body, pose, step, skin, sleeve)
-    _box(body, 16, 78, 39, 101, TROUSERS)
+    # body: the neck under the chin, then everything from the shoulders down, lifted to meet a shorter neck
+    if neck > 0:
+        _box(body, 24, 37, 31, 36 + neck, skin)
+        if collar is not None:
+            _box(body, 16, 37, 39, 36 + neck, collar)
+    lower: dict[tuple[int, int], tuple[int, int, int]] = {}
+    _box(lower, 15, 42, 40, 77, shirt)
+    _arms(lower, pose, step, skin, sleeve)
+    _box(lower, 16, 78, 39, 101, TROUSERS)
     for y in range(88, 102):
-        body.pop((27, y), None)
-        body.pop((28, y), None)
-    _box(body, 14, 102, 26, 109, SHOES)
-    _box(body, 29, 102, 41, 109, SHOES)
+        lower.pop((27, y), None)
+        lower.pop((28, y), None)
+    _box(lower, 14, 102, 26, 109, SHOES)
+    _box(lower, 29, 102, 41, 109, SHOES)
+    lift = 5 - neck
+    for (x, y), colour in lower.items():
+        body[(x, y - lift)] = colour
 
     rgba = np.zeros((CANVAS_H, CANVAS_W, 4), np.uint8)
     for (x, y), colour in body.items():
@@ -237,6 +250,7 @@ def draw_figure(
         "left_eye": canvas_box(LEFT_EYE_BODY),
         "right_eye": canvas_box(RIGHT_EYE_BODY),
         "mouth": canvas_box(MOUTH_BODY),
+        "body": canvas_box((15, 42 - lift, 40, 77 - lift)),
         "air": air,
     }
     return rgba, info

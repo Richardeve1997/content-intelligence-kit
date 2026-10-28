@@ -187,6 +187,53 @@ def test_a_beard_stays_a_beard_when_the_mouth_opens():
         assert (after != before).any()
 
 
+# --- where the head ends: short necks, no neck, collars ---------------------------------------------------------------
+
+NECKS = {
+    "a short neck": dict(neck=3),
+    "a one-row neck": dict(neck=1),
+    "no neck": dict(neck=0),
+    "a high collar": dict(collar=(64, 116, 178)),  # a turtleneck in the top's own colour, wider than the neck
+    "a cream collar on a short neck": dict(neck=2, collar=(236, 228, 210)),
+    "no neck, a top the colour of the hair": dict(neck=0, hair=(30, 26, 28), shirt=(30, 26, 28)),
+    "a beard and a short neck": dict(neck=2, hair=BEARD, beard=BEARD),
+    "a beard and no neck": dict(neck=0, hair=BEARD, beard=BEARD),
+}
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("look", list(NECKS))
+def test_the_head_ends_just_under_the_chin_whatever_is_below_it(look, scale):
+    """A top right under the chin, a high collar, or a beard over a short neck never stretches the head down
+    into the body: the neck row stays within a few rows of the chin, and the eyes and mouth are where drawn."""
+    rgba, drawn = _scaled(*draw_figure("idle", **NECKS[look]), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin, body = drawn["face"][3], drawn["body"][1]
+    assert chin < face.neck <= min(body, chin + 1 + 2 * scale), (face.neck, chin, body)
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("look", ["a short neck", "a high collar", "no neck, a top the colour of the hair"])
+def test_the_head_lock_never_pastes_the_front_views_body_over_a_pose(look, scale):
+    """The pose step copies everything above the neck row from the front view onto a pose. With the neck in
+    the right place, arms across or beside the chest keep every cell of the body."""
+    from kit.character import poses
+
+    idle, drawn = _scaled(*draw_figure("idle", **NECKS[look]), scale)
+    face = faces.locate(idle)
+    body = drawn["body"][1]
+    for pose in ("thumbs_up", "shrug", "hold_card", "wave"):
+        before, _ = _scaled(*draw_figure(pose, **NECKS[look]), scale)
+        after = before.copy()
+        poses.head_lock(after, idle, face, 0, 0)
+        changed = (after != before).any(2)
+        assert not changed[body:].any(), f"{pose}: {int(changed[body:].sum())} cells of the body changed"
+
+
 # --- marking the face by hand -------------------------------------------------------------------------------------------
 
 
@@ -217,6 +264,20 @@ def test_a_face_that_cannot_be_measured_can_be_marked_by_hand():
     assert face is not None and face.mouth == faces.Box(54, 68, 12, 4)
     states = faces.face_states(rgba, face)
     assert set(states.patches) == {"mouth_closed", "mouth_mid", "mouth_open", "eyes_open", "eyes_closed"}
+
+    face, _ = faces.measure(rgba, {"eyes": [46, 55, 30, 8], "mouth": [54, 68, 12, 4], "neck": 80})
+    assert face.neck == 80
+
+
+def test_a_marked_neck_row_replaces_the_measured_one():
+    rgba, drawn = draw_figure("idle", neck=3)
+    face = faces.locate(rgba)
+
+    marked = faces.apply_marks(rgba, face, {"neck": face.neck + 3})
+
+    assert marked.neck == face.neck + 3
+    assert (marked.left_eye, marked.right_eye, marked.mouth) == (face.left_eye, face.right_eye, face.mouth)
+    assert faces.apply_marks(rgba, face, {"neck": face.mouth.y}).neck == face.mouth.y1, "the head always holds the mouth"
 
 
 @pytest.mark.parametrize("text", ["1,2,3", "a,b,c,d", "1,2,0,4", "", "1.5,2,3,4"])

@@ -154,6 +154,34 @@ def test_a_new_sheet_drops_the_marks_but_a_resnap_keeps_them(me, capsys):
     assert _state(me)["face_marks"] is None, "marks read off the old picture are dropped"
 
 
+def test_the_neck_row_can_be_marked_and_approval_uses_it(me, capsys):
+    from kit.character import faces
+
+    _sheet_drawn(me, capsys)
+    face, _ = faces.measure(faces.front_canvas(me, _state(me)), None)
+    row = face.neck + 2
+
+    assert cli.main(["faces", "--neck", str(row)]) == 0
+    assert "marked by hand" in capsys.readouterr().out
+    assert _state(me)["face_marks"] == {"neck": row}
+    assert cli.main(["approve", "sheet"]) == 0
+    assert faces.FaceBox.from_dict(_state(me)["face"]).neck == row, "the pose step copies the head down to this row"
+
+
+def test_a_neck_row_above_the_mouth_or_off_the_canvas_is_refused_and_not_kept(me, capsys):
+    from kit.character import faces
+
+    _sheet_drawn(me, capsys)
+    face, _ = faces.measure(faces.front_canvas(me, _state(me)), None)
+
+    assert cli.main(["faces", "--neck", str(face.mouth.y)]) == 1
+    err = capsys.readouterr().err
+    assert "above the bottom of the mouth" in err and "Traceback" not in err
+    assert cli.main(["faces", "--neck", "999"]) == 1
+    assert "off the 245 x 284 canvas" in capsys.readouterr().err
+    assert _state(me)["face_marks"] is None, "a refused mark is not kept"
+
+
 @pytest.mark.parametrize("box", ["300,10,4,4", "10,10,4,4x"])
 def test_a_mark_off_the_canvas_or_badly_written_is_a_plain_error(me, capsys, box):
     _sheet_drawn(me, capsys)
@@ -176,11 +204,25 @@ def test_words_with_apostrophes_can_come_from_standard_input(me, capsys, monkeyp
     assert "Only one of" in capsys.readouterr().err
 
 
-def test_redraw_explains_a_move_that_does_not_exist_and_the_idle_pose(me, capsys):
+def test_redraw_explains_a_move_that_does_not_exist_and_the_idle_pose_before_a_sheet(me, capsys):
     assert cli.main(["start", "--description", "someone", "--outfit", "a shirt"]) == 0
     capsys.readouterr()
     assert cli.main(["redraw", "shrug", "--move"]) == 1
     assert "shrug has no in-betweens" in capsys.readouterr().err
+    assert cli.main(["redraw", "idle"]) == 1
+    err = capsys.readouterr().err
+    assert "no sheet is drawn yet" in err and "kit.character sheet" in err and "approved" not in err
+
+
+def test_redraw_idle_points_at_the_sheet_until_it_is_approved(me, capsys):
+    _sheet_drawn(me, capsys)
+    assert cli.main(["redraw", "idle"]) == 1
+    err = capsys.readouterr().err
+    assert "the sheet is not approved yet, so draw the sheet again" in err and "kit.character describe" in err
+    assert "move the me/character folder" not in err
+
+    assert cli.main(["approve", "sheet"]) == 0
+    capsys.readouterr()
     assert cli.main(["redraw", "idle"]) == 1
     err = capsys.readouterr().err
     assert "move the me/character folder somewhere else" in err and "image calls" in err

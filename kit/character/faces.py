@@ -17,19 +17,22 @@ locate() reads the face from the picture rather than from fixed rectangles, so i
    beside it (the white, highlights) join it.
 5. The mouth is the biggest mark below the eyes and between them, keeping to the lowest when there are a
    nose and a mouth. The search reaches down into a beard; a colour that fills a large area there (the skin,
-   the beard) is not the mouth.
+   the beard) is not the mouth. A beard is followed only while it is part of the head: its colour is one the
+   head has around the face (the hair, or the beard on the cheeks), and it stops where the figure narrows to
+   the neck. A top or a collar right under the chin is the body, never a beard.
 6. The neck is the narrowest row below the face. Everything above it is the head that the pose step copies
    onto other drawings, so the face stays the same in every pose.
 
-make() draws the face board: the head with a coordinate grid, the measured boxes and the face states. When a
-box is in the wrong place, or no face is found, the creator marks the eyes and the mouth by hand; the marks
-are kept in the character record and every later step uses them.
+make() draws the face board: the head with a coordinate grid, the measured boxes, a line where the head ends,
+and the face states. When a box or the line is in the wrong place, or no face is found, the creator marks the
+eyes, the mouth and the neck row by hand; the marks are kept in the character record and every later step
+uses them.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +45,7 @@ from kit.config import KitError
 
 SKIN_RANGE = 22.0  # the widest Lab distance from the skin that still counts as one of its shades
 NEUTRAL_CHROMA = 6.0  # a light colour greyer than this is a white (eye whites, teeth), never skin
-CHIN_NARROWING = 0.6  # the face ends where the skin patch is narrower than this share of its widest row
+CHIN_NARROWING = 0.6  # the face ends where the skin is narrower than this share of its widest row, a beard where the figure is
 EYE_AREA_SHARE = 0.15  # an eye covers at most this share of the face; a bigger "eye" means a wrong guess
 AREA_SHARE = 0.25  # below the eyes, a colour covering more than this share fills an area (skin, a beard)
 TRIES = 10  # how many colours down the middle of the head are tried as the skin, longest run first
@@ -314,32 +317,55 @@ def _gap(s: _Sprite) -> int:
     return max(3, int(round(0.03 * s.height)))
 
 
-def _beard_end(s: _Sprite, family_idx: list[int], x0: int, x1: int, skin_end: int, face_cx: float) -> int:
-    """The row below a beard, or `skin_end` when there is none. A beard row is mostly a colour that is neither
-    skin nor the outline, across the face and in the middle of the chin; a few rows of skin between (above a
-    moustache, say) do not end it."""
+def _plain(s: _Sprite, family_idx: list[int]) -> list[int]:
+    """The skin's colours and the outline's: what a face is made of, as opposed to hair, a beard or clothes."""
+    return list(family_idx) + ([s.colours.index(s.ink)] if s.ink in s.colours else [])
+
+
+def _head_colours(s: _Sprite, plain: list[int], x0: int, x1: int, y0: int, skin_end: int) -> set[int]:
+    """The colours the head has around the face: everything above it (the hair, a hat) and beside it down to
+    the end of the skin (hair at the sides, sideburns), apart from the skin and the outline."""
+    above = s.grid[s.top : y0]
+    beside = np.concatenate([s.grid[y0:skin_end, :x0].ravel(), s.grid[y0:skin_end, x1:].ravel()])
+    found = set(np.unique(above[above >= 0]).tolist()) | set(np.unique(beside[beside >= 0]).tolist())
+    return found - set(plain)
+
+
+def _beard_end(s: _Sprite, family_idx: list[int], x0: int, x1: int, y0: int, skin_end: int, face_cx: float) -> int:
+    """The row below a beard, or `skin_end` when there is none.
+
+    A beard row is mostly a colour the head already has around the face (the hair, or the beard on the cheeks
+    beside the skin), across the face and in the middle of the chin; a few rows of skin between (above a
+    moustache, say) do not end it. A beard is part of the head, so the search stops where the figure narrows to
+    the neck. A "beard" still going where the search ends is the body (a top or a collar right under the chin),
+    so then there is no beard."""
     width = x1 - x0
     half = max(1, int(0.15 * width))
-    plain = list(family_idx) + ([s.colours.index(s.ink)] if s.ink in s.colours else [])
+    plain = _plain(s, family_idx)
+    head = _head_colours(s, plain, x0, x1, y0, skin_end)
     deepest = min(s.bottom, skin_end + max(4, int(0.15 * s.height)))
     last, misses = None, 0
     for y in range(skin_end, deepest):
+        if s.solid[y, x0:x1].sum() < CHIN_NARROWING * width:
+            break  # the figure narrows to the neck: the head, and any beard on it, ends here
         row = s.grid[y, x0:x1]
         row = row[row >= 0]
         middle = s.grid[y, max(0, int(face_cx) - half) : int(face_cx) + half + 1]
         middle = middle[middle >= 0]
-        beard = (
-            len(row) >= 0.5 * width
-            and np.isin(row, plain, invert=True).sum() >= 0.4 * width
-            and len(middle) > 0
-            and np.isin(middle, plain, invert=True).mean() >= 0.5
-        )
+        if len(middle) and np.isin(middle, plain).mean() > 0.5:
+            # still the face, skin down the middle: what sits beside it is on the head (a beard on the cheeks)
+            head |= set(row[np.isin(row, plain, invert=True)].tolist())
+            beard = False
+        else:
+            beard = len(middle) > 0 and np.isin(row, list(head)).sum() >= 0.4 * width
         if beard:
             last, misses = y, 0
         else:
             misses += 1
             if misses > _gap(s):
                 break
+    else:
+        return skin_end  # nothing ended it inside the search: the body under the chin, not a beard
     return last + 1 if last is not None else skin_end
 
 
@@ -417,7 +443,7 @@ def _measure(s: _Sprite, skin: tuple[int, int, int], seed_row: int) -> FaceBox:
     x0, x1 = int(cols[0]), int(cols[-1]) + 1
     features = span & ~face & s.solid
     face_cx = (x0 + x1) / 2
-    beard_end = _beard_end(s, family_idx, x0, x1, y1, face_cx)
+    beard_end = _beard_end(s, family_idx, x0, x1, y0, y1, face_cx)
     split_y = y0 + int(0.62 * (max(y1, beard_end) - y0))  # the eyes sit in the upper part of the face and beard
     columns = np.arange(features.shape[1])[None, :]
     lightness = art.lab_of(np.array(s.colours, dtype=np.float64))[:, 0]
@@ -565,20 +591,26 @@ def _face_from_marks(canvas: np.ndarray, eyes: Box, mouth: Box) -> FaceBox:
 
 
 def apply_marks(canvas: np.ndarray, face: FaceBox | None, marks: dict | None) -> FaceBox | None:
-    """The face with the creator's marks in place of what was measured. With no measured face, both the eyes
-    and the mouth must be marked; with only one of them the result is None."""
+    """The face with the creator's marks in place of what was measured: one box round both eyes, the mouth's
+    box, and the neck row (the first row under the head). With no measured face, both the eyes and the mouth
+    must be marked; with only one of them the result is None. The head always reaches down past the mouth."""
     marks = marks or {}
     eyes = Box(*marks["eyes"]) if marks.get("eyes") else None
     mouth = Box(*marks["mouth"]) if marks.get("mouth") else None
+    neck = marks.get("neck")
     if face is None:
-        return _face_from_marks(canvas, eyes, mouth) if eyes and mouth else None
+        if not (eyes and mouth):
+            return None
+        face = _face_from_marks(canvas, eyes, mouth)
+        return face if neck is None else replace(face, neck=max(int(neck), face.mouth.y1))
     if eyes:
         left, right = _split_eyes(canvas, eyes, skin_colours(canvas, face.skin))
     else:
         left, right = face.left_eye, face.right_eye
     mouth = mouth or face.mouth
     box = _union(_union(face.box, _union(left, right)), mouth)
-    return FaceBox(box.x, box.y, box.w, box.h, left, right, mouth, face.top, max(face.neck, mouth.y1), face.skin)
+    neck = max(face.neck if neck is None else int(neck), mouth.y1)
+    return FaceBox(box.x, box.y, box.w, box.h, left, right, mouth, face.top, neck, face.skin)
 
 
 def front_canvas(folder: Path, state: dict[str, Any]) -> np.ndarray:
@@ -737,14 +769,34 @@ def _outline(draw: ImageDraw.ImageDraw, box: Box, k: int, origin: tuple[int, int
     x1, y1 = margin + (box.x1 - ox) * k - 1, margin + (box.y1 - oy) * k - 1
     draw.rectangle([x0 - 2, y0 - 2, x1 + 2, y1 + 2], outline=art.INK, width=3)
     draw.rectangle([x0, y0, x1, y1], outline=(255, 255, 255), width=1)
-    draw.text((x0, max(0, y0 - 22)), label, fill=art.INK, font=art.label_font(16))
+    _label(draw, x0 - 2, max(0, y0 - 27), label)
+
+
+def _label(draw: ImageDraw.ImageDraw, x: int, y: int, text: str) -> None:
+    """A name on a small white label with its top-left corner at (x, y), so it reads over any colour."""
+    font = art.label_font(16)
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    draw.rectangle([x, y, x + (right - left) + 10, y + 23], fill=(255, 255, 255), outline=art.INK)
+    draw.text((x + 5 - left, y + 3 - top + 3), text, fill=art.INK, font=font)
+
+
+def _neck_line(draw: ImageDraw.ImageDraw, row: int, k: int, origin: tuple[int, int], margin: int, right: int) -> None:
+    """A line across the board on top of the neck row, black with a white edge, named at its right end on a
+    white label so the name reads over hair or clothes of any colour."""
+    ox, oy = origin
+    y = margin + (row - oy) * k
+    draw.line([margin, y + 1, right, y + 1], fill=art.INK, width=3)
+    draw.line([margin, y - 1, right, y - 1], fill=(255, 255, 255), width=1)
+    label = f"neck: row {row}"
+    left, _, end, _ = draw.textbbox((0, 0), label, font=art.label_font(16))
+    _label(draw, right - (end - left) - 16, y - 27, label)
 
 
 def _board(canvas: np.ndarray, face: FaceBox | None, states: FaceStates | None, *, marked: bool, note: str | None) -> Image.Image:
     bounds = art.content_box(canvas)
     if face is not None:
         x0, y0 = max(0, face.x - 14), max(0, face.top - 4)
-        x1, y1 = min(canvas.shape[1], face.x1 + 14), min(canvas.shape[0], face.neck + 6)
+        x1, y1 = min(canvas.shape[1], face.x1 + 14), min(canvas.shape[0], face.neck + 12)
     else:
         x0, y0, x1 = bounds[0], bounds[1], bounds[2]
         y1 = bounds[1] + int(0.6 * (bounds[3] - bounds[1]))
@@ -766,6 +818,7 @@ def _board(canvas: np.ndarray, face: FaceBox | None, states: FaceStates | None, 
     if face is not None:
         _outline(draw, face.eyes, k, (x0, y0), margin, "eyes")
         _outline(draw, face.mouth, k, (x0, y0), margin, "mouth")
+        _neck_line(draw, face.neck, k, (x0, y0), margin, head.width)
     heads = []
     if states is not None:
         hx0, hy0, hx1, hy1 = x0, y0, x1, y1
@@ -778,40 +831,45 @@ def _board(canvas: np.ndarray, face: FaceBox | None, states: FaceStates | None, 
             heads.append((art.flatten(frame[hy0:hy1, hx0:hx1], art.BOARD_BG), label, ""))
     lines = []
     if face is not None:
-        lines.append(f"Eyes: {face.eyes.text()}    Mouth: {face.mouth.text()}" + ("    (marked by hand)" if marked else ""))
-        lines.append("If a box sits in the wrong place, mark it by hand: uv run python -m kit.character faces "
-                     "--eyes x,y,w,h --mouth x,y,w,h")  # fmt: skip
+        lines.append(f"Eyes: {face.eyes.text()}    Mouth: {face.mouth.text()}    Neck: row {face.neck}"
+                     + ("    (marked by hand)" if marked else ""))  # fmt: skip
+        lines.append("The head is everything above the neck line, and it should end just under the chin. If a box or "
+                     "the line is in the wrong place,")  # fmt: skip
+        lines.append("mark it by hand: uv run python -m kit.character faces --eyes x,y,w,h --mouth x,y,w,h --neck row")
     if note:
         lines.append(note)
     if face is None:
-        lines.append("Mark it by hand: read the boxes off this grid (one box round both eyes) and run "
-                     "uv run python -m kit.character faces --eyes x,y,w,h --mouth x,y,w,h")  # fmt: skip
-    title = ("Face check: the eyes and mouth" + (" as marked" if marked else " as measured") + ", and the face states"
-             if face is not None else "Face check: the face could not be measured")  # fmt: skip
+        lines.append("Mark it by hand: read the boxes off this grid (one box round both eyes) and run")
+        lines.append("uv run python -m kit.character faces --eyes x,y,w,h --mouth x,y,w,h")
+    title = ("Face check: the eyes, the mouth and the neck line" + (" as marked" if marked else " as measured")
+             + ", and the face states" if face is not None else "Face check: the face could not be measured")  # fmt: skip
     states_img = art.board(heads, title="", columns=4, scale=max(2, k // 2)) if heads else None
-    width = max(head.width + (states_img.width if states_img else 0) + 48, 900)
+    measure_text = ImageDraw.Draw(head)
+    widest = max([measure_text.textlength(title, font=art.label_font(26))]
+                 + [measure_text.textlength(line, font=art.label_font(17)) for line in lines])  # fmt: skip
+    width = int(max(head.width + (states_img.width + 24 if states_img else 0) + 48, widest + 48, 900))
     height = 70 + max(head.height, states_img.height if states_img else 0) + 30 * len(lines) + 40
     page = Image.new("RGB", (width, height), art.BOARD_BG)
     pen = ImageDraw.Draw(page)
     pen.text((24, 20), title, fill=art.INK, font=art.label_font(26))
     page.paste(head, (24, 64))
     if states_img is not None:
-        page.paste(states_img, (24 + head.width + 24, 40))
-    y = 64 + max(head.height, (states_img.height - 24) if states_img else 0) + 16
+        page.paste(states_img, (24 + head.width + 24, 64))
+    y = 64 + max(head.height, states_img.height if states_img else 0) + 16
     for line in lines:
         pen.text((24, y), line, fill=art.INK, font=art.label_font(17))
         y += 30
     return page
 
 
-def make(folder: Path, *, eyes: Box | None = None, mouth: Box | None = None, clear: bool = False,
-         open_rows: int | None = None) -> Path:  # fmt: skip
+def make(folder: Path, *, eyes: Box | None = None, mouth: Box | None = None, neck: int | None = None,
+         clear: bool = False, open_rows: int | None = None) -> Path:  # fmt: skip
     """Measure the face on the front view, apply the creator's marks, build the face states and the face board.
 
     It works as soon as there is a sheet, before it is approved, so the creator can check the face at that
-    gate. `eyes` (one box round both eyes) and `mouth` are kept as marks in the character record and used by
-    every later step; `clear` drops them. Returns the board. Raises FaceNotFound, with what to do, when there
-    is no face to use."""
+    gate. `eyes` (one box round both eyes), `mouth` and `neck` (the first row under the head) are kept as marks
+    in the character record and used by every later step; `clear` drops them. Returns the board. Raises
+    FaceNotFound, with what to do, when there is no face to use."""
     state = store.load(folder)
     if not state.get("sheet", {}).get("round"):
         raise KitError("Draw the sheet first. The face is measured on its front view.")
@@ -824,8 +882,18 @@ def make(folder: Path, *, eyes: Box | None = None, mouth: Box | None = None, cle
             raise KitError(f"The {name} box {box.text()} runs off the {art.CANVAS_W} x {art.CANVAS_H} canvas. "
                            "Read the numbers off the grid on the face board.")  # fmt: skip
         marks[name] = [box.x, box.y, box.w, box.h]
+    if neck is not None:
+        if not 0 < neck < canvas.shape[0]:
+            raise KitError(f"Row {neck} is off the {art.CANVAS_W} x {art.CANVAS_H} canvas. Read the neck row off the "
+                           "grid on the face board.")  # fmt: skip
+        marks["neck"] = int(neck)
     if "eyes" in marks and "mouth" in marks and Box(*marks["mouth"]).y < Box(*marks["eyes"]).y1:
         raise KitError("The mouth box must sit below the eyes box. Check the rows on the face board.")
+
+    face, reason = measure(canvas, marks)
+    if face is not None and marks.get("neck") is not None and marks["neck"] < face.mouth.y1 and (neck or mouth):
+        raise KitError(f"The neck row {marks['neck']} is above the bottom of the mouth (row {face.mouth.y1 - 1}). "
+                       "Mark the first row under the chin, read off the face board.")  # fmt: skip
     state["face_marks"] = marks or None
     faces_state = state.setdefault("faces", {})
     if open_rows is not None:
@@ -833,7 +901,6 @@ def make(folder: Path, *, eyes: Box | None = None, mouth: Box | None = None, cle
     rows = int(faces_state.get("open_rows", 3))
     store.save(folder, state)
 
-    face, reason = measure(canvas, marks)
     out = folder / "faces"
     out.mkdir(parents=True, exist_ok=True)
     board_path = folder / BOARD

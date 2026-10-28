@@ -4,7 +4,7 @@
     python -m kit.character start --description TEXT --outfit TEXT [--photos FILE ...] [--colours N] [--tool NAME]
     python -m kit.character describe [--description TEXT] [--outfit TEXT]
     python -m kit.character sheet [--resnap]
-    python -m kit.character faces [--eyes x,y,w,h] [--mouth x,y,w,h] [--clear] [--open ROWS]
+    python -m kit.character faces [--eyes x,y,w,h] [--mouth x,y,w,h] [--neck ROW] [--clear] [--open ROWS]
     python -m kit.character approve sheet
     python -m kit.character poses [NAME ...] [--resnap]
     python -m kit.character approve poses NAME ... | all
@@ -85,7 +85,8 @@ def _face_lines(folder: Path, note: str | None = None) -> None:
     if note:
         print(note)
     elif board.is_file():
-        print(f"Check the face here before approving: {_shown(board)}. The boxes must sit on the eyes and the mouth.")
+        print(f"Check the face here before approving: {_shown(board)}. The boxes must sit on the eyes and the mouth, "
+              "and the neck line just under the chin.")  # fmt: skip
 
 
 def _status(folder: Path) -> int:
@@ -157,13 +158,13 @@ def _run(args: argparse.Namespace) -> int:
         return 0
     if args.command == "faces":
         board = faces.make(folder, eyes=faces.parse_box(args.eyes) if args.eyes else None,
-                           mouth=faces.parse_box(args.mouth) if args.mouth else None, clear=args.clear,
-                           open_rows=args.open)  # fmt: skip
+                           mouth=faces.parse_box(args.mouth) if args.mouth else None, neck=args.neck,
+                           clear=args.clear, open_rows=args.open)  # fmt: skip
         state = store.load(folder)
         state["sheet"]["face_note"] = None
         store.save(folder, state)
         how = "marked by hand" if state.get("face_marks") else "as measured"
-        print(f"The face is ready ({how}). Look at the boxes and the face states here: {_shown(board)}")
+        print(f"The face is ready ({how}). Look at the boxes, the neck line and the face states here: {_shown(board)}")
         return 0
     if args.command == "approve":
         if args.what == "sheet":
@@ -244,9 +245,10 @@ def main(argv: list[str] | None = None) -> int:
     one.add_argument("--outfit", help="the new outfit, or - for standard input")
     one = commands.add_parser("sheet", help="draw the character sheet, or draw it again")
     one.add_argument("--resnap", action="store_true", help="snap the last sheet picture again, with no image call")
-    one = commands.add_parser("faces", help="measure the face again, or mark the eyes and mouth by hand")
+    one = commands.add_parser("faces", help="measure the face again, or mark the eyes, the mouth or the neck row by hand")
     one.add_argument("--eyes", help="one box round both eyes, x,y,w,h on the face board's grid")
     one.add_argument("--mouth", help="the box round the mouth, x,y,w,h on the face board's grid")
+    one.add_argument("--neck", type=int, help="the first row under the chin, read off the face board's grid")
     one.add_argument("--clear", action="store_true", help="drop the marks and measure the face again")
     one.add_argument("--open", type=int, help="how many rows the open mouth drops (1 to 4)")
     one = commands.add_parser("approve", help="approve the sheet, poses or moves")

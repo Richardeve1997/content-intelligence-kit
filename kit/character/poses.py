@@ -399,6 +399,16 @@ def redraw(folder: Path, name: str, note: str | None = None) -> None:
     """Mark one pose to be drawn again on its own, with the creator's note added to its direction."""
     state = store.load(folder)
     if name == "idle":
+        sheet = state.get("sheet", {})
+        if not sheet.get("round"):
+            raise KitError("The idle pose is the front view of the character sheet, and no sheet is drawn yet. Draw "
+                           "it with: uv run python -m kit.character sheet")  # fmt: skip
+        if not sheet.get("approved"):
+            raise KitError(
+                "The idle pose is the front view of the sheet, and the sheet is not approved yet, so draw the sheet "
+                "again instead: put the change into the description or the outfit with uv run python -m "
+                "kit.character describe, then run uv run python -m kit.character sheet"
+            )
         raise KitError(
             "The idle pose is the front view of the approved sheet, and an approved sheet is not drawn again. The only "
             "way to change it is a new character: move the me/character folder somewhere else and run start again. "
