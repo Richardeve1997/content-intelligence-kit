@@ -285,6 +285,8 @@ def test_the_skill_finds_windows_by_name_or_time_never_by_place():
     layout_note = next(line for line in body.splitlines() if line.startswith("`build/layout.json` lists"))
     assert "UIS.win(" in layout_note and '"name"' in layout_note, layout_note
     assert "never by its place" in layout_note, layout_note
+    assert "{mode, t0, t1, name, at}" in layout_note, "it says what UIS.win returns"
+    assert "{{ w('" in layout_note, "the same lookup for index.src.html"
     assert '"name":' in body.split('"windows": [')[1].split("```")[0], "the example layout.json shows a name"
     helpers = next(line for line in body.splitlines() if line.startswith("| `uistory.js` |"))
     assert "`win`" in helpers, helpers

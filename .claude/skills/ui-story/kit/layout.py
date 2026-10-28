@@ -164,8 +164,9 @@ def main():
     if a.hf:
         lib = Path(a.hf) / "lib"
         lib.mkdir(parents=True, exist_ok=True)
-        # [mode, t0, t1, name]: the name UIS.win finds it by is its own name, else the phrase it starts at
-        entries = [[w["mode"], w["t0"], w["t1"], w["name"] or (w["at"] if isinstance(w["at"], str) else None)]
+        # [mode, t0, t1, name, at]: UIS.win finds a window by its name or by the phrase it starts at (null for a
+        # window that starts at "t" seconds)
+        entries = [[w["mode"], w["t0"], w["t1"], w["name"], w["at"] if isinstance(w["at"], str) else None]
                    for w in out_w]
         (lib / "layout.js").write_text("window.UIS_LAYOUT=" + json.dumps(entries) + ";\n")
     if a.edl_in and a.edl_out:

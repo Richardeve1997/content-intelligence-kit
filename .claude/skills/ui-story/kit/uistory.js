@@ -51,21 +51,22 @@
     return L.length ? L[L.length - 1][0] : 'split';
   };
   U.windows = function(mode){ return (window.UIS_LAYOUT || []).filter(w => w[0] === mode).map(w => [w[1], w[2]]); };
-  // one window as {mode, t0, t1, name}, found by its name in layout.json (else the phrase it starts at) or by a
+  // one window as {mode, t0, t1, name, at}, found by its name in layout.json, by the phrase it starts at, or by a
   // time inside it. Never address a window by its place in UIS_LAYOUT: a window added before it moves that place.
   const phrase = (p) => String(p).split(/\s+/).map(norm).filter(Boolean).join(' ');
   U.win = function(key){
     const L = window.UIS_LAYOUT || [];
-    const as = (w) => ({mode: w[0], t0: w[1], t1: w[2], name: w[3] == null ? null : w[3]});
+    const as = (w) => ({mode: w[0], t0: w[1], t1: w[2], name: w[3] == null ? null : w[3], at: w[4] == null ? null : w[4]});
     if (typeof key === 'number'){
       const hit = L.find((w, i) => key >= w[1] && (key < w[2] || (i === L.length - 1 && key <= w[2])));
       if (hit) return as(hit);
       throw new Error('UIS.win: no layout window holds ' + key + ' s');
     }
-    const hits = L.filter(w => w[3] != null && phrase(w[3]) === phrase(key));
+    const wanted = phrase(key);
+    const hits = L.filter(w => wanted && [w[3], w[4]].some(label => label != null && phrase(label) === wanted));
     if (hits.length === 1) return as(hits[0]);
-    if (!hits.length) throw new Error('UIS.win: no layout window is called "' + key + '"');
-    throw new Error('UIS.win: ' + hits.length + ' layout windows are called "' + key + '"; give one a "name" in layout.json');
+    if (!hits.length) throw new Error('UIS.win: no layout window is named "' + key + '" or starts at that phrase');
+    throw new Error('UIS.win: ' + hits.length + ' layout windows answer to "' + key + '"; give one a "name" in layout.json');
   };
 
   // ---- scene visibility: plain (non-clip) layers switched with hard cuts ----

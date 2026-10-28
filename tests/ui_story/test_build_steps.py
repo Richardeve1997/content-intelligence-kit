@@ -109,15 +109,17 @@ def test_a_window_is_found_by_its_name_or_a_time_after_another_is_inserted_befor
     windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret", "name": "payoff"},
                {"mode": "canvas", "at": "not the seeds"}]
     assert resolve(tmp_path, {"windows": windows}, hf=hf).returncode == 0
-    before = lookup(hf, ["payoff", "not the seeds", 4.2])
-    assert before["payoff"]["mode"] == "face" and before["payoff"]["name"] == "payoff", before
+    before = lookup(hf, ["payoff", "The Secret", "not the seeds", 4.2])
+    assert before["payoff"] == {"mode": "face", "t0": before["payoff"]["t0"], "t1": before["payoff"]["t1"],
+                                "name": "payoff", "at": "the secret"}, before
+    assert before["The Secret"] == before["payoff"], "a named window answers to the phrase it starts at too"
     assert before["4.2"] == before["payoff"], "a time inside the window finds it too"
 
     windows.insert(1, {"mode": "canvas", "at": "took ten minutes"})  # a window added before the one looked up
     assert resolve(tmp_path, {"windows": windows}, hf=hf).returncode == 0
-    after = lookup(hf, ["payoff", "not the seeds", 4.2, "parsley"])
+    after = lookup(hf, ["payoff", "The Secret", "not the seeds", 4.2, "parsley"])
     assert after["second"][0] == "canvas", "the old index now points at the inserted window"
-    assert after["payoff"] == before["payoff"] and after["4.2"] == before["payoff"], (before, after)
+    assert after["payoff"] == after["The Secret"] == after["4.2"] == before["payoff"], (before, after)
     assert after["not the seeds"] == before["not the seeds"] and after["not the seeds"]["mode"] == "canvas"
     assert after["parsley"].startswith("error: ") and "parsley" in after["parsley"], "a name no window has is an error"
 
@@ -357,7 +359,7 @@ def test_fill_times_replaces_cue_expressions_with_snapped_seconds(tmp_path):
     (tmp_path / "layout.resolved.json").write_text(json.dumps(
         {"duration": duration, "windows": [{"mode": "split", "t0": 0, "t1": duration}]}))
     src = tmp_path / "index.src.html"
-    src.write_text('<div data-start="{{ c("the secret") }}" data-end="{{ e("the pot") }}" data-w="{{ w(0) }}"></div>')
+    src.write_text('<div data-start="{{ c("the secret") }}" data-end="{{ e("the pot") }}" data-w="{{ w(1.0) }}"></div>')
     out = tmp_path / "index.html"
     done = run_kit("fill_times.py", src, words, tmp_path / "layout.resolved.json", out)
     assert done.returncode == 0, done.stderr
@@ -365,8 +367,52 @@ def test_fill_times_replaces_cue_expressions_with_snapped_seconds(tmp_path):
     values = [float(v) for v in re.findall(r'"([\d.]+)"', html)]
     assert values[0] == pytest.approx(3.7 - 0.12, abs=1 / 60)
     assert values[1] == pytest.approx(0.5 + 12 * 0.4 + 0.3, abs=1 / 60)
-    assert values[2] == 0.0
+    assert values[2] == 0.0, "the window holding 1.0 s starts at 0"
     assert all(abs(v * 60 - round(v * 60)) < 0.01 for v in values), "every time sits on a frame"
+
+
+def fill_window_times(tmp_path, windows, expressions):
+    """Resolve `windows` with layout.py, then fill one attribute per {{ expression }}; returns the values, or the
+    finished run when it failed."""
+    assert resolve(tmp_path, {"windows": windows}).returncode == 0
+    src, out = tmp_path / "index.src.html", tmp_path / "index.html"
+    src.write_text("<i " + " ".join(f'v{n}="{{{{ {x} }}}}"' for n, x in enumerate(expressions)) + "></i>")
+    done = run_kit("fill_times.py", src, tmp_path / "base.words.json", tmp_path / "layout.resolved.json", out)
+    if done.returncode != 0:
+        return done
+    return [float(v) for v in re.findall(r'"([\d.]+)"', out.read_text())]
+
+
+def test_fill_times_finds_a_window_by_name_phrase_or_time_after_another_is_inserted_before_it(tmp_path):
+    """{{ w(i) }} once read a window by its place in the list, so a window added before it moved every later
+    time without a word. w() finds a window by its name, the phrase it starts at, or a time inside it."""
+    windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret", "name": "payoff"},
+               {"mode": "canvas", "at": "not the seeds"}]
+    asks = ['w("payoff")', 'w("The Secret")', 'w("not the seeds")', "w(4.2)"]
+    before = fill_window_times(tmp_path, windows, asks)
+    windows.insert(1, {"mode": "canvas", "at": "took ten minutes"})  # a window added before the ones looked up
+    after = fill_window_times(tmp_path, windows, asks)
+    assert after == before, (before, after)
+    face_start = round(round((3.7 - 0.12) * 60) / 60, 4)
+    assert before[0] == before[1] == before[3] == face_start
+    assert before[2] == round(round((0.5 + 13 * 0.4 - 0.12) * 60) / 60, 4)
+
+
+def test_fill_times_refuses_a_window_by_its_place_and_names_the_ways_that_last(tmp_path):
+    windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret"}]
+    done = fill_window_times(tmp_path, windows, ["w(1)"])
+    said = done.stdout + done.stderr
+    assert done.returncode != 0 and "Traceback" not in said, said
+    assert "w(1)" in said and "place" in said and "name" in said and "phrase" in said and "w(31.0)" in said, said
+    done = fill_window_times(tmp_path, windows, ['w("parsley")'])
+    said = done.stdout + done.stderr
+    assert done.returncode != 0 and "Traceback" not in said and "parsley" in said, said
+
+
+
+def test_fill_times_help_lists_the_window_lookups():
+    said = run_kit("fill_times.py", "--help").stdout
+    assert 'w("name")' in said and "w(31.0)" in said and "refused" in said, said
 
 
 def test_seg_starts_finds_each_join(tmp_path):
