@@ -23,7 +23,7 @@ layout.json (cues are phrases of the BASE transcript, matched like UIS.cue: lowe
   slow:  a sine ease across [cue(at) - lead or the window start, the window end], 1.00 drifting to z.
   "fy" on a zoom is the row of the take held still, as a fraction of its height (default 0.385, the eyes).
 
-    python layout.py --layout layout.json --words base.words.json --duration <base seconds> \
+    python layout.py --layout layout.json --words base.words.json --duration <base seconds> \\
         --out layout.resolved.json [--hf <hf dir>] [--edl-in edl.json --edl-out edl-zoom.json]
         [--seg-starts seg_starts.json]
 

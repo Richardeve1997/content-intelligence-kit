@@ -288,3 +288,15 @@ def test_the_skill_finds_windows_by_name_or_time_never_by_place():
     assert '"name":' in body.split('"windows": [')[1].split("```")[0], "the example layout.json shows a name"
     helpers = next(line for line in body.splitlines() if line.startswith("| `uistory.js` |"))
     assert "`win`" in helpers, helpers
+
+
+def test_layout_help_wraps_its_usage_example():
+    """A backslash at a line end inside the help text once joined the example into one 186 character line."""
+    from uistory_helpers import run_kit
+
+    lines = run_kit("layout.py", "--help").stdout.splitlines()
+    first = next(i for i, line in enumerate(lines) if "python layout.py --layout" in line)
+    assert "--out layout.resolved.json" not in lines[first], lines[first]
+    assert lines[first].rstrip().endswith("\\"), "the example breaks the way a shell command does"
+    assert lines[first + 1].strip().startswith("--out layout.resolved.json"), lines[first + 1]
+    assert max(len(line) for line in lines) <= 120
