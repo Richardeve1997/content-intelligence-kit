@@ -554,8 +554,9 @@ STATES = [
     (["idea.json", "script.md", "final.mp4"], "final_ready", "idea.json, script.md, final.mp4"),
     (["idea.json", "script.md", "final.mp4", "captions.json"], "captions_ready", "idea.json, script.md, final.mp4, captions.json"),
     (
+        # a post folder with nothing in it is not a posted video: only a receipt for a platform counts
         ["idea.json", "script.md", "final.mp4", "captions.json", "post/"],
-        "posted",
+        "captions_ready",
         "idea.json, script.md, final.mp4, captions.json, post",
     ),
 ]
@@ -625,6 +626,141 @@ def test_next_warns_about_a_take_link_that_points_nowhere(tmp_path):
     seen = look(tmp_path)
     assert seen["state"] == "take_ready"
     assert seen["warning"] == ["take/take-01.mov points to a file that is not there any more"]
+
+
+# A post folder keeps more than live posts: the upload record (media.json), the file for posting by hand
+# (manual.md) and every receipt that no longer applies, renamed to <platform>.cancelled.json or
+# <platform>.stale.json. Only a live receipt, <platform>.json, says something was sent.
+
+READY = ["idea.json", "script.md", "final.mp4", "captions.json"]
+SENT = {"slug": "example-reel", "platform": "instagram", "create_attempted": True, "post_id": "not-a-real-id"}
+
+
+def write_post(folder: Path, files: dict) -> None:
+    (folder / "post").mkdir(exist_ok=True)
+    for name, body in files.items():
+        (folder / "post" / name).write_text(body if isinstance(body, str) else json.dumps(body))
+
+
+def test_a_post_folder_holding_only_the_upload_is_not_a_posted_video(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", READY), {"media.json": {"url": "https://example.com/v.mp4"}})
+    seen = look(tmp_path)
+    assert seen["state"] == "captions_ready"
+    assert "receipts" not in seen
+
+
+def test_a_post_that_was_cancelled_is_not_posted_any_more(tmp_path):
+    write_post(
+        make_video(tmp_path, "example-reel", READY),
+        {"media.json": {"url": "https://example.com/v.mp4"}, "instagram.cancelled.json": SENT},
+    )
+    seen = look(tmp_path)
+    assert seen["state"] == "captions_ready"
+    assert seen["receipts"] == "instagram cancelled"
+
+
+def test_every_platform_cancelled_still_leaves_the_video_unposted(tmp_path):
+    files = {f"{name}.cancelled.json": SENT for name in ("instagram", "tiktok", "youtube")}
+    write_post(make_video(tmp_path, "example-reel", READY), files)
+    seen = look(tmp_path)
+    assert seen["state"] == "captions_ready"
+    assert seen["receipts"] == "instagram cancelled, tiktok cancelled, youtube cancelled"
+
+
+def test_a_receipt_with_a_post_id_means_posted(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", READY), {"instagram.json": SENT})
+    seen = look(tmp_path)
+    assert seen["state"] == "posted"
+    assert seen["receipts"] == "instagram scheduled"
+
+
+def test_cancelling_one_platform_leaves_the_others_posted(tmp_path):
+    write_post(
+        make_video(tmp_path, "example-reel", READY),
+        {"tiktok.json": SENT, "instagram.cancelled.json": SENT, "media.json": {}},
+    )
+    seen = look(tmp_path)
+    assert seen["state"] == "posted"
+    assert seen["receipts"] == "instagram cancelled, tiktok scheduled", "in the order the kit lists its platforms"
+
+
+def test_a_new_receipt_wins_over_an_older_cancelled_one(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", READY), {"instagram.json": SENT, "instagram.cancelled.json": SENT})
+    seen = look(tmp_path)
+    assert (seen["state"], seen["receipts"]) == ("posted", "instagram scheduled")
+
+
+def test_a_post_zernio_lost_is_not_posted(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", READY), {"instagram.stale.json": SENT})
+    seen = look(tmp_path)
+    assert (seen["state"], seen["receipts"]) == ("captions_ready", "instagram gone")
+
+
+def test_an_attempt_nobody_confirmed_is_not_called_posted(tmp_path):
+    interrupted = {"slug": "example-reel", "platform": "instagram", "create_attempted": True, "request_id": "not-a-real-id"}
+    write_post(make_video(tmp_path, "example-reel", READY), {"instagram.json": interrupted})
+    seen = look(tmp_path)
+    assert seen["state"] == "post_unsure"
+    assert seen["receipts"] == "instagram unconfirmed"
+
+
+def test_a_damaged_receipt_is_not_called_posted(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", READY), {"instagram.json": "not json at all"})
+    seen = look(tmp_path)
+    assert (seen["state"], seen["receipts"]) == ("post_unsure", "instagram unreadable")
+
+
+def test_one_confirmed_post_beats_an_unconfirmed_one_and_the_warning_says_which(tmp_path):
+    interrupted = {"create_attempted": True, "request_id": "not-a-real-id"}
+    write_post(make_video(tmp_path, "example-reel", READY), {"instagram.json": SENT, "tiktok.json": interrupted})
+    seen = look(tmp_path)
+    assert seen["state"] == "posted"
+    assert seen["receipts"] == "instagram scheduled, tiktok unconfirmed"
+    assert seen["warning"] == ["post/tiktok.json shows an attempt Zernio never confirmed"]
+
+
+def test_the_file_for_posting_by_hand_is_not_a_posted_video(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", READY), {"manual.md": "# Post example-reel by hand\n"})
+    seen = look(tmp_path)
+    assert seen["state"] == "captions_ready"
+    assert seen["manual"] == "post/manual.md"
+    assert "receipts" not in seen
+
+
+def test_receipts_are_ignored_on_a_video_that_has_no_final(tmp_path):
+    write_post(make_video(tmp_path, "example-reel", ["idea.json", "script.md"]), {"instagram.json": SENT})
+    assert look(tmp_path)["state"] == "mini_me_in_progress"
+
+
+def test_next_does_not_mistake_the_setup_test_folder_for_a_video(tmp_path):
+    # setup keeps its test take and test clips in work/onboarding-test, which is newer than any real video
+    video = make_video(tmp_path, "example-reel", ["idea.json"])
+    scratch = make_video(tmp_path, "onboarding-test", ["take/"])
+    os.utime(video, (1_700_000_000, 1_700_000_000))
+    os.utime(scratch, (1_800_000_000, 1_800_000_000))
+    assert look(tmp_path)["video"] == "example-reel"
+    assert look(tmp_path, SLUG="onboarding-test")["video"] == "onboarding-test", "still reachable by name"
+
+    only_scratch = tmp_path / "second"
+    make_video(only_scratch, "onboarding-test", [])
+    assert look(only_scratch)["state"] == "no_video"
+
+
+def test_next_names_the_same_platforms_as_the_kit():
+    import ast
+
+    from kit import config
+
+    listed = re.search(r"PLATFORMS = (\([^)]*\))", next_snippet())
+    assert listed, "the script lists the platforms a receipt can be for"
+    assert tuple(ast.literal_eval(listed.group(1))) == config.PLATFORMS
+
+
+def test_every_state_the_script_can_print_is_in_the_table_and_the_other_way_round():
+    body = text(SKILLS / "next" / "SKILL.md")
+    states = set(re.findall(r'state = "(\w+)"', next_snippet()))
+    table = set(re.findall(r"^\| `(\w+)` \|", body, re.M))
+    assert states == table, states ^ table
 
 
 # --- the kit's own prose ---------------------------------------------------------------------------------------------------------
