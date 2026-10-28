@@ -200,7 +200,7 @@ Run `install.py` again after any change to the voice-over, `words.json`, `beats.
 - [ ] The character is big (scale 6 to 8) and cropped at its waist, with shoulders and chest in view, the white outline and the ink edge on the light field
 - [ ] What arrives on each page is caused by the pose, and every receipt is real and in `build/sources/SOURCES.md`
 - [ ] The close shows the creator's name and handle, and the follow press or the typed keyword lands on its word
-- [ ] `check.py` and `beats.py --check` pass, and `npx hyperframes lint` shows no errors
+- [ ] `check.py` and `beats.py --check` pass, and the HyperFrames lint in step 5 shows no errors
 - [ ] `ship.py` passed the speech gate; `gates.sh` passes (format, margins, no caption track, no frozen stretch, -13 LUFS, the bed measured 15 dB under, picture and sound together, the end)
 
 Then run the `review` skill on `work/<video>/final.mp4`. Its rubric items 2 to 5 belong to UI story; for this style check the fields flipping, a headline page per phrase, the character big and cropped at the waist, and no caption track.

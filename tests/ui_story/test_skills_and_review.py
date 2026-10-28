@@ -290,6 +290,7 @@ def test_every_hyperframes_command_runs_through_kit_media():
     assert {re.search(r"hyperframes (\w+)", line).group(1) for line in calls} == {"lint", "snapshot", "render"}
     for line in calls:
         assert line.startswith("uv run python -m kit.media run -- npx hyperframes "), line
+    assert "`npx hyperframes" not in text(SKILLS["ui-story"]), "the notes name no bare npx command to copy"
 
 
 def test_the_cleanup_waits_for_the_render_gate_and_the_review():

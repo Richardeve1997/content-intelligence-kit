@@ -67,6 +67,7 @@ def test_the_lint_runs_through_kit_media_like_every_hyperframes_call():
     blocks = re.findall(r"^```bash\n(.*?)^```", BODY, re.M | re.S)
     calls = [line for block in blocks for line in block.splitlines() if "hyperframes " in line]
     assert calls == ["uv run python -m kit.media run -- npx hyperframes lint $W/build/hf"]
+    assert "`npx hyperframes" not in BODY, "the checklist names no bare npx command to copy"
 
 
 def test_every_kit_file_the_skill_names_exists():
