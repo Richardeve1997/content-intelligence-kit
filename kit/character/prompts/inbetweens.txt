@@ -1,0 +1,22 @@
+The attached images show the same pixel-art character twice. The first image is the start of a short move and the second image is the end of it.
+
+Draw four full-body frames of this character in one row, standing on a single ground line, from left to right, for a smooth animation:
+frame 1 is an exact copy of the first attached image,
+frames 2 and 3 are in-between drawings that move evenly from the start to the end,
+frame 4 is an exact copy of the second attached image.
+
+Who: {description}
+
+Clothes: {outfit}
+
+Colours: {palette_hint}
+
+All four frames are the same size, with the feet in the same place. Only the parts the move below describes may change: the head, the face, the body and the legs stay exactly as they are. The face looks at the viewer with the mouth closed. Leave clear space between the frames so no two of them touch.
+
+Pixel style: the same crisp pixel art as the attached images, on the same grid. Every pixel is the same size, a dark outline one pixel wide runs around each figure, and the colours are flat. No anti-aliasing, no gradients and no blur.
+
+Picture: wide, in landscape format, with a margin of plain background all round the figures.
+
+Background: one flat, plain light grey, the same colour everywhere. No text, no labels, no numbers, no shadow on the ground and no other objects.
+
+The move:
