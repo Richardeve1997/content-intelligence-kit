@@ -186,7 +186,7 @@ If they skip the take, the test clip uses a sample card and a scratch voice inst
 
 Mini me builds a character from 3 to 5 photos of them, or from a description if they would rather not share photos. Ask two more things first, because both answers go into the profile:
 
-- How they want to make the voice-over. `record` is the default and is free: they record it on their phone. `elevenlabs` is a stock ElevenLabs voice with their own key. `clone` is a copy of their own voice, which asks for their consent first.
+- How they want to make the voice-over. `record` is the default and is free: they record it on their phone. `elevenlabs` is a stock ElevenLabs voice with their own key. `clone` is a copy of their own voice, which asks for their consent first. Tell them that ElevenLabs' free plan includes no commercial licence, so with either ElevenLabs choice the videos they post need a paid plan.
 - Which tool draws the character. `manual` is the default: the kit prints prompts, they paste them into ChatGPT or Gemini and drop the images in a folder. `openai` and `gemini` need the matching key in `.env`. `codex` uses a signed-in Codex CLI.
 
 The character itself is built after the profile is written, further down.

@@ -1828,6 +1828,23 @@ def test_the_skill_and_the_guide_describe_the_one_optional_keys_line_the_doctor_
         assert words not in skill + guide, "the old wording, from when each key was a row"
 
 
+def guide_steps(guide: str) -> dict[int, str]:
+    """Each numbered step of "What happens, step by step": its first line and its indented sub-list."""
+    body = guide.split("## What happens, step by step", 1)[1].split("\n## ", 1)[0]
+    parts = re.split(r"^(\d+)\. ", body, flags=re.M)
+    return {int(parts[i]): parts[i + 1] for i in range(1, len(parts), 2)}
+
+
+def test_the_guide_and_the_skill_say_the_elevenlabs_free_plan_has_no_commercial_licence():
+    """ElevenLabs' own help centre: the free plan does not include a commercial licence."""
+    guide = read(ROOT / "ONBOARDING.md")
+    offer = next(line for line in guide_steps(guide)[8].splitlines() if "ElevenLabs stock voice with your key" in line)
+    key_row = next(line for line in guide.splitlines() if line.startswith("| `ELEVENLABS_API_KEY`"))
+    skill = next(line for line in read(SKILLS / "onboard" / "SKILL.md").splitlines() if "is a stock ElevenLabs voice" in line)
+    for text_ in (offer, key_row, skill):
+        assert "free plan includes no commercial licence" in text_ and "need a paid plan" in text_, text_
+
+
 def test_onboarding_guide_covers_every_step_in_plain_words():
     guide = read(ROOT / "ONBOARDING.md").lower()
     for words in (

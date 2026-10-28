@@ -286,6 +286,11 @@ def test_readme_names_the_install_steps_no_clean_mac_has_tested():
     assert "`brew install uv`" in untested and "`brew install node`" in untested
 
 
+def test_readme_costs_say_the_elevenlabs_free_plan_has_no_commercial_licence():
+    row = next(line for line in _readme_section("## Costs").splitlines() if line.startswith("| ElevenLabs"))
+    assert "free plan includes no commercial licence" in row and "need a paid plan" in row, row
+
+
 def test_readme_codex_section_explains_hooks_and_the_sandbox_in_plain_words():
     section = _readme_section("## Codex")
     assert "The kit sets up no hooks for Codex" in section

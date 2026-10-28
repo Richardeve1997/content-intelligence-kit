@@ -95,7 +95,7 @@ Apart from your Claude or ChatGPT plan, every paid tool is optional, and each ha
 | --- | --- | --- | --- |
 | Apify (`APIFY_TOKEN`) | research on Instagram and TikTok creators | a free plan with US$5 of usage a month, on which the official Instagram scraper costs about US$2.70 per 1,000 results. The kit caps each research run at US$0.25 for Instagram and US$0.50 for TikTok, and you can raise the caps. | YouTube creators through yt-dlp, and links you paste |
 | An image model (`OPENAI_API_KEY`, `GEMINI_API_KEY` or a signed-in Codex CLI) | drawing your mini me character and its poses | priced per image by OpenAI or Google, while a signed-in Codex CLI uses your ChatGPT plan. A character takes 9 images, plus one for each redraw. | the kit prints the prompts, you paste them into ChatGPT or Gemini, and you save the pictures into a folder |
-| ElevenLabs (`ELEVENLABS_API_KEY`) | a stock or cloned voice for mini me | instant voice cloning starts on the Starter plan, about US$5 to 6 a month | record the voice-over on your phone |
+| ElevenLabs (`ELEVENLABS_API_KEY`) | a stock or cloned voice for mini me | instant voice cloning starts on the Starter plan, about US$5 to 6 a month. ElevenLabs' free plan includes no commercial licence, so the videos you post need a paid plan. | record the voice-over on your phone |
 | Zernio (`ZERNIO_API_KEY`) | scheduling posts on six platforms, and your own results as a research input | priced per connected account: the first 2 are free, then US$6 a month each for accounts 3 to 10, so all six platforms come to about US$24 a month | post the MP4 by hand, with the caption file the kit writes |
 
 ## Codex
