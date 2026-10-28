@@ -49,7 +49,7 @@ Everything for one video lives in `work/<video>/`:
 
 ## The look
 
-These are the house rules of the style. They are what make it work, so keep them unless the creator's rules say otherwise.
+These rules are what make the style work, so keep them unless the creator's rules say otherwise.
 
 ### Does the video fit
 

@@ -1,11 +1,11 @@
 ---
 name: review
-description: Review a finished Reel before it is called done. It runs the gates (speech, loudness, captions, still frames, safe area), lays the video out as a contact sheet, looks at every frame against the house rubric, and returns a numbered list of fixes, each sent back to the step that owns it. Then it reviews again, at most 5 cycles. Both styles end with it. Use when the creator says "review it", "check the video", "is it good to ship", "does this pass", "grade the final" or "look over the Reel", or when the ui-story or mini-me skill reaches its review step.
+description: Review a finished Reel before it is called done. It runs the gates (speech, loudness, captions, still frames, safe area), lays the video out as a contact sheet, looks at every frame against its rubric, and returns a numbered list of fixes, each sent back to the step that owns it. Then it reviews again, at most 5 cycles. Both styles end with it. Use when the creator says "review it", "check the video", "is it good to ship", "does this pass", "grade the final" or "look over the Reel", or when the ui-story or mini-me skill reaches its review step.
 ---
 
 # Review
 
-Looks at the finished file, `work/<video>/final.mp4`, the way a viewer meets it: sped up, with the music bed, cropped by a tall phone. A render can pass every automated check and still show an empty card or a head cut off at the crown, so the frames are the evidence. Read them.
+This skill looks at the finished file, `work/<video>/final.mp4`, the way a viewer meets it: sped up, with the music bed, cropped by a tall phone. A render can pass every automated check and still show an empty card or a head cut off at the crown, so the frames are the evidence. Read them.
 
 ## Steps
 

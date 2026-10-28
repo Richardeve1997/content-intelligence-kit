@@ -5,7 +5,7 @@ description: Update the kit's own files to the latest release without touching t
 
 # update-kit
 
-Replaces the kit's files (skills, code, scripts, docs) with the latest release. Everything of the creator's stays where it is: `me/`, `work/`, `research/`, `.env`, and anything that is not a kit file, such as `.venv` and `node_modules`. A kit file the creator edited is left as they edited it, unless the release changed that file too. Then the update copies the edited file to `me/kit-backups/<date>/` before replacing it.
+This skill replaces the kit's files (skills, code, scripts, docs) with the latest release. Everything of the creator's stays where it is: `me/`, `work/`, `research/`, `.env`, and anything that is not a kit file, such as `.venv` and `node_modules`. A kit file the creator edited is left as they edited it, unless the release changed that file too. Then the update copies the edited file to `me/kit-backups/<date>/` before replacing it.
 
 ## Steps
 

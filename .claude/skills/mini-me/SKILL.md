@@ -65,7 +65,7 @@ The voice step writes `vo.m4a` at -13 LUFS, and `words.json` with every word tim
 
 ## The pages
 
-`uv run python .claude/skills/mini-me/kit/beats.py <video>` turns `words.json` into `beats.json`: one page per spoken phrase. Each page is `{"t", "text", "pose", "field", "prop"}`: Pages are numbered from 1, and the same numbers are used everywhere: in `beats.py`, `check.py`, the stage's notes and `Stage.page(n)`.
+`uv run python .claude/skills/mini-me/kit/beats.py <video>` turns `words.json` into `beats.json`: one page per spoken phrase. Each page is `{"t", "text", "pose", "field", "prop"}`. Pages are numbered from 1, and the same numbers are used everywhere: in `beats.py`, `check.py`, the stage's notes and `Stage.page(n)`.
 
 | Key | What it is |
 |---|---|
@@ -109,7 +109,7 @@ Props:
 
 ## The look
 
-These are the house rules of the style. They are what makes it work, so keep them unless the creator's rules say otherwise.
+These rules are what make the style work, so keep them unless the creator's rules say otherwise.
 
 - Two flat fields, the creator's `--field-dark` and `--field-light`, each with a faint dot grid. The field flips on every page with a push and speed lines, and a whoosh lands on every flip. Nothing sits still: a new page, pose and field about every 1.5 to 2.5 seconds.
 - The headline is the keyword of the spoken phrase, at most four words, in `--font-display` capitals at the heaviest weight the font has, fitted to the width from y 190 down to about y 620. Sizes mix inside a lockup: a short word set huge under a smaller line reads well. One accent word at most, on an accent plate. There is no caption track: the headlines carry the words.

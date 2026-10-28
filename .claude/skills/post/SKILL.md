@@ -5,7 +5,7 @@ description: Write one caption per platform for a finished video, show every cap
 
 # post
 
-This skill takes a finished video, `work/<slug>/final.mp4`, to scheduled posts. You write a caption for each platform in the creator's voice and show all of them. When the creator says yes, the kit uploads the video once and schedules one post per platform through Zernio, a paid posting service the creator signs up for and pays for themselves. Each post keeps its own caption, time and cancel. Without a Zernio key, the same captions go into a file for posting by hand.
+This skill takes a finished video, `work/<slug>/final.mp4`, to scheduled posts. You write a caption for each platform in the creator's voice and show all of them. When the creator says yes, the kit uploads the video once and schedules one post per platform through Zernio, a paid posting service the creator signs up for and pays for themselves. Each post has its own caption and time, and can be cancelled on its own. Without a Zernio key, the same captions go into a file for posting by hand.
 
 You drive the kit with `uv run python -m kit.post <command>`. A command prints plain sentences. A problem comes back as one sentence and exit status 1. Never print the Zernio key, copy it or write it into a file. It lives in `.env`.
 

@@ -5,7 +5,7 @@ description: Say what the next step is for the video in progress. Use when the c
 
 # next
 
-Looks at the newest video folder in `work/`, works out which files exist, and names the next step. It reads files and answers. It starts nothing heavy: a render, an encode or a transcription waits for the creator's go-ahead and runs through the skill that owns it.
+This skill looks at the newest video folder in `work/`, works out which files exist, and names the next step. It reads files and answers. It starts nothing heavy: a render, an encode or a transcription waits for the creator's go-ahead and runs through the skill that owns it.
 
 ## Steps
 

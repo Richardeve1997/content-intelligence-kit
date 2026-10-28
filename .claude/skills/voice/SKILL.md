@@ -5,14 +5,14 @@ description: Build or refresh the creator's voice model, the short guide the kit
 
 # voice
 
-The voice model is `me/voice/VOICE.md`: a page of concrete observations about how the creator writes and speaks, in five sections. The `ui-story` and `mini-me` skills write scripts from it, and the `post` skill writes captions from it. A model is only as good as its samples, so ask for real ones before you fall back to adjectives.
+The voice model is `me/voice/VOICE.md`: a page of concrete observations about how the creator writes and speaks, in five sections. The `ui-story` and `mini-me` skills write scripts from it, and the `post` skill writes captions from it. Real samples give a better model than adjectives, so ask for them first.
 
 ## Steps
 
 1. Read the creator's rules for this skill with `kit.rules.read("voice")`. In a shell: `uv run python -m kit.rules read voice`. Follow them.
 2. Look at what exists. If `me/voice/VOICE.md` is there, this is a refresh: the new samples join the old ones in `me/voice/samples/`, and you rewrite the whole model from all of them. If nothing is there, this is a first model.
 3. Collect samples. Ask which of these they have, one at a time, and use every real sample they give you:
-   - Scripts or transcripts, theirs, pasted into the chat. One to three is enough. More is better.
+   - Scripts or transcripts of theirs, pasted into the chat. One to three is enough, and more is better.
    - Links to their own videos, to transcribe. Only their own: a link to someone else's video says nothing about how they sound, so do not use it. Check that `kit/transcribe.py` exists. If it does, download the audio into a temporary folder under `work/` with `uv run yt-dlp --no-playlist -x --audio-format wav -o "work/voice-samples/%(id)s.%(ext)s" <link>` (at least 5 GB of disk free first), transcribe each file with `kit.transcribe.words(path, align=False)`, join the word texts into plain text, and delete the audio. If a download fails, or `kit.transcribe` is not there yet, say so in one plain sentence and ask them to paste the text instead. Most video pages let them copy a transcript.
    - No samples at all: three adjectives that describe how they sound, and three to five sentences written the way they would say them.
 4. Save every sample exactly as received in `me/voice/samples/`, as `sample-01.txt`, `sample-02.txt` and so on. Never edit a sample, and never overwrite one. A refresh adds files after the last number.
