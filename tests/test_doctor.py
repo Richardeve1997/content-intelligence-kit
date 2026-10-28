@@ -512,6 +512,19 @@ def test_free_disk_warns_under_20_and_fails_under_5(doctor, fake, free, status):
         assert "5 GB" in row["fix"]
 
 
+@pytest.mark.parametrize(
+    "free, shown",
+    [(19.99, "19.9 GB"), (12.34, "12.3 GB"), (8.0, "8 GB"), (5.0, "5 GB"), (4.99, "4.9 GB"), (2.3, "2.3 GB"), (0.2, "0.2 GB")],
+)
+def test_a_disk_row_that_is_not_ok_says_how_much_is_free(doctor, fake, free, shown):
+    # Without the number a warning reads as if the 5 GB floor was missed. The figure is rounded down,
+    # so a row that says missing never shows 5 GB.
+    probe = fake()
+    probe.free = free
+    row = find(rows_of(doctor, probe), "Free disk")
+    assert row["fix"].startswith(f"Free now: {shown}. Heavy jobs need at least 5 GB free"), row["fix"]
+
+
 def test_a_warning_does_not_fail_the_run_but_a_missing_row_does(doctor, fake, capsys):
     probe = fake()
     probe.free = 12.0
@@ -648,7 +661,7 @@ def test_the_table_lists_every_check_with_its_fix(doctor, fake, capsys):
         if row["fix"]:
             assert row["fix"] in text
     assert re.search(r"^missing\s+ffmpeg with h264_videotoolbox\s+brew install ffmpeg$", text, re.M)
-    assert re.search(r"^warn\s+Free disk space\s+Heavy jobs need at least 5 GB free", text, re.M)
+    assert re.search(r"^warn\s+Free disk space\s+Free now: 8 GB\. Heavy jobs need at least 5 GB free", text, re.M)
     assert re.search(r"^ok\s+Homebrew$", text, re.M), "a row that passes has no fix after it"
     assert "1 check needs fixing" in text
     assert "python3 bin/doctor.py again" in text

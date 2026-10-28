@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import re
@@ -347,11 +348,17 @@ def check_package(report: Optional[Dict[str, str]], *names: str) -> Result:
     return "missing", FIX_SYNC
 
 
+def gigabytes(value: float) -> str:
+    """A size in GB for a sentence, rounded down to one decimal so it never reads as more than there is."""
+    return f"{math.floor(round(value * 10, 6)) / 10:g}"
+
+
 def check_disk(probe: Probe) -> Result:
+    """The row names the space that is free now, so a warning is never read as being under the 5 GB floor."""
     free = probe.free_gb()
     if free >= DISK_WARN_GB:
         return "ok", ""
-    return ("warn" if free >= DISK_FAIL_GB else "missing"), FIX_DISK
+    return ("warn" if free >= DISK_FAIL_GB else "missing"), f"Free now: {gigabytes(free)} GB. {FIX_DISK}"
 
 
 # --- optional keys ------------------------------------------------------------------------------------------
