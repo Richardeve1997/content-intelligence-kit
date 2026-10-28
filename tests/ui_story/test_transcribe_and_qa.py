@@ -73,6 +73,55 @@ def test_a_chunk_heard_as_punctuation_alone_gives_no_word(tmp_path, monkeypatch)
     assert [w.text for w in transcribe.words(audio)] == ["Fresh", "basil,", "37"]
 
 
+def _stand_in_models(monkeypatch, cached: bool):
+    """A stand-in for the model hub and mlx-whisper: records how the model was looked up and what was loaded."""
+    import types
+
+    seen = {"lookups": [], "model": None}
+
+    class NotHereYet(Exception):
+        pass
+
+    def snapshot_download(repo_id, local_files_only=False, **kwargs):
+        seen["lookups"].append(local_files_only)
+        if local_files_only and not cached:
+            raise NotHereYet(repo_id)
+        return "/models/a-copy-on-this-mac"
+
+    def mlx_transcribe(samples, *, path_or_hf_repo, **kwargs):
+        seen["model"] = path_or_hf_repo
+        return {"text": "", "language": "en", "segments": []}
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=snapshot_download))
+    monkeypatch.setitem(sys.modules, "mlx_whisper", types.SimpleNamespace(transcribe=mlx_transcribe))
+    monkeypatch.setattr(transcribe, "_use_mlx", lambda: True)
+    monkeypatch.delenv("KIT_ASR_MODEL", raising=False)
+    getattr(transcribe, "_mlx_model", None) and transcribe._mlx_model.cache_clear()
+    return seen
+
+
+def test_a_speech_model_already_here_loads_with_no_download_bar(monkeypatch, capsys):
+    """Given a model's name, mlx-whisper looks it up online and draws a "Fetching 4 files" bar on every run. The
+    kit hands it the folder of the copy already on this Mac, found without going online, and says nothing."""
+    import numpy as np
+
+    seen = _stand_in_models(monkeypatch, cached=True)
+    transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
+    assert seen["model"] == "/models/a-copy-on-this-mac" and seen["lookups"] == [True]
+    assert capsys.readouterr().out == ""
+
+
+def test_a_speech_model_not_here_yet_is_downloaded_once_with_one_sentence(monkeypatch, capsys):
+    import numpy as np
+
+    seen = _stand_in_models(monkeypatch, cached=False)
+    transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
+    transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
+    assert seen["model"] == "/models/a-copy-on-this-mac" and seen["lookups"] == [True, False]
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1 and "speech model" in out and "once" in out
+
+
 def test_words_writes_the_shape_the_kit_reads(tmp_path, monkeypatch):
     monkeypatch.setattr(transcribe, "words", lambda audio, *, align=True: words_of("Fresh basil in March"))
     monkeypatch.setattr(transcribe, "_duration", lambda path: 3.0)

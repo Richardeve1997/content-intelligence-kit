@@ -62,6 +62,7 @@ MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
 FASTER_MODEL = "small"
 # --inexact keeps the other groups: without it uv removes every group the command does not name.
 NO_SPEECH_MODEL = "No speech model is installed. Install the video tools with: uv sync --group video --inexact"
+DOWNLOADING = "Downloading the speech model. This happens once, and the model is large, so it can take a few minutes."
 _FRAME = 0.02  # seconds per energy frame
 # A word has a letter or a digit, in any script. A rustle or a breath can come back from the speech model as a
 # lone "." or "...", and that is not something anyone said.
@@ -159,6 +160,22 @@ def _use_mlx() -> bool:
 
 
 @functools.lru_cache(maxsize=2)
+def _mlx_model(name: str) -> str:
+    """Where the mlx speech model is. Given a name, mlx-whisper looks the model up online on every run and draws a
+    download bar while it does. A copy already on this Mac is found without going online and used from its
+    folder, so nothing is drawn; a model that is not here yet is downloaded once, after one sentence saying so."""
+    if Path(name).exists():
+        return name
+    from huggingface_hub import snapshot_download
+
+    try:
+        return snapshot_download(repo_id=name, local_files_only=True)
+    except Exception:  # not on this Mac yet
+        print(DOWNLOADING, flush=True)
+        return snapshot_download(repo_id=name)
+
+
+@functools.lru_cache(maxsize=2)
 def _faster_model(name: str):
     from faster_whisper import WhisperModel
 
@@ -176,7 +193,7 @@ def _asr(samples, *, word_times: bool, language: str | None = None) -> dict:
             import mlx_whisper
 
             result = mlx_whisper.transcribe(
-                samples, path_or_hf_repo=os.environ.get("KIT_ASR_MODEL") or MLX_MODEL, language=language,
+                samples, path_or_hf_repo=_mlx_model(os.environ.get("KIT_ASR_MODEL") or MLX_MODEL), language=language,
                 temperature=0.0, condition_on_previous_text=False, word_timestamps=word_times, verbose=None,
             )
             found = [
