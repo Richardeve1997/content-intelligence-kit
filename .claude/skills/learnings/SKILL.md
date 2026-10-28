@@ -42,7 +42,21 @@ Keep the rules that stay word for word. A rule that asks for an action instead o
 
 ## Add a rule by hand
 
-For "add a rule to post: never use exclamation marks", run `uv run python -m kit.rules add post "<rule>"`. Keep the creator's wording when they give exact wording. If the new rule contradicts an old one, show the old one and replace it after they agree.
+For "add a rule to post: never use exclamation marks", run:
+
+```bash
+uv run python -m kit.rules add post 'Never use exclamation marks.'
+```
+
+Single quotes keep `$` and backticks exactly as typed. A rule with a single quote in it, or one that runs over several lines, goes in on standard input instead. Quote the end marker so nothing in the rule is expanded:
+
+```bash
+uv run python -m kit.rules add post - <<'RULE'
+Say "next steps" at the end of every caption, and don't put hashtags in the first line.
+RULE
+```
+
+The command refuses a rule over 300 characters, so write one or two plain sentences. The skill must be a folder in `.claude/skills/`, and the error names the ones that are. A rule the skill already has, word for word, is skipped, and the command says it is already recorded. Keep the creator's wording when they give exact wording. If the new rule contradicts an old one, show the old one and replace it after they agree.
 
 A correction with no other skill running is handled the same way. Pick the skill it shapes, and record it there.
 
@@ -52,4 +66,4 @@ Only the files in `me/rules/` and `me/lessons.md`, and only through the commands
 
 ## Feedback
 
-When the creator corrects how this skill behaves, fix it now and record the rule with `kit.rules.add("learnings", "<rule>")`. In a shell: `uv run python -m kit.rules add learnings "<rule>"`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.
+When the creator corrects how this skill behaves, fix it now and record the rule with `kit.rules.add("learnings", "<rule>")`. In a shell: `uv run python -m kit.rules add learnings '<rule>'`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.

@@ -11,6 +11,9 @@ going forward"), the correction becomes a rule:
 
 Both files sit in the creator's me/ folder, so an update to the kit never touches them.
 
+What add accepts: a rule of at most 300 characters (one or two plain sentences), for a skill that has a
+folder in .claude/skills/. A rule that is already recorded for that skill, word for word, is skipped.
+
 A skill cannot call Python directly, so everything here is also a command:
 
     python -m kit.rules read <skill> [--numbered]     print the skill's rules
@@ -38,6 +41,7 @@ from kit import config
 __all__ = ["read", "add", "undo", "remove", "numbered", "recent", "main"]
 
 HEADLINE_WIDTH = 80  # a headline is the first sentence, cut at a whole word near this width
+MAX_RULE = 300  # characters, once the rule is on one line
 
 _SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 _RULE_LINE = re.compile(r"- (?:(\d{4}-\d{2}-\d{2}): )?(.*)")
@@ -62,6 +66,27 @@ def _check_skill(skill) -> str:
             "dashes, starts with a letter or number, and is at most 64 characters long, like ui-story."
         )
     return skill
+
+
+def _skills_dir() -> Path:
+    return config.kit_root() / ".claude" / "skills"
+
+
+def _known_skills() -> list[str]:
+    """The names of the skills this kit has: the folders in .claude/skills/."""
+    try:
+        return sorted(p.name for p in _skills_dir().iterdir() if p.is_dir() and not p.name.startswith("."))
+    except OSError:
+        return []
+
+
+def _check_known(skill: str) -> None:
+    known = _known_skills()
+    if skill in known:
+        return
+    if not known:
+        raise ValueError("There are no skills in .claude/skills yet.")
+    raise ValueError(f"There is no skill called {skill}. The skills are: {', '.join(known)}.")
 
 
 def _rules_path(skill) -> Path:
@@ -189,15 +214,32 @@ def _write_whole(path: Path, text: str) -> None:
     os.replace(temp, path)
 
 
-def add(skill: str, rule: str) -> None:
-    """Record a rule for `skill`: one line in me/rules/<skill>.md and one entry in me/lessons.md."""
+def _add(skill: str, rule: str) -> bool:
+    """Record a rule. False when the skill already has exactly this rule, in which case nothing is written."""
     path = _rules_path(skill)
     text = _one_line(rule)
+    if len(text) > MAX_RULE:
+        raise ValueError(
+            f"A rule can be at most {MAX_RULE} characters, and this one has {len(text)}. "
+            "Shorten it to one or two plain sentences."
+        )
+    _check_known(skill)
+    if any(item.text == text for item in _rule_lines(_text(path))):
+        return False
     when = _now()
     path.parent.mkdir(parents=True, exist_ok=True)
     _append(path, f"- {when:%Y-%m-%d}: {text}\n")
     entry = f"## {when:%Y-%m-%d %H:%M} · {_headline(text)}\n\n- Skill: {skill}\n- Rule: {text}\n"
     _append(_journal_path(), entry, blank_line_before=True)
+    return True
+
+
+def add(skill: str, rule: str) -> None:
+    """Record a rule for `skill`: one line in me/rules/<skill>.md and one entry in me/lessons.md.
+
+    Raises ValueError for a rule over 300 characters or a skill with no folder in .claude/skills/. A rule the
+    skill already has, word for word, is skipped."""
+    _add(skill, rule)
 
 
 def _mark_removed(skill: str, rule: _Rule) -> None:
@@ -260,8 +302,8 @@ def _run(args: argparse.Namespace) -> int:
         sys.stdout.write(numbered(args.skill) if args.numbered else read(args.skill))
     elif args.command == "add":
         rule = sys.stdin.read() if args.rule == ["-"] else " ".join(args.rule)
-        add(args.skill, rule)
-        print(f"Recorded for {args.skill}: {_one_line(rule)}")
+        recorded = _add(args.skill, rule)
+        print(f"{'Recorded' if recorded else 'Already recorded'} for {args.skill}: {_one_line(rule)}")
     elif args.command == "undo":
         removed = undo(args.skill)
         if removed is None:

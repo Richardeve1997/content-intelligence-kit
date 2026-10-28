@@ -25,6 +25,19 @@ EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)  # written as code points so this fi
 HEADER = re.compile(rf"^## (\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}) {MIDDLE_DOT} (.+)$", re.M)
 
 
+SKILLS = ["learnings", "next", "post", "ui-story", "update-kit"]
+
+
+@pytest.fixture(autouse=True)
+def known_skills(tmp_path, monkeypatch):
+    """A folder of skills for `add` to check names against, in place of the repo's own .claude/skills."""
+    folder = tmp_path / "skills-folder"
+    for name in SKILLS:
+        (folder / name).mkdir(parents=True)
+    monkeypatch.setattr(rules, "_skills_dir", lambda: folder)
+    return folder
+
+
 @pytest.fixture
 def clock(monkeypatch):
     """Fix the time that entries are stamped with. A test moves it by changing clock['now']."""
@@ -183,6 +196,102 @@ def test_an_empty_rule_is_refused(example_me, rule):
     assert not (example_me / "lessons.md").exists()
 
 
+# --- what add will take --------------------------------------------------------------------------------------
+
+
+def test_a_rule_can_be_300_characters_but_not_301(example_me, clock):
+    rules.add("post", "a" * 300)
+    assert rules.read("post") == f"- 2026-10-28: {'a' * 300}\n"
+
+    with pytest.raises(ValueError) as caught:
+        rules.add("ui-story", "a" * 301)
+    assert str(caught.value) == (
+        "A rule can be at most 300 characters, and this one has 301. Shorten it to one or two plain sentences."
+    )
+    assert rules.read("ui-story") == ""
+    assert len(headers(example_me)) == 1, "a refused rule leaves no journal entry"
+
+
+def test_the_length_is_counted_after_the_rule_is_put_on_one_line(example_me, clock):
+    spaced = "word  " * 60  # 360 characters as typed, 299 once the spaces are tidied
+    rules.add("post", spaced)
+    assert len(rules.read("post").split(": ", 1)[1].strip()) == 299
+
+
+def test_a_skill_without_a_folder_is_refused_and_the_known_skills_are_named(example_me, clock):
+    with pytest.raises(ValueError) as caught:
+        rules.add("captions", "Keep it short.")
+    assert str(caught.value) == (
+        "There is no skill called captions. The skills are: learnings, next, post, ui-story, update-kit."
+    )
+    assert not (example_me / "rules").exists() and not (example_me / "lessons.md").exists()
+
+
+def test_only_folders_count_as_skills(example_me, clock, known_skills):
+    (known_skills / "a-file").write_text("not a skill\n")
+    (known_skills / ".hidden").mkdir()
+    with pytest.raises(ValueError) as caught:
+        rules.add("a-file", "Keep it short.")
+    assert "a-file" not in str(caught.value).split("The skills are:")[1]
+    assert ".hidden" not in str(caught.value)
+
+
+def test_with_no_skills_at_all_the_error_says_so(example_me, clock, monkeypatch, tmp_path):
+    monkeypatch.setattr(rules, "_skills_dir", lambda: tmp_path / "nothing-here")
+    with pytest.raises(ValueError) as caught:
+        rules.add("post", "Keep it short.")
+    assert str(caught.value) == "There are no skills in .claude/skills yet."
+
+
+def test_the_skills_folder_is_the_repos_own_by_default(monkeypatch):
+    monkeypatch.undo()
+    assert rules._skills_dir() == ROOT / ".claude" / "skills"
+    assert "learnings" in rules._known_skills()
+
+
+def test_rules_for_a_skill_that_no_longer_has_a_folder_can_still_be_read_and_removed(example_me, clock):
+    (example_me / "rules").mkdir()
+    (example_me / "rules" / "retired-skill.md").write_text("- 2026-01-01: Old rule.\n- 2026-01-02: Older rule.\n")
+    assert rules.read("retired-skill").count("\n") == 2
+    assert rules.numbered("retired-skill").startswith("1. 2026-01-01: Old rule.")
+    assert rules.remove("retired-skill", 1) == "Old rule."
+    assert rules.undo("retired-skill") == "Older rule."
+
+
+def test_an_exact_duplicate_is_skipped(example_me, clock):
+    rules.add("post", "Keep it plain.")
+    before = (rules.read("post"), journal(example_me))
+
+    rules.add("post", "Keep it plain.")
+    rules.add("post", "  Keep   it\nplain.  ")  # the same rule once it is on one line
+
+    assert (rules.read("post"), journal(example_me)) == before
+
+
+def test_a_duplicate_is_only_a_duplicate_for_the_same_skill_and_the_same_words(example_me, clock):
+    rules.add("post", "Keep it plain.")
+    rules.add("ui-story", "Keep it plain.")
+    rules.add("post", "Keep it plain!")
+    rules.add("post", "keep it plain.")
+    assert rules.read("ui-story").count("Keep it plain.") == 1
+    assert rules.read("post").count("\n") == 3
+
+
+def test_a_rule_can_be_added_again_after_it_was_taken_back(example_me, clock):
+    rules.add("post", "Keep it plain.")
+    rules.undo("post")
+    rules.add("post", "Keep it plain.")
+    assert rules.read("post") == "- 2026-10-28: Keep it plain.\n"
+    assert len(headers(example_me)) == 2
+
+
+def test_a_duplicate_written_by_hand_without_a_date_still_counts(example_me, clock):
+    (example_me / "rules").mkdir()
+    (example_me / "rules" / "post.md").write_text("- Keep it plain.\n")
+    rules.add("post", "Keep it plain.")
+    assert rules.read("post") == "- Keep it plain.\n"
+
+
 # --- taking a rule back -----------------------------------------------------------------------------
 
 
@@ -226,16 +335,18 @@ def test_undo_with_no_rules_changes_nothing(example_me, clock):
     assert not (example_me / "lessons.md").exists()
 
 
-def test_undo_marks_the_newest_matching_entry_when_a_rule_was_added_twice(example_me, clock):
+def test_undo_marks_the_newest_matching_entry_when_a_rule_was_added_again_after_it_was_taken_back(example_me, clock):
     rules.add("post", "Keep it plain.")
     clock["now"] = datetime(2026, 10, 30, 7, 0)
+    rules.undo("post")
+    clock["now"] = datetime(2026, 10, 31, 9, 0)
     rules.add("post", "Keep it plain.")
     clock["now"] = datetime(2026, 11, 2, 8, 0)
 
     rules.undo("post")
 
     first, second = headers(example_me)
-    assert "(removed" not in first
+    assert first.endswith("(removed 2026-10-30)"), "the first removal keeps its own date"
     assert second.endswith("(removed 2026-11-02)")
 
 
@@ -279,15 +390,20 @@ def test_remove_refuses_a_number_that_is_not_a_rule(example_me, clock, number):
     assert rules.read("post").count("\n") == 2
 
 
-def test_remove_marks_the_entry_with_the_same_date_when_a_rule_was_added_twice(example_me, clock):
-    rules.add("post", "Keep it plain.")
-    clock["now"] = datetime(2026, 10, 30, 7, 0)
-    rules.add("post", "Keep it plain.")
+def test_remove_marks_the_entry_with_the_same_date_when_a_rule_appears_twice(example_me, clock):
+    # add refuses a repeat, so this is the file as an older kit or the creator's own edits could leave it
+    (example_me / "rules").mkdir()
+    (example_me / "rules" / "post.md").write_text("- 2026-10-28: Keep it plain.\n- 2026-10-30: Keep it plain.\n")
+    (example_me / "lessons.md").write_text(
+        "## 2026-10-28 14:05 \u00b7 Keep it plain.\n\n- Skill: post\n- Rule: Keep it plain.\n\n"
+        "## 2026-10-30 07:00 \u00b7 Keep it plain.\n\n- Skill: post\n- Rule: Keep it plain.\n"
+    )
+    clock["now"] = datetime(2026, 11, 2, 8, 0)
 
     rules.remove("post", 1)  # the older line, dated 2026-10-28
 
     first, second = headers(example_me)
-    assert first.endswith("(removed 2026-10-30)")
+    assert first.endswith("(removed 2026-11-02)")
     assert "(removed" not in second
     assert rules.read("post") == "- 2026-10-30: Keep it plain.\n"
 
@@ -344,6 +460,13 @@ def test_cli_add_then_read(example_me, clock, capsys):
     assert (code, out) == (0, "")
 
 
+def test_cli_says_when_a_rule_is_already_recorded(example_me, clock, capsys):
+    assert cli(["add", "post", "Keep", "it", "plain."], capsys)[1] == "Recorded for post: Keep it plain.\n"
+    code, out, err = cli(["add", "post", "Keep it plain."], capsys)
+    assert (code, out, err) == (0, "Already recorded for post: Keep it plain.\n", "")
+    assert rules.read("post").count("\n") == 1
+
+
 def test_cli_add_takes_the_rule_from_standard_input(example_me, clock, capsys, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO('Say "next steps" at the end.\n'))
     code, out, _ = cli(["add", "post", "-"], capsys)
@@ -376,6 +499,8 @@ def test_cli_undo_remove_and_recent(example_me, clock, capsys):
     "argv",
     [
         ["add", "Bad Skill", "A rule."],
+        ["add", "captions", "A rule."],
+        ["add", "post", "x" * 301],
         ["add", "post", "   "],
         ["read", "../x"],
         ["remove", "post", "7"],
@@ -412,10 +537,15 @@ def test_the_module_runs_as_a_command(tmp_path):
             text=True,
         )
 
-    added = run("add", "ui-story", "Keep it under 40 seconds.")
+    added = run("add", "learnings", "Keep it under 40 seconds.")
     assert added.returncode == 0, added.stderr
-    assert "Recorded for ui-story" in added.stdout
-    read = run("read", "ui-story")
+    assert "Recorded for learnings" in added.stdout
+    read = run("read", "learnings")
     assert read.returncode == 0
     assert read.stdout.endswith(": Keep it under 40 seconds.\n")
     assert (me / "lessons.md").is_file()
+
+    unknown = run("add", "no-such-skill", "Keep it short.")
+    assert unknown.returncode == 1 and unknown.stdout == ""
+    assert unknown.stderr.startswith("There is no skill called no-such-skill. The skills are: ")
+    assert "learnings" in unknown.stderr and "Traceback" not in unknown.stderr

@@ -164,7 +164,7 @@ def test_session_start_is_silent_when_set_up_and_nothing_has_been_learned(exampl
 def test_session_start_shows_the_last_five_lessons(example_me, monkeypatch):
     for day in range(1, 8):
         monkeypatch.setattr(rules, "_now", lambda day=day: datetime(2026, 10, day, 9, 30))
-        rules.add("post", f"Rule number {day}. It has a second sentence.")
+        rules.add("learnings", f"Rule number {day}. It has a second sentence.")
 
     done = start(example_me)
 
@@ -177,8 +177,8 @@ def test_session_start_shows_the_last_five_lessons(example_me, monkeypatch):
 def test_session_start_skips_lessons_that_were_taken_back(example_me, monkeypatch):
     for day in range(1, 5):
         monkeypatch.setattr(rules, "_now", lambda day=day: datetime(2026, 10, day, 9, 30))
-        rules.add("post", f"Rule number {day}.")
-    rules.undo("post")  # takes back rule 4
+        rules.add("learnings", f"Rule number {day}.")
+    rules.undo("learnings")  # takes back rule 4
 
     done = start(example_me)
 
@@ -462,6 +462,34 @@ def test_update_kit_skill_sends_git_clones_to_git_pull_and_explains_what_is_kept
     assert "replaced even when the release did not change it" not in body, "the old policy is gone"
     claude = text(ROOT / "CLAUDE.md")
     assert "`git pull`" in claude and "me/kit-backups/" in claude and "unless the release changed it too" in claude
+
+
+def test_shell_examples_that_add_a_rule_use_single_quotes_so_dollar_signs_and_backticks_survive():
+    sources = [ROOT / "CLAUDE.md", ROOT / "AGENTS.md", *[f / "SKILL.md" for f in skill_folders() if f.name != "humanizer"]]
+    for source in sources:
+        doubled = re.findall(r"python -m kit\.rules add \S+ \"", text(source))
+        assert doubled == [], f"{source.name} quotes a rule with double quotes in a shell example"
+    claude = text(ROOT / "CLAUDE.md")
+    assert "python -m kit.rules add <skill> '<rule>'" in claude
+    assert "300 characters" in claude
+
+
+def test_learnings_skill_documents_adding_by_hand_with_its_limits():
+    body = text(SKILLS / "learnings" / "SKILL.md")
+    section = body[body.index("## Add a rule by hand") : body.index("## What this skill changes")]
+    assert "python -m kit.rules add post 'Never use exclamation marks.'" in section
+    assert "Single quotes keep `$` and backticks exactly as typed" in section
+    assert "python -m kit.rules add post - <<'RULE'" in section and "\nRULE\n" in section, "the standard input form"
+    for words in ("300 characters", "folder in `.claude/skills/`", "already recorded", "names the ones that are"):
+        assert words in section, words
+
+
+def test_next_never_starts_heavy_work_by_itself_even_when_told_to_continue():
+    body = text(SKILLS / "next" / "SKILL.md")
+    assert "without asking" not in body
+    step = re.search(r"^3\. (.+)$", body, re.M).group(1)
+    assert "If they said \"continue\" or \"keep going\", hand over right away for light work" in step
+    assert "A render, an encode or a transcription still waits for their go-ahead" in step
 
 
 def test_learnings_skill_covers_show_undo_and_prune():

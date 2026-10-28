@@ -72,7 +72,7 @@ if runs:
         pass
 ```
 
-3. Find the state in the table and tell the creator the next step in one or two sentences. If they said "continue" or "keep going", hand over to the skill named in the table without asking. Otherwise offer it.
+3. Find the state in the table and tell the creator the next step in one or two sentences, then offer to hand over to the skill named there. If they said "continue" or "keep going", hand over right away for light work such as a plan, a script or captions. A render, an encode or a transcription still waits for their go-ahead, however they phrased the request.
 4. To look at a different video, run the script again with `SLUG=<folder name>` set.
 
 | State | What it means | What to say, and who takes over |
@@ -92,4 +92,4 @@ A `warning:` line means a file in `take/` is a link to a raw take that has moved
 
 ## Feedback
 
-When the creator corrects how this skill answers, fix it now and record the rule with `kit.rules.add("next", "<rule>")`. In a shell: `uv run python -m kit.rules add next "<rule>"`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.
+When the creator corrects how this skill answers, fix it now and record the rule with `kit.rules.add("next", "<rule>")`. In a shell: `uv run python -m kit.rules add next '<rule>'`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.

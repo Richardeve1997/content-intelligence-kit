@@ -52,7 +52,7 @@ Every skill starts by reading the creator's rules for it with `kit.rules.read("<
 Every skill ends with a Feedback section. When the creator corrects something, or says "going forward", "always" or "never":
 
 1. Fix what is in front of them first.
-2. Record the lasting part with `kit.rules.add("<skill>", "<rule>")`. In a shell: `uv run python -m kit.rules add <skill> "<rule>"`. Write one or two plain sentences, with no dates and no quotes from the creator. If the rule touches several skills, add it once for each.
+2. Record the lasting part with `kit.rules.add("<skill>", "<rule>")`. In a shell: `uv run python -m kit.rules add <skill> '<rule>'`, with single quotes so `$` and backticks stay as typed. Write one or two plain sentences, 300 characters at most, with no dates and no quotes from the creator. The skill must be a folder in `.claude/skills/`, and a rule the skill already has is skipped. If the rule touches several skills, add it once for each.
 3. If it contradicts an older rule, take the old one out first. `uv run python -m kit.rules undo <skill>` removes the newest, and `learnings` handles the rest.
 4. Say in one line what you recorded.
 
