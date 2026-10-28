@@ -19,6 +19,10 @@ and holds the request id (sent as both X-Request-Id and Idempotency-Key), the po
 to a create never arrives, the next run looks for a post with that title in Zernio and uses it, and only
 sends the create again, with the same request id, when there is none. media.json remembers the upload.
 
+A resend that Zernio refuses or turns away leaves the record as it was, because that says nothing about
+the attempt before it, which may have made the post. The next run then sends the same key again, and Zernio
+answers with the post it already has, whatever the caption now says.
+
 `cancel` and `reschedule` look for such a post the same way, so they can reach a post whose create was
 interrupted. After 23 hours with no post found, `schedule` stops and says to check Zernio, because Zernio
 only treats a repeated request as the same one for 24 hours.
@@ -66,6 +70,9 @@ EARLIER_TEXT = "Zernio still holds the earlier text of this post. To use the new
 WAITING = "Another run is posting this video. Waiting for it to finish."
 LOCK = ".post.lock"  # in the video's folder, so work/<slug>/post/ appears only once something is recorded in it
 AGAIN = "Run the same command again: it looks for the post in Zernio before it sends anything."
+EARLIER_ATTEMPT = (
+    "An earlier attempt may already have made this post, so the next run looks for it before it sends anything."
+)
 CANCEL_FIRST = "To try again, cancel it first and then schedule it again."
 PASSED = (
     "The time you picked has passed or is too close to schedule. Pick a time at least five minutes from now, "
@@ -412,13 +419,14 @@ class _Run:
         )
         receipt["account_id"] = account["_id"]
         receipt["create_attempted"] = True
+        resend = "attempted_at" in receipt  # an earlier run already sent this request, and may have made the post
         # The first attempt's time is kept: Zernio's 24 hours run from the first request with this key.
         receipt.setdefault("attempted_at", _now().isoformat(timespec="seconds"))
         store.write(path, receipt)  # the request id is on disk before the request leaves
         try:
             created = self.client.create_post(body, receipt["request_id"])
         except zernio.ZernioError as exc:
-            return self._create_failed(platform, path, receipt, exc)
+            return self._create_failed(platform, path, receipt, exc, resend)
         saved = zernio.post_of(created)
         post_id = saved.get("_id") or created.get("postId")
         if not post_id:
@@ -426,9 +434,11 @@ class _Run:
         receipt["post_id"] = post_id
         receipt["scheduled_for"] = self.when.isoformat()
         store.write(path, receipt)
-        return self._confirm(platform, post_id, saved)
+        return self._confirm(platform, post_id, saved, resend)
 
-    def _create_failed(self, platform: str, path: Path, receipt: dict, exc: zernio.ZernioError) -> Result:
+    def _create_failed(
+        self, platform: str, path: Path, receipt: dict, exc: zernio.ZernioError, resend: bool
+    ) -> Result:
         body = exc.body if isinstance(exc.body, dict) else {}
         if exc.status == 409 and body.get("existingPostId"):
             # Zernio already holds this exact caption and video. If it is our own post, use it.
@@ -445,11 +455,20 @@ class _Run:
                 receipt.pop("post_id")
         if exc.uncertain:
             return Result(platform, "failed", reason=f"{exc} {AGAIN}")
-        path.unlink(missing_ok=True)  # Zernio refused it, so nothing exists to remember
+        if resend:
+            # Refusing or turning away the resend says nothing about the attempt before it, which may have made
+            # the post. Keep the request id and the time of the first attempt, so a later run, whatever its
+            # caption says, sends the same Idempotency-Key and Zernio answers with the post it already has.
+            return Result(platform, "failed", reason=f"{exc} {EARLIER_ATTEMPT}")
+        path.unlink(missing_ok=True)  # the first request was refused, so nothing exists to remember
         return Result(platform, "failed", reason=str(exc))
 
-    def _confirm(self, platform: str, post_id: str, fallback: dict) -> Result:
-        """Read the new post back and report it as Zernio holds it."""
+    def _confirm(self, platform: str, post_id: str, fallback: dict, resend: bool = False) -> Result:
+        """Read the new post back and report it as Zernio holds it.
+
+        `resend` is True when an earlier run had already sent this request, so a post at another time than
+        the one asked for is that earlier post, which Zernio answered with again.
+        """
         try:
             post = self.client.get_post(post_id)
         except zernio.ZernioError:
@@ -465,10 +484,14 @@ class _Run:
         if status == "scheduled":
             if actual is None or abs(actual - self.when) > TOLERANCE:
                 said = "no time" if actual is None else describe_time(actual.astimezone(self.zone))
-                return Result(
-                    platform, "failed", post_id, reason=f"Zernio set it for {said}, not {describe_time(self.when)}. Check it in Zernio.",
-                    scheduled_for=shown,
-                )
+                if resend and actual is not None:
+                    note = (
+                        f"Zernio already had this post from an earlier attempt, set for {said}. "
+                        f"To move it to {describe_time(self.when)}, ask to reschedule it."
+                    )
+                else:
+                    note = f"Zernio set it for {said}, not {describe_time(self.when)}. Check it in Zernio."
+                return Result(platform, "failed", post_id, reason=note, scheduled_for=shown)
             return Result(platform, "scheduled", post_id, reason=self._text_note(platform, post), scheduled_for=shown)
         if status == "published":
             return Result(platform, "published", post_id, url, "Zernio published it at once, not at the time you chose.", shown)
@@ -579,7 +602,7 @@ def _receipt(folder: Path, platform: str) -> tuple[Path, dict]:
 
 
 def _adopt_interrupted(
-    client: zernio.Client, receipt: dict, path: Path, platform: str, slug: str, profile, undone: str
+    client: zernio.Client, receipt: dict, path: Path, platform: str, slug: str, profile, undone: str, command: str
 ) -> Result | None:
     """For `cancel` and `reschedule` when the record has no post id.
 
@@ -599,7 +622,7 @@ def _adopt_interrupted(
         platform, "skipped",
         reason=(
             f'An earlier attempt to schedule it was interrupted, and Zernio has no post titled "{title}". '
-            f"Nothing was {undone}."
+            f"Nothing was {undone}. If it appears in Zernio later, run {command} again."
         ),
     )
 
@@ -650,7 +673,7 @@ def reschedule(slug: str, platform: str, when: datetime, *, client: zernio.Clien
     with store.locked(folder / LOCK, WAITING):
         receipt = store.read(path)
         if not receipt.get("post_id"):
-            outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "moved")
+            outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "moved", "reschedule")
             if outcome is not None:
                 return outcome
         post_id = receipt["post_id"]
@@ -691,7 +714,7 @@ def cancel(slug: str, platform: str, *, client: zernio.Client | None = None) -> 
     with store.locked(folder / LOCK, WAITING):
         receipt = store.read(path)
         if not receipt.get("post_id"):
-            outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "cancelled")
+            outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "cancelled", "cancel")
             if outcome is not None:
                 return outcome
         post_id = receipt["post_id"]

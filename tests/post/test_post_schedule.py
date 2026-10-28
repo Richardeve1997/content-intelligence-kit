@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -670,6 +671,99 @@ def test_an_edited_caption_resent_after_a_lost_answer_does_not_make_a_second_pos
     assert "still holds the earlier text" in again.reason  # and the result says which words are scheduled
 
 
+def test_a_resend_turned_away_by_rate_limiting_keeps_its_request_id_so_a_later_run_makes_no_second_post(
+    reel, stub, when, monkeypatch
+):
+    # run 1: Zernio saves the post, the answer is lost, and the post list has not caught up
+    stub.drop_creates = ["after"]
+    (first,) = run(reel, stub, ["instagram"], when)
+    assert first.status == "failed" and len(stub.posts) == 1
+    kept = receipt(reel, "instagram")
+    stub.list_lag = True
+
+    # run 2: the resend is turned away with 429 until the post's own time is less than a minute off
+    with monkeypatch.context() as patch:
+        now = {"at": when.astimezone(timezone.utc) - timedelta(seconds=100)}
+        patch.setattr(zernio, "_now", lambda: now["at"])
+        patch.setattr(
+            zernio, "time", SimpleNamespace(sleep=lambda seconds: now.update(at=now["at"] + timedelta(seconds=seconds)))
+        )
+        stub.reply("POST", r"/api/v1/posts", 429, {"error": "Slow down"}, {"Retry-After": "50"})
+        (second,) = run(reel, stub, ["instagram"], when)
+    assert second.status == "failed" and "Pick a later time" in second.reason
+    assert "earlier attempt may already have made this post" in second.reason
+    assert receipt(reel, "instagram") == kept  # the same request id, and the time of the first attempt
+
+    # run 3: the creator edits the caption, approves it and asks again
+    edit_caption(reel, "instagram", NEW_WORDS)
+    (third,) = run(reel, stub, ["instagram"], when)
+    assert len(stub.posts) == 1  # not two
+    assert {c.headers["idempotency-key"] for c in stub.creates()} == {kept["request_id"]}  # one key throughout
+    assert third.status == "scheduled" and third.post_id in stub.posts
+    assert "still holds the earlier text" in third.reason
+
+
+def test_a_resend_that_runs_out_of_rate_limited_tries_keeps_its_receipt_too(reel, stub, when, monkeypatch):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    kept = receipt(reel, "instagram")
+    stub.list_lag = True
+    monkeypatch.setattr(zernio, "time", SimpleNamespace(sleep=lambda seconds: None))
+    stub.reply("POST", r"/api/v1/posts", 429, {"error": "Rate limit exceeded"}, {"Retry-After": "0"}, times=6)
+
+    (second,) = run(reel, stub, ["instagram"], when)
+    assert second.status == "failed" and "HTTP 429" in second.reason
+    assert receipt(reel, "instagram") == kept
+
+    (third,) = run(reel, stub, ["instagram"], when)  # the rate limit has lifted
+    assert third.status == "scheduled" and len(stub.posts) == 1
+
+
+def test_a_first_attempt_that_runs_out_of_rate_limited_tries_is_forgotten(reel, stub, when, monkeypatch):
+    # every answer was 429, so Zernio never looked at any of the requests and there is nothing to remember
+    monkeypatch.setattr(zernio, "time", SimpleNamespace(sleep=lambda seconds: None))
+    stub.reply("POST", r"/api/v1/posts", 429, {"error": "Rate limit exceeded"}, {"Retry-After": "0"}, times=6)
+    (result,) = run(reel, stub, ["instagram"], when)
+    assert result.status == "failed" and "HTTP 429" in result.reason
+    assert not (reel.folder / "post" / "instagram.json").exists()
+    assert len(stub.posts) == 0
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+def test_a_resend_that_is_refused_says_nothing_about_the_first_attempt_so_its_receipt_stays(reel, stub, when, status):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    kept = receipt(reel, "instagram")
+    stub.list_lag = True
+    stub.reply("POST", r"/api/v1/posts", status, {"error": "Refused for now"}, times=1)
+
+    (second,) = run(reel, stub, ["instagram"], when)
+    assert second.status == "failed" and "Refused for now" in second.reason
+    assert "earlier attempt may already have made this post" in second.reason
+    assert receipt(reel, "instagram") == kept
+
+    stub.list_lag = False  # the list has caught up: the next run finds the post it made the first time
+    (third,) = run(reel, stub, ["instagram"], when)
+    assert third.status == "scheduled" and len(stub.posts) == 1 and third.post_id in stub.posts
+
+
+def test_a_resend_answered_with_the_earlier_post_at_its_earlier_time_says_how_to_move_it(reel, stub, when):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    stub.list_lag = True
+    later = when + timedelta(days=1)  # the creator asked for a later time in the meantime
+
+    (second,) = run(reel, stub, ["instagram"], later)
+    assert second.status == "failed" and len(stub.posts) == 1
+    assert "already had this post from an earlier attempt" in second.reason
+    assert post.describe_time(when) in second.reason and "reschedule" in second.reason
+
+    stub.list_lag = False
+    (third,) = run(reel, stub, ["instagram"], later)  # the next run finds it and says the same thing the same way
+    assert third.status == "scheduled" and "instead" in third.reason and "reschedule" in third.reason
+    assert len(stub.posts) == 1
+
+
 def test_after_23_hours_an_attempt_that_left_no_post_is_not_sent_again(reel, stub, when, monkeypatch):
     clock = {"now": datetime.now(timezone.utc)}
     monkeypatch.setattr(schedule_module, "_now", lambda: clock["now"])
@@ -778,13 +872,14 @@ def test_cancel_and_reschedule_say_so_when_the_interrupted_create_made_no_post(r
     stub.drop_creates = ["before"]
     run(reel, stub, ["instagram"], when)
 
-    for result, undone in (
-        (post.cancel(reel.slug, "instagram", client=stub.client()), "cancelled"),
-        (post.reschedule(reel.slug, "instagram", when + timedelta(days=1), client=stub.client()), "moved"),
+    for result, undone, command in (
+        (post.cancel(reel.slug, "instagram", client=stub.client()), "cancelled", "cancel"),
+        (post.reschedule(reel.slug, "instagram", when + timedelta(days=1), client=stub.client()), "moved", "reschedule"),
     ):
         assert result.status == "skipped"
         assert "interrupted" in result.reason and "no post titled" in result.reason
         assert "Example Studio instagram example-reel" in result.reason and f"Nothing was {undone}" in result.reason
+        assert result.reason.endswith(f"If it appears in Zernio later, run {command} again.")  # and what to do next
     assert stub.calls("DELETE") == [] and post_edits(stub) == []
     assert receipt(reel, "instagram")["create_attempted"] is True  # the record stays, in case the create lands late
 
