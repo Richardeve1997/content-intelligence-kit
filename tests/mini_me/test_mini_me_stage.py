@@ -20,7 +20,9 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("PIL")
 playwright = pytest.importorskip("playwright.sync_api")
 
-from mini_me_helpers import ROOT, load, make_character, needs_node, speech_samples, write_wav  # noqa: E402
+from mini_me_helpers import (  # noqa: E402
+    BIG_HEAD, PAGES, ROOT, SECONDS, SPOKEN, build_project, load, make_character, needs_node,
+)
 from PIL import Image  # noqa: E402
 
 from kit import brand, config  # noqa: E402
@@ -30,45 +32,6 @@ margin_scan = load("margin_scan")
 
 GSAP = ROOT / "kit" / "vendor" / "gsap.min.js"
 pytestmark = pytest.mark.skipif(not GSAP.is_file(), reason="needs GSAP: bash bin/fetch_gsap.sh")
-
-PAGES = [
-    {"t": 0.0, "text": "BASIL *DIES*", "pose": "point_up", "field": "dark", "prop": "card: Week three"},
-    {"t": 1.6, "text": "LOOK AT THIS", "pose": "point_left", "field": "light", "prop": "card: A sunny window"},
-    {"t": 3.0, "text": "WATER EARLY", "pose": "point_right", "field": "dark", "prop": "stamp: AM"},
-    {"t": 4.4, "text": "3 PLANTS", "pose": "thumbs_up", "field": "light", "prop": "count"},
-    {"t": 5.6, "text": "COMMENT GROW", "pose": "point_up", "field": "dark", "prop": "cta"},
-]
-SPOKEN = ("Basil dies in week three. Look at this window. Water it early. Three plants made it. "
-          "Comment GROW and I'll send you the checklist.")
-SECONDS = 8.0
-
-
-def words_for(text: str) -> list[dict]:
-    """Words laid over the pages: each sentence starts on its page."""
-    starts = [p["t"] + 0.12 for p in PAGES]
-    out = []
-    for start, sentence in zip(starts, re.findall(r"[^.]+\.", text)):
-        t = start
-        for word in sentence.split():
-            out.append({"w": word, "s": round(t, 3), "e": round(t + 0.26, 3)})
-            t += 0.3
-    return out
-
-
-def build_project(root: Path, me: Path, slug: str = "example-reel", spoken: str = SPOKEN) -> Path:
-    """work/<slug>/ with a voice-over, words and pages, the stand-in character in me/, then install.py."""
-    folder = root / "work" / slug
-    folder.mkdir(parents=True, exist_ok=True)
-    wav = write_wav(speech_samples([("talk", SECONDS - 0.3), ("gap", 0.3)]), folder / "vo.wav")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-c:a", "aac", "-b:a", "192k", "-ac", "2",
-                    str(folder / "vo.m4a")], check=True)
-    wav.unlink()
-    (folder / "words.json").write_text(json.dumps({"dur": SECONDS, "words": words_for(spoken)}))
-    (folder / "beats.json").write_text(json.dumps({"duration": SECONDS, "pages": PAGES}))
-    if not (me / "character" / "manifest.json").exists():
-        make_character(me / "character")
-    return install.install(slug)
-
 
 class Page:
     """One loaded composition, seeked the way the renderer seeks it."""
@@ -114,20 +77,31 @@ def browser():
         started.close()
 
 
-@pytest.fixture(scope="module")
-def stage(tmp_path_factory, browser):
-    base = tmp_path_factory.mktemp("stage")
+def project(tmp_path_factory, browser, build):
+    base = tmp_path_factory.mktemp(build)
     root, me = base / "kit", base / "me"
     shutil.copytree(ROOT / "me.example", me)
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("KIT_ME", str(me))
         patch.setattr(config, "kit_root", lambda: root)
-        hf = build_project(root, me)
+        hf = build_project(root, me, build=build)
         profile = config.load_profile()
         tokens = brand.colour_tokens(profile)
-    page = Page(browser, hf)
-    yield {"page": page, "hf": hf, "profile": profile, "tokens": tokens, "dir": base}
-    page.page.close()
+    return {"page": Page(browser, hf), "hf": hf, "profile": profile, "tokens": tokens, "dir": base}
+
+
+@pytest.fixture(scope="module")
+def stage(tmp_path_factory, browser):
+    built = project(tmp_path_factory, browser, "standard")
+    yield built
+    built["page"].page.close()
+
+
+@pytest.fixture(scope="module")
+def big_stage(tmp_path_factory, browser):
+    built = project(tmp_path_factory, browser, "big_head")
+    yield built
+    built["page"].page.close()
 
 
 def rgb(colour: str) -> tuple[int, int, int]:
@@ -214,22 +188,43 @@ def test_fields_flip_on_every_page(stage):
     for n, (spec, end) in enumerate(zip(PAGES, ends)):
         page.seek((spec["t"] + end) / 2)
         shown = visible_scene(page)
-        assert len(shown) == 1 and shown[0]["id"] == f"mm-p{n}", shown
+        assert len(shown) == 1 and shown[0]["id"] == f"mm-p{n + 1}", shown
         assert shown[0]["field"] == spec["field"]
         assert f"mm-stk-{spec['field']}" in shown[0]["filter"], "the outline matches the field"
 
 
-def test_the_character_is_big_and_cropped_at_the_waist(stage):
-    pages = stage["page"].js("Stage.audit()")["pages"]
-    for spec, info in zip(PAGES, pages):
-        scale, crown = info["char"]["scale"], info["char"]["crown"]
+STANDARD = {"top": 60, "neck": 113, "waist": 197, "mouth": [116, 99], "eyes": [107, 85]}  # the standard stand-in
+
+
+def framing(built, body):
+    """Each page shows the character down to its waist; the close puts its mouth well inside the frame."""
+    info = built["page"].js("Stage.audit()")
+    assert [p for p in info["problems"] if not p.startswith("note:")] == []
+    for spec, page in zip(PAGES, info["pages"]):
+        char = page["char"]
         if spec["prop"] == "cta":
-            assert 10 <= scale <= 12 and crown <= 1150, info["char"]
-        else:
-            assert 6 <= scale <= 8, info["char"]
-            assert 1000 <= crown <= 1320, info["char"]
-        # the waist sits at the bottom of the frame or below it: the feet are never in shot
-        assert info["char"]["crown"] + 200 * scale > 1920
+            assert 10 <= char["scale"] <= 12, char
+            mouth = char["crown"] + (body["mouth"][1] + 4 - body["top"]) * char["scale"]
+            assert 1300 <= mouth <= 1700 and char["mouth"] == mouth, (mouth, char)
+            card = built["page"].js("document.querySelector('.mm-cta').offsetTop + document.querySelector('.mm-cta').offsetHeight")
+            assert char["crown"] + (body["eyes"][1] - body["top"]) * char["scale"] >= card + 30, "the eyes show under the card"
+            continue
+        assert 6 <= char["scale"] <= 8 and 960 <= char["crown"] <= 1320, char
+        bottom = body["top"] + (1920 - char["crown"]) / char["scale"]  # the art row at the bottom of the frame
+        assert bottom >= body["waist"] - 2, f"cropped at row {bottom:.0f}, above the waist ({body['waist']})"
+        assert bottom - body["neck"] >= 40, "more than the head and a sliver of shoulder is in view"
+
+
+def test_the_character_is_big_and_cropped_at_the_waist(stage):
+    framing(stage, STANDARD)
+
+
+def test_a_big_headed_character_is_framed_to_its_waist_too(big_stage):
+    """A chibi's waist is far below halfway: the frame still reaches it, and the close keeps the mouth in view."""
+    framing(big_stage, BIG_HEAD)
+    figure = big_stage["page"].js("window.MM_DATA.figure")
+    assert abs(figure["waist"] - BIG_HEAD["waist"]) <= 2 and abs(figure["neck"] - BIG_HEAD["neck"]) <= 3, figure
+    assert figure["waist_measured"] is True
 
 
 def test_headlines_fit_the_safe_area_and_the_first_shows_on_frame_0(stage):
@@ -238,12 +233,12 @@ def test_headlines_fit_the_safe_area_and_the_first_shows_on_frame_0(stage):
         assert all(90 <= line["left"] and line["right"] <= 990 for line in info["lines"]), info["lines"]
         assert info["headBottom"] <= 632
     page.seek(0)
-    assert page.js("getComputedStyle(document.querySelector('#mm-p0 .mm-ln')).opacity") == "1"
-    weight = page.js("getComputedStyle(document.querySelector('#mm-p0 .mm-ln')).fontWeight")
+    assert page.js("getComputedStyle(document.querySelector('#mm-p1 .mm-ln')).opacity") == "1"
+    weight = page.js("getComputedStyle(document.querySelector('#mm-p1 .mm-ln')).fontWeight")
     assert weight == "900", "the heaviest weight of the display font"
-    family = page.js("getComputedStyle(document.querySelector('#mm-p0 .mm-ln')).fontFamily")
-    assert "Inter Tight" in family
-    transform = page.js("getComputedStyle(document.querySelector('#mm-p0 .mm-ln')).textTransform")
+    family = page.js("getComputedStyle(document.querySelector('#mm-p1 .mm-ln')).fontFamily")
+    assert stage["profile"].fonts.display in family
+    transform = page.js("getComputedStyle(document.querySelector('#mm-p1 .mm-ln')).textTransform")
     assert transform == "uppercase"
 
 
@@ -334,7 +329,7 @@ def test_every_page_keeps_moving(stage):
         where = []
         for t in (spec["t"] + 0.4, end - 0.1):
             page.seek(t)
-            where.append(page.js(f"getComputedStyle(document.querySelector('#mm-p{n} .mm-hl')).transform"))
+            where.append(page.js(f"getComputedStyle(document.querySelector('#mm-p{n + 1} .mm-hl')).transform"))
         assert where[0] != where[1], f"page {n + 1} holds still"
 
 
@@ -354,3 +349,34 @@ def test_the_cursor_presses_the_button_it_should(stage):
         return {tip: [cur.left + 19, cur.top + 9], post: [post.left, post.right, post.top, post.bottom]}; })()""")
     (x, y), (left, right, top, bottom) = where["tip"], where["post"]
     assert left - 4 <= x <= right + 4 and top - 4 <= y <= bottom + 4, where
+
+
+def test_a_close_that_cannot_reach_scale_10_says_why(tmp_path_factory, browser):
+    """A character whose arms are always out is too wide for a close-up: the close shrinks and says so."""
+    built = project(tmp_path_factory, browser, "wide")
+    info = built["page"].js("Stage.audit()")
+    close = info["pages"][-1]["char"]
+    assert close["scale"] < 10
+    notes = [p for p in info["problems"] if "the close uses scale" in p]
+    assert len(notes) == 1 and f"scale {close['scale']}" in notes[0] and "safe lines at the sides" in notes[0], notes
+    built["page"].page.close()
+
+
+def profile_with(me, **handles):
+    data = json.loads((me / "profile.json").read_text())
+    data["handles"].update(handles)
+    if not handles.get("instagram"):
+        data["platforms"] = [p for p in data["platforms"] if p != "instagram"]
+        data["cta"]["comment_platforms"] = [p for p in data["cta"]["comment_platforms"] if p != "instagram"]
+    (me / "profile.json").write_text(json.dumps(data))
+    return config.load_profile()
+
+
+def test_the_card_shows_the_instagram_handle_with_its_at(example_me):
+    card = install.profile_card(profile_with(example_me, instagram="examplestudio"))
+    assert card["handle"] == "@examplestudio" and card["name"] == "Example Studio" and card["initial"] == "E"
+
+
+def test_with_no_instagram_handle_the_card_shows_the_name_alone(example_me):
+    card = install.profile_card(profile_with(example_me, instagram="", tiktok="@examplestudio"))
+    assert card["handle"] == "", "never another platform's handle on Instagram's profile row"

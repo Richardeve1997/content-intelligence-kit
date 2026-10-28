@@ -10,7 +10,8 @@ line is said with the first voice there is:
      their saved copy of their voice, else a stock voice
   3. macOS say, as a scratch voice
 The clip is one headline page with the character waving and talking: the same install, render and finish as
-a full Reel, in a scratch video folder (work/mini-me-test-clip/) that is deleted afterwards unless --keep.
+a full Reel, in a scratch video folder (work/mini-me-test-clip/). Afterwards everything the script made there is
+deleted unless --keep, and nothing else: a recording kept in that folder stays where it is.
 It should run 5 to 10 seconds; a line much longer or shorter is said anyway, with a note.
 """
 
@@ -27,6 +28,7 @@ from kit.config import KitError
 
 SLUG = "mini-me-test-clip"
 HEADLINE = "MEET MY MINI ME"
+MADE = ("build", "review", "vo.m4a", "vo.json", "words.json", "beats.json", "script.md", "final.mp4")
 
 
 def default_line(profile) -> str:
@@ -37,12 +39,28 @@ def make_voice(line: str, recording: Path | None, profile) -> tuple[voice.VO, st
     if recording is not None:
         return voice.from_recording(recording, SLUG), "your recording"
     if profile.voice_over in ("elevenlabs", "clone") and config.env(voice.KEY_NAME):
-        saved = voice.saved_voice() if profile.voice_over == "clone" else None
-        return voice.from_elevenlabs(line, SLUG, saved), "ElevenLabs"
+        chosen = voice.chosen_voice(profile)
+        if profile.voice_over == "clone" and chosen is None:
+            print("note: there is no copy of your voice yet, so this clip uses a scratch voice instead of a stock one. "
+                  "Make the copy with: uv run python -m kit.voice clone '<your name>' <sample files>")
+        else:
+            return voice.from_elevenlabs(line, SLUG, chosen), "ElevenLabs"
     if shutil.which("say"):
         return voice.from_say(line, SLUG), "a scratch voice (macOS say)"
     raise KitError("There is no voice for the test clip on this machine. Record the line on your phone and run this "
                    "again with --voice <the file>.")
+
+
+def _clear(folder: Path, recording: Path | None) -> None:
+    """Delete what this script made in the scratch folder, and nothing else: never the creator's recording."""
+    for name in MADE:
+        path = folder / name
+        if recording is not None and (path == recording or path in recording.parents):
+            continue
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.exists() or path.is_symlink():
+            path.unlink()
 
 
 def clip(out: Path, *, line: str | None = None, recording: Path | None = None, keep: bool = False) -> Path:
@@ -52,9 +70,11 @@ def clip(out: Path, *, line: str | None = None, recording: Path | None = None, k
 
     profile = config.load_profile()
     folder = config.work_dir(SLUG)
-    if folder.exists():
-        shutil.rmtree(folder)
-    folder.mkdir(parents=True)
+    recording = Path(recording).absolute() if recording is not None else None
+    if recording is not None and not recording.is_file():
+        raise KitError(f"{recording} does not exist. Record the line on your phone and give its path with --voice.")
+    _clear(folder, recording)
+    folder.mkdir(parents=True, exist_ok=True)
     try:
         said = line or default_line(profile)
         (folder / "script.md").write_text(f"# Test clip\n\n## Narration\n\n{said}\n", encoding="utf-8")
@@ -77,7 +97,9 @@ def clip(out: Path, *, line: str | None = None, recording: Path | None = None, k
         return out
     finally:
         if not keep:
-            shutil.rmtree(folder, ignore_errors=True)
+            _clear(folder, recording)
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
 
 
 def main(argv: list[str] | None = None) -> int:

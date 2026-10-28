@@ -98,7 +98,7 @@ def test_poses_and_props_follow_the_meaning(words):
     assert counted["prop"] == "count"
     made = next(p for p in pages if "MADE" in p["text"])
     assert made["pose"] in {"thumbs_up", "celebrate"}
-    assert by_text  # every page has text
+    assert len(by_text) == len(pages), "no two pages share a headline"
     for page in pages:
         assert beats.prop_kind(page["prop"]) in beats.PROPS
 
@@ -106,7 +106,8 @@ def test_poses_and_props_follow_the_meaning(words):
 def test_the_closing_line_is_one_cta_page(words):
     pages = beats.build(words, cta="follow")["pages"]
     last = pages[-1]
-    assert last["prop"] == "cta" and last["text"] == "FOLLOW" and last["pose"] == "point_up"
+    assert last["prop"] == "cta" and last["text"] == "FOLLOW" and last["pose"] == beats.CLOSE_POSE == "idle"
+    assert pages[-2]["pose"] != "idle", "a new pose every page, the close included"
     follow = next(w for w in words if w.text.startswith("Follow"))
     assert last["t"] == follow.start
     assert sum(1 for p in pages if p["prop"] == "cta") == 1
@@ -194,3 +195,21 @@ def test_without_punctuation_the_pauses_mark_the_sentences():
     said = [[words[i].text for i in group] for group in groups]
     assert said[-1][0] == "comment", said
     assert all("comment" not in group for group in said[:-1])
+
+
+def test_running_it_again_keeps_an_edited_beats_json(kit_home, capsys):
+    folder = config.work_dir("example-reel")
+    folder.mkdir(parents=True)
+    words = timed(NARRATION)
+    (folder / "words.json").write_text(json.dumps({"words": [{"w": w.text, "s": w.start, "e": w.end} for w in words]}))
+    assert beats.main(["example-reel", "--cta", "follow"]) == 0
+    assert not (folder / "beats.backup.json").exists(), "an unedited draft needs no backup"
+    edited = json.loads((folder / "beats.json").read_text())
+    edited["pages"][0]["text"] = "NOT *THIRSTY*"
+    (folder / "beats.json").write_text(json.dumps(edited))
+    assert beats.main(["example-reel", "--cta", "follow"]) == 0
+    assert json.loads((folder / "beats.backup.json").read_text())["pages"][0]["text"] == "NOT *THIRSTY*"
+    (folder / "beats.json").write_text(json.dumps(edited))
+    assert beats.main(["example-reel", "--cta", "follow"]) == 0
+    assert (folder / "beats.backup-2.json").is_file(), "an earlier backup is never overwritten"
+    assert "beats.backup-2.json" in capsys.readouterr().out

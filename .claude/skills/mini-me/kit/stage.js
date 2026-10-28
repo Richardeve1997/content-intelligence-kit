@@ -9,10 +9,12 @@
  * one scene: a flat field (dark or light, flipping every page), the page's headline, the character in the page's
  * pose and the prop that arrives because of the pose. lib/scenes.js, written for each Reel, adds the rest with
  *
- *   Stage.page(n, { lines, char, trans, prop, build })     n counts from 0, in the order of beats.json
+ *   Stage.page(n, { lines, char, trans, prop, build })     n is the page number, from 1, as beats.py and check.py print it
  *
  *     lines  ["WEEK", "*THREE*"] or [{ t: "WEEK", size: 150 }]: the headline lines (default: fitted from text)
- *     char   { pose, scale, x, crown, flip }: overrides for the character (scale 6 to 8, 10 to 12 on the close)
+ *     char   { pose, scale, x, crown, flip }: overrides for the character. A page shows it down to its waist (measured
+ *            from the idle drawing) at the largest scale from 8 down that keeps the crown at y 960 or lower; the close
+ *            puts the mouth at y 1660 at scale 10 to 12, with the head tucked behind the profile card
  *     trans  "down" | "up" | "cut" | "flash": how the scene arrives (default: pushes taking turns)
  *     prop   a prop string, as in beats.json, replacing the page's own
  *     build  function (c) { ... }: receipts, stamps and objects for this page (see c below)
@@ -37,7 +39,10 @@
   "use strict";
   var W = 1080, H = 1920, SAFE_L = 92, SAFE_R = 988, RING = 12, EDGE = 3, OUT = RING + EDGE;
   var HEAD_TOP = 190, HEAD_BOTTOM = 620, FIT_W = 884, MAX_SIZE = 240, MIN_SIZE = 84, LEAD_KEY = 0.15;
-  var PREF_SCALES = [7, 6, 5, 4], CTA_SCALES = [11, 12, 10, 9, 8];
+  // a page shows the character down to its waist, at the largest scale that keeps the crown at y 960 or lower
+  var PAGE_SCALES = [8, 7, 6, 5, 4], CROWN_MIN = 960, CROWN_MAX = 1320;
+  // the close: scale 10 to 12 with the mouth's bottom edge at y 1660, clear of the phone's caption area
+  var CLOSE_SCALES = [11, 12, 10], CLOSE_LOWER = [9, 8], MOUTH_Y = 1660, CARD_H = 300;
   var D = null, WORDS = [], DUR = 0, tl = null, root = null, TOK = {};
   var OVERRIDES = {}, SC = [], WINS = [], HITS = [], PROBLEMS = [];
   var r3 = function (x) { return Math.round(x * 1000) / 1000; };
@@ -254,50 +259,96 @@
     if (M.poses[pose]) return { name: "pose:" + pose, key: "pose:" + pose, e: M.poses[pose] };
     throw new Error("Stage: the character has no pose called " + pose + ". Use one of: " + Object.keys(M.poses).join(", "));
   }
-  /** where the character stands: the largest scale (from the list) whose outline fits x 90 to 990 */
-  function fit(key, o, cta, only) {
-    var X = D.extents[key], F = D.figure, scales = only || (o.scale ? [o.scale] : (cta ? CTA_SCALES : PREF_SCALES));
-    for (var k = 0; k < scales.length; k++) {
-      var sc = scales[k];
-      var crown = o.crown != null ? o.crown : (cta ? clamp(Math.round(H * 0.55), 950, 1150) : clamp(H - (F.waist - F.top) * sc, 1000, 1320));
-      var y = crown + (D.baseline - F.top) * sc, last = Math.min(X.rows.length - 1, F.top + Math.floor((H - crown) / sc));
-      var lo = Infinity, hi = -Infinity;
-      for (var r = 0; r <= last; r++) {
-        var row = X.rows[r];
-        if (!row) continue;
-        var a = o.flip ? -row[1] : row[0], b = o.flip ? -row[0] : row[1];
-        lo = Math.min(lo, a); hi = Math.max(hi, b);
-      }
-      if (lo === Infinity) { lo = -10; hi = 10; }
-      var xmin = SAFE_L + OUT - lo * sc, xmax = SAFE_R - OUT - hi * sc;
-      if (xmin <= xmax || (k === scales.length - 1 && !o.quiet)) {
-        var x = xmin <= xmax ? clamp(o.x != null ? o.x : W / 2, xmin, xmax) : Math.round((xmin + xmax) / 2);
-        if (xmin > xmax) PROBLEMS.push("the pose " + key + " is wider than the space between x 90 and 990 even at scale " + sc + ". Pick another pose for that page.");
-        if (o.x != null && Math.abs(x - o.x) > 0.5) PROBLEMS.push("note: the character was moved from x " + o.x + " to x " + Math.round(x) + " to stay inside the safe lines.");
-        return { scale: sc, x: Math.round(x), y: Math.round(y), crown: Math.round(crown), left: Math.round(x + lo * sc - OUT), right: Math.round(x + hi * sc + OUT) };
-      }
+  /** where x can go for this outline at this scale and crown, so the outline stays inside x 90 to 990 */
+  function across(key, sc, crown, flip) {
+    var X = D.extents[key], F = D.figure, last = Math.min(X.rows.length - 1, F.top + Math.floor((H - crown) / sc));
+    var lo = Infinity, hi = -Infinity;
+    for (var r = 0; r <= last; r++) {
+      var row = X.rows[r];
+      if (!row) continue;
+      var a = flip ? -row[1] : row[0], b = flip ? -row[0] : row[1];
+      lo = Math.min(lo, a); hi = Math.max(hi, b);
     }
+    if (lo === Infinity) { lo = -10; hi = 10; }
+    return { lo: lo, hi: hi, xmin: SAFE_L + OUT - lo * sc, xmax: SAFE_R - OUT - hi * sc };
   }
-  /** the closing punch-in shows the head and shoulders big: a pose too wide for scale 10 to 12 talks instead */
-  function closingPose(poseName, o) {
-    if (o.scale) return poseName;
-    var tries = [poseName, "talking", "idle"];
+  function place(key, sc, crown, o) {
+    var F = D.figure, room = across(key, sc, crown, o.flip);
+    if (room.xmin > room.xmax) return null;
+    var x = clamp(o.x != null ? o.x : W / 2, room.xmin, room.xmax);
+    if (o.x != null && Math.abs(x - o.x) > 0.5) PROBLEMS.push("note: the character was moved from x " + o.x + " to x " + Math.round(x) + " to stay inside the safe lines.");
+    return { scale: sc, x: Math.round(x), y: Math.round(crown + (D.baseline - F.top) * sc), crown: Math.round(crown),
+      left: Math.round(x + room.lo * sc - OUT), right: Math.round(x + room.hi * sc + OUT),
+      rows: [F.top, Math.min(F.feet, F.top + Math.floor((H - crown) / sc))] };
+  }
+  /** a page: the largest scale that shows the character down to its waist with its crown at y 960 or lower */
+  function fitPage(key, o, n) {
+    var F = D.figure, scales = o.scale ? [o.scale] : PAGE_SCALES;
+    for (var k = 0; k < scales.length; k++) {
+      var sc = scales[k], crown = o.crown != null ? o.crown : H - (F.waist - F.top) * sc;
+      if (o.crown == null && crown < CROWN_MIN) {
+        if (!o.scale) continue;  // the head would sit too high to bring the waist into the frame: a smaller scale
+        crown = CROWN_MIN;
+      }
+      var where = place(key, sc, Math.min(crown, CROWN_MAX), o);
+      if (where) return where;
+    }
+    var last = scales[scales.length - 1], fallback = Math.max(CROWN_MIN, Math.min(CROWN_MAX, H - (F.waist - F.top) * last));
+    var room = across(key, last, fallback, o.flip);
+    PROBLEMS.push("page " + n + ": the pose " + key + " is wider than the space between x 90 and 990 even at scale " + last + ". Pick another pose for that page.");
+    return { scale: last, x: Math.round((room.xmin + room.xmax) / 2), y: Math.round(fallback + (D.baseline - F.top) * last), crown: Math.round(fallback),
+      left: 0, right: W, rows: [F.top, F.feet] };
+  }
+  /** the close: the mouth's bottom edge at y 1660 and the eyes below the card. { where, why } (where is null when none fits) */
+  function fitClose(key, e, o, cardBottom, scales) {
+    var F = D.figure, M = window.CHARACTER_MANIFEST, fi = (e.frame_info || [])[0] || {};
+    var mouth = fi.mouth ? fi.mouth[1] + M.faces.mouth_open[1] : F.neck - 4;
+    var eyes = fi.eyes ? fi.eyes[1] : F.top + Math.round(0.6 * (F.neck - F.top));
+    var why = "";
+    for (var k = 0; k < scales.length; k++) {
+      var sc = scales[k], crown = o.crown != null ? o.crown : MOUTH_Y - (mouth - F.top) * sc;
+      if (!o.scale && o.crown == null && crown + (eyes - F.top) * sc < cardBottom + 30) {
+        why = "the character's eyes would sit behind the profile card";
+        continue;
+      }
+      var where = place(key, sc, crown, o);
+      if (!where) { why = "the character would cross the safe lines at the sides"; continue; }
+      where.mouth = Math.round(crown + (mouth - F.top) * sc);
+      where.eyes = Math.round(crown + (eyes - F.top) * sc);
+      return { where: where, why: why };
+    }
+    return { where: null, why: why };
+  }
+  /** the close shows the head big: the page's pose when it fits at scale 10 to 12, else idle, else talking; then smaller */
+  function shootClose(s, o) {
+    var bottom = s.cardTop + CARD_H, wanted = o.pose || s.page.pose, tries = o.pose ? [o.pose] : [wanted, "idle", "talking"];
+    var scales = o.scale ? [o.scale] : CLOSE_SCALES, first = null;
     for (var i = 0; i < tries.length; i++) {
-      var key = entryFor(tries[i]).key, where = fit(key, Object.assign({}, o, { quiet: true }), true, [11, 12, 10]);
-      if (where) {
-        if (i > 0) PROBLEMS.push("note: the pose " + poseName + " is too wide for the closing punch-in, so the character talks there instead.");
-        return tries[i];
+      var found = entryFor(tries[i]), got = fitClose(found.key, found.e, o, bottom, scales);
+      if (!first) first = got;
+      if (got.where) {
+        if (i > 0) PROBLEMS.push("note: page " + s.n + ": the pose " + wanted + " is too wide for the close at scale 10 to 12, so it uses " + tries[i] + ".");
+        return { found: found, where: got.where };
       }
     }
-    return poseName;
+    var f0 = entryFor(tries[0]), lower = fitClose(f0.key, f0.e, o, bottom, CLOSE_LOWER);
+    var where = lower.where || fitPage(f0.key, o, s.n);
+    PROBLEMS.push("note: page " + s.n + ": the close uses scale " + where.scale + ", because at scale 10 to 12 " +
+      (first.why || "the character does not fit the frame") + ".");
+    return { found: f0, where: where };
   }
   function shoot(s, o) {
-    var cta = s.kind === "cta", poseName = o.pose || s.page.pose;
-    if (cta) poseName = closingPose(poseName, o);
-    var found = entryFor(poseName), where = fit(found.key, o, cta);
+    var found, where;
+    if (s.kind === "cta") {
+      var chosen = shootClose(s, o);
+      found = chosen.found; where = chosen.where;
+    } else {
+      found = entryFor(o.pose || s.page.pose);
+      where = fitPage(found.key, o, s.n);
+    }
+    var poseName = found.name.replace("pose:", "");
     var holder = el("div", "mm-ch", s.chl, "filter:url(#mm-stk-" + s.field + ")");
-    var sub = gsap.timeline();
-    var inst = Character.mount(holder, { scale: where.scale, x: where.x, y: where.y, flip: !!o.flip, seed: 7 + s.n * 3 });
+    var inst = Character.mount(holder, { scale: where.scale, x: where.x, y: where.y, flip: !!o.flip, seed: 7 + s.i * 3 });
     var e = found.e, items, keyAt = s.t0;
     if (e.kind === "oneshot") {
       var pre = 0;
@@ -310,15 +361,11 @@
     } else {
       items = [{ t: r3(s.t0 - 0.06), move: found.name }];
     }
-    Character.script(sub, items, { character: inst, until: DUR });
+    Character.script(tl, items, { character: inst, until: DUR });
     if (D.envelope && D.envelope.envelope && D.envelope.envelope.length) {
-      Character.speak(sub, { envelope: D.envelope.envelope, fps: D.envelope.fps, t0: 0, until: DUR }, inst);
+      Character.speak(tl, { envelope: D.envelope.envelope, fps: D.envelope.fps, t0: 0, until: DUR }, inst);
     }
-    // character.js sets its driver's length through timeline.duration(), which rescales a timeline: undo that here,
-    // then hold the driver to the composition's length before it joins the main timeline
-    sub.timeScale(1);
-    sub.getChildren(false, true, false).forEach(function (child) { if (child.duration() > DUR) child.duration(DUR); });
-    tl.add(sub, 0);
+    if (inst.driver && inst.driver.duration() > DUR) inst.driver.duration(DUR);  // the Reel ends at DUR
     var side = /left/.test(poseName) ? "left" : /right/.test(poseName) ? "right" : /up|hold_card|celebrate/.test(poseName) ? "up" : null;
     if (o.flip && side === "left") side = "right"; else if (o.flip && side === "right") side = "left";
     return { el: holder, inst: inst, pose: poseName, keyAt: keyAt, side: side, char: where };
@@ -394,24 +441,29 @@
   function defaultProp(s, c) {
     var kind = String(s.prop).split(":")[0].trim().toLowerCase(), what = content(s.prop);
     if (kind === "stamp") stamp(c, what || headWord(s));
-    else if (kind === "count") s.pageEl.querySelectorAll(".mm-num").forEach(function (n) { A.count(n, s.t0 + 0.02, Math.min(0.7, s.dur * 0.6)); });
+    else if (kind === "count") {
+      // one number counts: the accented one, else the first ("3 OF 5" counts the 3 and leaves the 5 alone)
+      var num = s.pageEl.querySelector(".mm-acc .mm-num") || s.pageEl.querySelector(".mm-num");
+      if (num) A.count(num, s.t0 + 0.02, Math.min(0.7, s.dur * 0.6));
+    }
     else if (kind === "burst") A.burst(c.front, c.char.x, c.char.crown + 140, c.keyAt + 0.05, { r: 260 });
     else if (kind === "bubble") bubble(c, what || "?");
     else if (kind === "card" && what) {
       if (/\.(png|jpe?g|webp|gif|svg)$/i.test(what)) card(c, { img: what });
       else card(c, { text: what });
-    } else if (kind === "card") PROBLEMS.push("note: page " + (s.n + 1) + " has a card with nothing on it. Name what it shows in beats.json.");
+    } else if (kind === "card") PROBLEMS.push("note: page " + s.n + " has a card with nothing on it. Name what it shows in beats.json.");
   }
 
   // ---- the closing call to action ------------------------------------------------------------------------------------------
   function closer(s, c) {
-    var P = D.profile, cta = D.cta || { type: "follow" }, top = Math.max(c.zone.top, 470);
+    var P = D.profile, cta = D.cta || { type: "follow" }, top = s.cardTop;
     var av = P.avatar ? '<img src="' + esc(P.avatar) + '" alt="">' : esc(P.initial || "");
     var lower = cta.type === "comment" && cta.keyword
       ? '<div class="box"><span class="typed"></span><span class="post">Post</span></div>'
       : '<div class="btn"><span class="a">Follow</span><span class="b">Following</span></div>';
-    var card0 = h(c.back, '<div class="mm-cta" style="top:' + top + 'px"><div class="av">' + av + '</div><div class="nm">' + esc(P.name) +
-      '</div><div class="hd">' + esc(P.handle) + "</div>" + lower + "</div>");
+    // in front of the character: the big head tucks behind the card, which stays readable
+    var card0 = h(c.front, '<div class="mm-cta' + (P.handle ? "" : " no-handle") + '" style="top:' + top + 'px"><div class="av">' + av +
+      '</div><div class="nm">' + esc(P.name) + '</div><div class="hd">' + esc(P.handle || "") + "</div>" + lower + "</div>");
     s.ctaEl = card0;
     A.rise(card0, s.t0 - 0.02, { y: -80, d: 0.22 });
     var press;
@@ -452,9 +504,10 @@
   }
 
   // ---- building ---------------------------------------------------------------------------------------------------------
-  function buildScene(page, n) {
-    var o = OVERRIDES[n] || {}, next = D.pages[n + 1];
-    var s = { n: n, page: page, t0: n === 0 ? 0 : r3(page.t), t1: next ? r3(next.t) : DUR, field: page.field === "light" ? "light" : "dark",
+  function buildScene(page, i) {
+    // pages are numbered from 1 everywhere: Stage.page(1, ...), beats.py, check.py and every message
+    var n = i + 1, o = OVERRIDES[n] || {}, next = D.pages[i + 1];
+    var s = { i: i, n: n, page: page, t0: i === 0 ? 0 : r3(page.t), t1: next ? r3(next.t) : DUR, field: page.field === "light" ? "light" : "dark",
       prop: o.prop != null ? o.prop : page.prop, o: o };
     s.dur = r3(s.t1 - s.t0);
     s.kind = String(s.prop).split(":")[0].trim().toLowerCase();
@@ -478,7 +531,7 @@
       return ln;
     });
     s.headBottom = HEAD_TOP + Math.round(y);
-    if (!String(page.text || "").trim() && !o.lines) PROBLEMS.push("page " + (n + 1) + " has no headline.");
+    if (!String(page.text || "").trim() && !o.lines) PROBLEMS.push("page " + n + " has no headline.");
     SC.push(s);
     return s;
   }
@@ -487,9 +540,10 @@
     // the headline: readable on frame 0 for the first page, a quick drop-in for the rest
     s.lines.forEach(function (ln, k) {
       var t = s.t0 + k * 0.045;
-      if (s.n === 0) tl.fromTo(ln, { y: 26 }, { y: 0, duration: 0.5, ease: "power3.out" }, 0);
+      if (s.i === 0) tl.fromTo(ln, { y: 26 }, { y: 0, duration: 0.5, ease: "power3.out" }, 0);
       else tl.fromTo(ln, { scaleY: 1.3, opacity: 0, y: 34 }, { scaleY: 1, opacity: 1, y: 0, duration: 0.17, ease: "power3.out" }, t);
     });
+    s.cardTop = Math.max(s.headBottom + 24, 440);  // the close's card, right under its headline
     s.shot = shoot(s, Object.assign({}, o.char || {}));
     var zone = { top: s.headBottom + 30, bottom: Math.max(s.headBottom + 200, s.shot.char.crown + 40), left: 120, right: 960 };
     var c = { n: s.n, page: s.page, t0: s.t0, t1: s.t1, dur: s.dur, field: s.field, keyAt: s.shot.keyAt, side: s.shot.side,
@@ -599,7 +653,7 @@
         return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), size: ln._size };
       });
       s.el.style.display = shown;
-      var p = { n: s.n + 1, t0: s.t0, t1: s.t1, field: s.field, pose: s.shot.pose, prop: s.prop, char: s.shot.char, lines: lines,
+      var p = { n: s.n, t0: s.t0, t1: s.t1, field: s.field, pose: s.shot.pose, prop: s.prop, char: s.shot.char, lines: lines,
         headBottom: s.headBottom };
       if (s.ctaEl) p.cta = { name: s.ctaEl.querySelector(".nm").textContent, handle: s.ctaEl.querySelector(".hd").textContent };
       pages.push(p);
@@ -610,9 +664,8 @@
       if (lines.some(function (L) { return L.size < MIN_SIZE; })) {
         problems.push("note: page " + p.n + ": the headline is set small to fit. Cut it to the two words that carry the phrase.");
       }
-      var sc = s.shot.char.scale, cta = s.kind === "cta";
-      if (!cta && (sc < 6 || sc > 8)) problems.push("note: page " + p.n + ": the character is at scale " + sc + " (6 to 8 is the look) to fit the pose.");
-      if (cta && (sc < 10 || sc > 12)) problems.push("note: page " + p.n + ": the closing character is at scale " + sc + " (10 to 12 is the look).");
+      var sc = s.shot.char.scale;
+      if (s.kind !== "cta" && (sc < 6 || sc > 8)) problems.push("note: page " + p.n + ": the character is at scale " + sc + " (6 to 8 is the look) to fit the pose.");
     });
     return { problems: problems, pages: pages, hits: Stage.hits || [] };
   }

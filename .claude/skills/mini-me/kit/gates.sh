@@ -8,10 +8,12 @@
 # One PASS or FAIL line per gate, and exit 1 when any gate fails:
 #   1 format          1080x1920 at 60 fps, H.264 picture and AAC sound
 #   2 margins         nothing inside the 90 px side margins on any frame (margin_scan.py; --skip leaves out windows)
-#   3 no captions     the composition draws no caption track: the headline pages carry the words
+#   3 no captions     the composition draws no caption track (index.html and lib/scenes.js): the headline pages
+#                     carry the words
 #   4 frozen picture  no stretch of 0.8 s where the whole frame holds still
 #   5 loudness        -13 LUFS within 1 LU, true peak at or below -1.5 dBTP
-#   6 bed             the bed sits at least 15 dB under the voice (build/mix.json, written by ship.py)
+#   6 bed             the bed measures at least 15 dB under the voice (build/mix.json: ship.py measures the bed
+#                     through the finish's own levelling)
 #   7 picture/sound   the picture and the sound end within one frame of each other
 #   8 end             the Reel ends within 0.7 s of the last word
 #   9 speech          every word of the voice-over is heard in the final (kit.qa_captions). --no-speech skips it,
@@ -52,8 +54,11 @@ if [ -n "$SKIP" ]; then "${PY[@]}" "$KIT/margin_scan.py" "$MP4" --skip "$SKIP"; 
 
 echo "== 3 no caption track"
 INDEX="$W/build/hf/index.html"
+SCENES="$W/build/hf/lib/scenes.js"
 if [ ! -f "$INDEX" ]; then fail "$INDEX is missing"
 elif grep -qiE 'karaoke|caption|class="clip"' "$INDEX"; then fail "index.html carries a caption track; the headline pages are the only words on screen"
+elif [ -f "$SCENES" ] && grep -qE 'class=.?clip|karaoke|capwords|captions?\(|mm-cap' "$SCENES"; then
+  fail "lib/scenes.js builds a caption track; the headline pages are the only words on screen"
 else pass "no caption track: the headline pages carry the words"; fi
 
 echo "== 4 frozen picture (whole frame, 0.8 s)"
@@ -71,17 +76,18 @@ tp = float(re.search(r"Peak:\s+(-?[\d.]+) dBFS", s).group(1))
 sys.exit(0 if abs(i + 13) <= 1 and tp <= -1.5 else 1)
 PY
 
-echo "== 6 bed (at least 15 dB under the voice)"
+echo "== 6 bed (measured at least 15 dB under the voice)"
 MIX="$W/build/mix.json"
 if [ ! -f "$MIX" ]; then fail "build/mix.json is missing: finish with ship.py"
 else
-  "${PY[@]}" - "$MIX" <<'PY' && pass "bed" || fail "the bed sits closer than 15 dB to the voice"
+  "${PY[@]}" - "$MIX" <<'PY' && pass "bed" || fail "the bed measures closer than 15 dB to the voice"
 import json, sys
 mix = json.load(open(sys.argv[1]))
 if mix.get("bed") is None:
     print("   no bed on this Reel")
     sys.exit(0)
-print(f"   voice {mix['voice_lufs']} LUFS, bed {mix['bed_lufs']} LUFS, {mix['under_db']} dB under ({mix['bed']})")
+print(f"   voice {mix['voice_lufs']} LUFS, bed measured {mix['bed_lufs']} LUFS (set to {mix.get('bed_lufs_set')}), "
+      f"{mix['under_db']} dB under ({mix['bed']})")
 sys.exit(0 if mix["under_db"] >= 15 else 1)
 PY
 fi

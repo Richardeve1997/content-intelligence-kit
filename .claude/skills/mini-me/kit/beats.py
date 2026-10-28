@@ -13,7 +13,8 @@ beats.json is {"duration": seconds, "pages": [...]}, and every page is
   t      when the page lands, in seconds on the voice-over (the first page is at 0, on screen from frame 0)
   text   the keyword headline of the phrase, in capitals, four words at most. Wrap one word in *stars* to
          put it on an accent plate.
-  pose   one of the 14 core poses, chosen for what the phrase says; never the same twice in a row
+  pose   one of the 14 core poses, chosen for what the phrase says; never the same twice in a row. The closing
+         page is idle: the close is a big head-and-shoulders punch-in where the mouth does the work
   field  dark or light, taking turns, so the background flips on every page
   prop   what arrives because of the pose: none, stamp[: TEXT], count, burst, bubble: TEXT,
          card: <a few words or assets/<file>>, or cta (the closing call to action)
@@ -22,9 +23,13 @@ How a phrase is found: the words break at the end of a sentence or clause, at a 
 and before the closing call to action. A phrase holds at most four content words (small words such as
 "the" and "of" do not count), so a long one is split where it joins best: before a word like "because" or
 "in", after a comma, at a breath, keeping the halves even. A lone short word ("So,") joins the next phrase
-rather than flashing on its own. The headline is the whole phrase when it has three words or fewer, and its
-content words otherwise. From the word "follow" (or the comment keyword) the rest of the narration is one
-closing page.
+rather than flashing on its own. The headline is the whole phrase when it has four words or fewer, and
+otherwise its best run of four words (the most content words, a number when there is one, the later run on a
+tie). Small words at either end are dropped when two content words are left. From the sentence with the word
+"follow" (or the comment keyword) the rest of the narration is one closing page.
+
+Running it again on a beats.json you have edited keeps your version as beats.backup.json (or
+beats.backup-2.json and so on), so nothing you wrote is lost.
 
 The poses and props are a first draft from word lists. Read the pages, then sharpen the headlines and the
 poses, and name what each card shows, before writing the scenes.
@@ -44,6 +49,7 @@ from kit.config import KitError
 CORE_POSES = ("idle", "talking", "point_left", "point_right", "point_up", "thumbs_up", "shrug", "thinking",
               "mind_blown", "celebrate", "hold_card", "typing", "facepalm", "wave")  # fmt: skip
 FIELDS = ("dark", "light")
+CLOSE_POSE = "idle"
 PROPS = ("none", "stamp", "count", "burst", "bubble", "card", "cta")
 MAX_WORDS = 4
 MAX_PHRASE_WORDS = 6
@@ -293,9 +299,15 @@ def build(words: list[transcribe.Word], *, cta: str | None = None, keyword: str 
     for index, group in enumerate(groups):
         is_cta = closing is not None and group[0] == closing
         text = _cta_text(cta, keyword) if is_cta else headline(words, group)
-        pose = "point_up" if is_cta else _pose(words, group, index, previous)
-        if pose == previous:
-            pose = NEXT_POSE.get(pose, "talking")
+        if is_cta:
+            pose = CLOSE_POSE  # the stage's own first choice for the close, so the draft is what renders
+            if pages and pages[-1]["pose"] == CLOSE_POSE:
+                before = pages[-2]["pose"] if len(pages) > 1 else None
+                pages[-1]["pose"] = next(p for p in ("talking", "point_left", "point_right") if p != before)
+        else:
+            pose = _pose(words, group, index, previous)
+            if pose == previous:
+                pose = NEXT_POSE.get(pose, "talking")
         pages.append({
             "t": 0.0 if index == 0 else round(words[group[0]].start, 3),
             "text": text,
@@ -372,6 +384,17 @@ def check(beats: dict) -> list[str]:
 # --- command line -------------------------------------------------------------------------------------------------------
 
 
+def backup(path: Path) -> Path:
+    """Copy `path` beside itself as name.backup.json, or name.backup-2.json when that is taken, and so on."""
+    stem, number = path.stem, 1
+    while True:
+        target = path.with_name(f"{stem}.backup{'' if number == 1 else f'-{number}'}{path.suffix}")
+        if not target.exists():
+            target.write_bytes(path.read_bytes())
+            return target
+        number += 1
+
+
 def _paths(target: str) -> tuple[Path, Path]:
     path = Path(target)
     if path.suffix == ".json" or path.is_file():
@@ -414,7 +437,10 @@ def main(argv: list[str] | None = None) -> int:
             keyword = a.keyword
             cta = a.cta or (None if keyword is None else "comment")
             data = build(words, cta=cta, keyword=keyword, duration=raw.get("dur") if isinstance(raw, dict) else None)
-            beats_path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+            text = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
+            if beats_path.is_file() and beats_path.read_text(encoding="utf-8") != text:
+                print(f"kept the pages that were there as {backup(beats_path).name}")
+            beats_path.write_text(text, encoding="utf-8")
     except (KitError, ValueError, OSError) as problem:
         print(problem)
         return 1

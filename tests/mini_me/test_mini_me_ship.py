@@ -7,6 +7,7 @@ bed in me/music). The speech gate is a stand-in: its own tests cover it, and it 
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 
@@ -52,7 +53,14 @@ def reel(kit_home, example_me, monkeypatch):
     calm = example_me / "music" / "calm"
     calm.mkdir(parents=True)
     ffmpeg("-f", "lavfi", "-i", "anoisesrc=color=pink:amplitude=0.5:d=8:r=48000", "-ac", 2, calm / "bed.wav")
-    state = {"checked": [], "problems": []}
+    os.utime(build / "picture.mp4")  # rendered after the pages and the voice-over, as in a real build
+    state = {"checked": [], "problems": [], "refreshed": []}
+
+    def refresh(slug):
+        state["refreshed"].append(slug)
+        return False  # no browser here: the hits come from beats.json
+
+    monkeypatch.setattr(ship, "refresh_hits", refresh)
 
     def speech_gate(final, words, **kwargs):
         state["checked"].append({"final": final, "speed": kwargs.get("speed"), "words": len(words)})
@@ -71,6 +79,8 @@ def test_bed_15db_under_voice(reel):
     assert speech - bed_alone >= 15.0, (speech, bed_alone)
     mix = json.loads((reel["folder"] / "build" / "mix.json").read_text())
     assert mix["under_db"] >= 15.0 and mix["bed"] == "bed.wav"
+    assert abs(mix["bed_lufs"] - mix["bed_lufs_set"]) <= 1.5, "the bed is measured, and lands near its setting"
+    assert mix["under_db"] == round(mix["voice_lufs"] - mix["bed_lufs"], 1)
 
 
 def test_the_finish_runs_at_speed_one_with_the_house_loudness(reel):
@@ -127,6 +137,9 @@ def test_a_render_that_fails_the_speech_gate_does_not_replace_the_final(reel, ca
     assert (folder / "review" / "review.json").exists(), "the old pass still describes the old final"
     assert (folder / "build" / "final.next.mp4").is_file()
     assert "basil" in capsys.readouterr().out
+    assert not (folder / "build" / "mix.json").exists(), "levels are recorded only for a final that passed"
+    ledger = reel["me"] / "music" / "MUSIC.md"
+    assert "| example-reel |" not in ledger.read_text(), "the bed is logged only once the Reel passed"
 
 
 def test_one_bed_per_video_logged_once(reel):
@@ -146,3 +159,38 @@ def test_a_missing_render_is_a_plain_sentence(reel, capsys):
     (reel["folder"] / "build" / "picture.mp4").unlink()
     assert ship.main(["example-reel"]) == 1
     assert "picture.mp4 is missing" in capsys.readouterr().out
+
+
+def test_a_render_older_than_the_pages_is_refused(reel, capsys):
+    beats = reel["folder"] / "beats.json"
+    beats.write_text(beats.read_text())  # the pages changed after the render
+    assert ship.main(["example-reel"]) == 1
+    out = capsys.readouterr().out
+    assert "older than beats.json" in out and "render.py example-reel" in out
+    assert not (reel["folder"] / "final.mp4").exists()
+
+
+def test_hits_older_than_the_scenes_are_made_again(reel, monkeypatch):
+    build = reel["folder"] / "build"
+    (build / "hits.json").write_text(json.dumps({"hits": []}))
+    scenes = build / "hf" / "lib" / "scenes.js"
+    scenes.parent.mkdir(parents=True)
+    scenes.write_text("/* a stamp added after the last check */\n")
+    os.utime(build / "picture.mp4")  # the render came after the scenes changed
+
+    def refresh(slug):
+        reel["refreshed"].append(slug)
+        (build / "hits.json").write_text(json.dumps({"hits": [{"kind": "thud", "t": 1.0, "gain": 0.5}]}))
+        return True
+
+    monkeypatch.setattr(ship, "refresh_hits", refresh)
+    assert ship.main(["example-reel", "--music", "none"]) == 0
+    assert reel["refreshed"] == ["example-reel"]
+    assert json.loads((build / "mix.json").read_text())["hits"] == 1
+
+
+def test_fresh_hits_are_used_as_they_are(reel):
+    build = reel["folder"] / "build"
+    (build / "hits.json").write_text(json.dumps({"hits": [{"kind": "whoosh", "t": 3.2, "gain": 0.6}]}))
+    assert ship.main(["example-reel", "--music", "none"]) == 0
+    assert reel["refreshed"] == [], "nothing changed since the page check"

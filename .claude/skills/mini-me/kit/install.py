@@ -31,6 +31,7 @@ import json
 import math
 import re
 import shutil
+from urllib.parse import quote
 import subprocess
 import sys
 from pathlib import Path
@@ -39,18 +40,19 @@ from kit import brand, config, media, transcribe
 from kit.config import KitError
 
 KIT = Path(__file__).resolve().parent
-GSAP = config.kit_root() / "kit" / "vendor" / "gsap.min.js"
+GSAP = Path(config.__file__).resolve().parent / "vendor" / "gsap.min.js"  # kit/vendor, beside the kit's own code
 FPS = 60
 ENVELOPE_FPS = 24
 KIT_FILES = ("stage.js", "stage.css")
 
 SCENES_STARTER = """/* Scenes for this Reel. The stage builds every page of beats.json by itself: the field, the headline, the
  * character in the page's pose and the page's prop. Add here what each page needs on top of that: the receipts,
- * stamps and objects that arrive because of what the character does. Pages count from 0, in beats.json order.
+ * stamps and objects that arrive because of what the character does. Pages are numbered from 1, the numbers
+ * beats.py and check.py print.
  * Every time comes from a spoken word, c.T("word") or c.keyAt (when the pose lands), never a typed second.
  * The full list of what c holds is at the top of stage.js.
  *
- * Stage.page(1, {
+ * Stage.page(2, {
  *   build: function (c) {
  *     Stage.card(c, { img: "assets/receipt.png" });   // arrives from the side the character points to
  *     Stage.stamp(c, "FREE", { t: c.T("free") });     // lands on its word, with a thud
@@ -115,13 +117,13 @@ def project_tokens(hf: Path) -> str:
     fonts.mkdir(parents=True, exist_ok=True)
 
     def local(match: re.Match) -> str:
-        source = (hf / match.group(1)).resolve()
+        source = brand.url_file(match.group(1), hf)  # the URL is percent-encoded: decode it before reading it
         if not source.is_file():
             raise KitError(f"The font file {source.name} named by your profile is missing. Run onboarding again.")
         target = fonts / source.name
         if not target.is_file() or target.stat().st_size != source.stat().st_size:
             shutil.copy2(source, target)
-        return f'url("fonts/{source.name}")'
+        return f'url("fonts/{quote(source.name)}")'
 
     return re.sub(r'url\("([^"]+)"\)', local, css)
 
@@ -137,12 +139,14 @@ def head_weight(profile) -> int:
 
 
 def profile_card(profile) -> dict:
-    """What the closing card shows: the creator's name and their Instagram handle (or their first handle)."""
-    handles = profile.handles
-    handle = handles.instagram or next(
-        (getattr(handles, p) for p in ("tiktok", "youtube", "twitter", "facebook", "linkedin") if getattr(handles, p)),
-        "",
-    )
+    """What the closing card shows: the creator's name and their Instagram handle, written with its @.
+
+    Only the Instagram handle is shown, because the card is Instagram's profile row. With none, the card shows
+    the name alone rather than a handle from another platform.
+    """
+    handle = (profile.handles.instagram or "").strip()
+    if handle and not handle.startswith("@"):
+        handle = "@" + handle
     avatar = None
     if profile.logo:
         avatar = f"assets/logo{Path(profile.logo).suffix.lower() or '.png'}"
@@ -210,10 +214,28 @@ def pose_outlines(character: Path, manifest: dict) -> dict:
 
 
 def figure(outlines: dict, baseline: int) -> dict:
-    """Where the character's head starts (idle's top row) and its waist, halfway down to the feet."""
-    top = outlines.get("pose:idle", next(iter(outlines.values())))["top"]
-    feet = baseline - 1
-    return {"top": top, "waist": round(top + 0.5 * (feet - top)), "feet": feet}
+    """The character's proportions, measured from the idle drawing (arms down): top, neck, waist and feet rows.
+
+    The neck is the narrowest row between the head and the body. With the arms down, the silhouette is
+    widest where the hands hang, so the waist is the first row under the last row that wide. A big-headed
+    character has its waist far below the halfway point, so it is measured, never guessed. A drawing without
+    that shape (hands out of sight) falls back to halfway between the neck and the feet, and says so.
+    """
+    idle = outlines.get("pose:idle") or next(iter(outlines.values()))
+    rows, top = idle["rows"], idle["top"]
+    drawn = [i for i, row in enumerate(rows) if row is not None]
+    feet = max(drawn[-1], baseline - 1) if drawn else baseline - 1
+    spans = [(row[1] - row[0]) if row is not None else 0.0 for row in rows]
+    height = max(1, feet - top)
+    window = range(top + int(0.2 * height), top + int(0.6 * height) + 1)
+    neck = min(window, key=lambda i: (spans[i] if spans[i] > 0 else float("inf"), i))
+    limit = neck + int(0.8 * (feet - neck))
+    widest = max(spans[neck : limit + 1])
+    hands = max(i for i in range(neck, limit + 1) if spans[i] >= widest - 4)
+    waist, measured = hands + 1, True
+    if not neck + 0.25 * (feet - neck) <= waist <= neck + 0.8 * (feet - neck):
+        waist, measured = round(neck + 0.5 * (feet - neck)), False
+    return {"top": top, "neck": neck, "waist": waist, "feet": feet, "waist_measured": measured}
 
 
 def _character(me: Path) -> tuple[Path, dict]:

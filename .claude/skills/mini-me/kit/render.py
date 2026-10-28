@@ -3,7 +3,8 @@
 
     python render.py <video> [--quality delivery]
 
-It renders work/<video>/build/hf with HyperFrames at 60 fps, one worker, into work/<video>/build/picture.mp4.
+It renders work/<video>/build/hf with the kit's own pinned HyperFrames (node_modules/.bin/hyperframes, from npm ci)
+at 60 fps, one worker, into work/<video>/build/picture.mp4. It never lets npx fetch another version.
 The render is heavy, so it waits for one of the shared slots (at most two heavy jobs run at once) and checks for
 5 GB of free disk first. HyperFrames' telemetry is turned off for the run. A failed render leaves no picture
 behind and prints the last lines HyperFrames wrote.
@@ -22,21 +23,29 @@ from kit import config, media
 from kit.config import KitError
 
 
+def hyperframes() -> Path:
+    """The kit's own HyperFrames command, installed by npm ci in the kit folder."""
+    tool = Path(config.__file__).resolve().parents[1] / "node_modules" / ".bin" / "hyperframes"
+    if shutil.which("node") is None:
+        raise KitError("Node is not installed, so HyperFrames cannot render. Install Node 22 or newer, then run npm ci.")
+    if not tool.exists():
+        raise KitError("HyperFrames is not installed in this kit yet. Run npm ci in the kit folder, then render again.")
+    return tool
+
+
 def render(slug: str, quality: str = "delivery") -> Path:
     folder = config.work_dir(slug)
     hf = folder / "build" / "hf"
     if not (hf / "index.html").is_file():
         raise KitError(f"{hf / 'index.html'} is missing. Make the project first: install.py {slug}")
-    if shutil.which("npx") is None:
-        raise KitError("Node is not installed, so HyperFrames cannot render. Install Node 22 or newer, then run npm ci.")
+    tool = hyperframes()
     out = folder / "build" / "picture.mp4"
     partial = out.with_name("picture.part.mp4")
     partial.unlink(missing_ok=True)
     env = {**os.environ, "HYPERFRAMES_NO_TELEMETRY": "1", "HYPERFRAMES_SKIP_SKILLS": "1"}
     with media.heavy_slot(label=f"render {slug}"):
-        done = subprocess.run(["npx", "--no-install", "hyperframes", "render", "--fps", "60", "--workers", "1",
-                               "--quality", quality, "--quiet", "--output", str(partial), str(hf)],
-                              cwd=config.kit_root(), env=env, capture_output=True, text=True)
+        done = subprocess.run([str(tool), "render", "--fps", "60", "--workers", "1", "--quality", quality, "--quiet",
+                               "--output", str(partial), str(hf)], cwd=tool.parents[2], env=env, capture_output=True, text=True)
     if done.returncode != 0 or not partial.is_file():
         partial.unlink(missing_ok=True)
         tail = "\n".join((done.stderr or done.stdout).strip().splitlines()[-8:])

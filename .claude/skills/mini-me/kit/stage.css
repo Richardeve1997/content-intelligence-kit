@@ -71,6 +71,8 @@
 .mm-cta .nm { position: absolute; left: 194px; right: 34px; top: 34px; font-family: var(--font-display); font-weight: 800;
   font-size: 52px; line-height: 1.1; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; }
 .mm-cta .hd { position: absolute; left: 196px; right: 34px; top: 104px; font-weight: 500; font-size: 34px; white-space: nowrap; overflow: hidden; }
+.mm-cta.no-handle .nm { top: 64px; }
+.mm-cta.no-handle .hd { display: none; }
 .mm-cta .btn { position: absolute; left: 34px; right: 34px; top: 186px; height: 88px; border-radius: 44px; background: var(--accent);
   color: var(--on-accent); font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: 88px; text-align: center; }
 .mm-cta .btn .b { display: none; }

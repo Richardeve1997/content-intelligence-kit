@@ -4,20 +4,24 @@
     python ship.py <video> [--music auto|none|<file>] [--mood <folder>] [--under 18]
 
 It reads build/picture.mp4 (the HyperFrames render), vo.m4a and words.json, and build/hits.json (written by
-check.py; without it the hits come from beats.json). Then:
+check.py). A render older than beats.json, scenes.js or vo.m4a does not show the latest changes, so it stops and
+asks for a new render. A hits.json that is missing or older than beats.json or scenes.js is made again by the page
+check (check.py); where no browser can run it, the hits come from beats.json. Then:
 
   1. The sound effects. kit.sfx makes the whoosh and the thud from numbers, and every hit is placed so its
      loudest moment lands on its time: a whoosh on each field flip, a thud on each stamp and button press.
   2. The edit: the picture (copied, never encoded again), with the voice-over and the hits mixed under it,
      cut to the picture's length, as build/edit.mov.
   3. kit.finish at speed 1.0 (the voice-over was made at its final pace, so nothing is sped up here). The bed
-     sits --under dB under the voice (18 by default, so it stays at least 15 under once levelled), fades in
+     is set --under dB under the voice (18 by default, so it stays at least 15 under once levelled), fades in
      over 0.3 s and out over the last 1.2 s; the mix lands at -13 LUFS with the true peak at or below -1.5.
-     --music auto keeps the bed this video already has, or picks one from me/music (kit.music.for_video) and
-     logs it; with no music in me/music the Reel has no bed. The levels go in build/mix.json.
+     --music auto keeps the bed this video already has, or picks one from me/music (kit.music.for_video);
+     with no music in me/music the Reel has no bed.
   4. kit.qa_captions listens to the result against words.json. A lost word stops the ship.
   5. Only a render that passed becomes final.mp4. The review's pass marker (review/review.json) is deleted
      first, because it described the previous final. A render that failed stays as build/final.next.mp4.
+     Once it passed, the bed is logged in me/music/MUSIC.md and build/mix.json records the levels: the voice,
+     and the bed as measured through the finish's own levelling, so gates.sh checks a measurement.
 """
 
 from __future__ import annotations
@@ -44,9 +48,38 @@ def need(path: Path, made_by: str) -> Path:
     return path
 
 
-def hits_for(folder: Path) -> list[sfx.Hit]:
-    """The hits from build/hits.json (check.py writes it from the page), else from beats.json."""
+def newer(target: Path, sources: list[Path]) -> list[Path]:
+    """The sources changed after `target` was made."""
+    made = target.stat().st_mtime
+    return [path for path in sources if path.is_file() and path.stat().st_mtime > made]
+
+
+def refresh_hits(slug: str) -> bool:
+    """Make build/hits.json again with the page check. False when no browser or project can run it."""
+    import check  # check.py beside this file
+
+    try:
+        code = check.run(slug, [])
+    except SystemExit:
+        return False  # no browser on this machine
+    if code != 0 and not (config.work_dir(slug) / "build" / "hf" / "index.html").is_file():
+        return False
+    if code != 0:
+        raise KitError(f"The page check failed, so the sound cannot follow the page. Run check.py {slug} and fix it.")
+    return True
+
+
+def hits_for(folder: Path, slug: str | None = None) -> list[sfx.Hit]:
+    """The hits from build/hits.json (check.py writes it from the page), else from beats.json.
+
+    With a video name, a hits.json that is missing or older than beats.json or scenes.js is made again first.
+    """
     written = folder / "build" / "hits.json"
+    if slug is not None:
+        sources = [folder / "beats.json", folder / "build" / "hf" / "lib" / "scenes.js"]
+        stale = written.is_file() and newer(written, sources)
+        if (not written.is_file() or stale) and refresh_hits(slug):
+            print(f"build/hits.json was {'older than ' + stale[0].name if stale else 'missing'}, so the page check made it again.")
     if written.is_file():
         data = json.loads(written.read_text(encoding="utf-8"))
         return [sfx.Hit(h["kind"], float(h["t"]), float(h.get("gain", 0.4))) for h in data.get("hits", [])]
@@ -77,6 +110,16 @@ def edit(folder: Path, picture: Path, hits: list[sfx.Hit], out: Path) -> Path:
         tail = "\n".join(done.stderr.strip().splitlines()[-4:])
         raise KitError(f"ffmpeg could not mix the voice-over and the sound effects. What it said:\n{tail}")
     return out
+
+
+def bed_level(length: float, bed: Path, music_lufs: float, scratch: Path) -> float:
+    """The bed's loudness as the finish levels it: the bed alone, under a silent voice, through kit.finish's own mix."""
+    silent = scratch / "silent.wav"
+    done = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+                           "-t", f"{length:.4f}", "-c:a", "pcm_s16le", str(silent)], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise KitError("ffmpeg could not make the silence the bed is measured under.")
+    return finish.mix_level(silent, speed=1.0, music=bed, music_lufs=music_lufs, fade_in=0.0, fade_out=0.0)
 
 
 def choose_bed(slug: str, choice: str, mood: str | None) -> Path | None:
@@ -110,7 +153,11 @@ def main(argv: list[str] | None = None) -> int:
         picture = need(build / "picture.mp4", "the render (see the skill)")
         need(folder / "vo.m4a", "python -m kit.voice auto " + a.slug)
         words = transcribe.load(need(folder / "words.json", "python -m kit.voice auto " + a.slug))
-        hits = hits_for(folder)
+        changed = newer(picture, [folder / "beats.json", build / "hf" / "lib" / "scenes.js", folder / "vo.m4a"])
+        if changed:
+            raise KitError(f"build/picture.mp4 is older than {changed[0].name}, so it does not show the latest changes. "
+                           f"Render it again first: render.py {a.slug}")
+        hits = hits_for(folder, a.slug)
         cut = edit(folder, picture, hits, build / "edit.mov")
         bed = choose_bed(a.slug, a.music, a.mood)
         voice_lufs = finish.measure(folder / "vo.m4a").integrated
@@ -118,14 +165,10 @@ def main(argv: list[str] | None = None) -> int:
         candidate, final = build / "final.next.mp4", folder / "final.mp4"
         finish.finish(cut, candidate, speed=voice.FINISH_SPEED, music=bed, music_lufs=bed_lufs,
                       mix_peak=finish.HOUSE["mix_peak"], fade_in=finish.HOUSE["fade_in"], fade_out=finish.HOUSE["fade_out"])
-        if bed is not None:
-            music.log(bed, a.slug)  # one row per video: a re-ship with the same bed adds nothing
-        (build / "mix.json").write_text(json.dumps({
-            "voice_lufs": round(voice_lufs, 1), "bed_lufs": bed_lufs if bed is not None else None,
-            "under_db": round(voice_lufs - bed_lufs, 1) if bed is not None else None,
-            "bed": bed.name if bed is not None else None, "hits": len(hits), "speed": voice.FINISH_SPEED,
-        }, indent=1) + "\n", encoding="utf-8")
         problems = qa_captions.check(candidate, words, speed=voice.FINISH_SPEED, fallback=cut)
+        if not problems and bed is not None:
+            with tempfile.TemporaryDirectory(prefix="mm-bed-", dir=build) as scratch:
+                measured = bed_level(media.probe(cut).duration, bed, bed_lufs, Path(scratch))
     except (KitError, ValueError) as problem:
         print(problem)
         return 1
@@ -136,6 +179,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"The failed render is {candidate}; final.mp4 was left as it was.")
         return 1
     print("PASS: the speech gate heard every word of the voice-over.")
+    if bed is not None:
+        music.log(bed, a.slug)  # one row per video: a re-ship with the same bed adds nothing
+    (build / "mix.json").write_text(json.dumps({
+        "voice_lufs": round(voice_lufs, 1),
+        "bed": bed.name if bed is not None else None,
+        "bed_lufs_set": bed_lufs if bed is not None else None,
+        "bed_lufs": round(measured, 1) if bed is not None else None,
+        "under_db": round(voice_lufs - measured, 1) if bed is not None else None,
+        "hits": len(hits), "speed": voice.FINISH_SPEED,
+    }, indent=1) + "\n", encoding="utf-8")
     (folder / "review" / "review.json").unlink(missing_ok=True)  # it passed the previous final, not this one
     os.replace(candidate, final)
     print(f"shipped {final}")

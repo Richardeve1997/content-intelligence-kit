@@ -52,20 +52,20 @@ Everything for one video lives in `work/<video>/`:
 `uv run python -m kit.voice auto <video>` makes it from whatever the video has, in this order:
 
 1. A recording in `work/<video>/take/`: the creator's own voice, recorded on their phone. This is the default and it is free. A light chain cleans it (a high-pass for rumble, gentle noise reduction, a soft compressor). The file is read in place and never changed.
-2. ElevenLabs, when the profile says `voice_over` is `elevenlabs` or `clone` and `ELEVENLABS_API_KEY` is in `.env`. It reads the narration from `script.md`: with `clone`, in the copy of the creator's voice saved in `me/voice/elevenlabs.json`, otherwise in one of the account's stock voices.
+2. ElevenLabs, when the profile says `voice_over` is `elevenlabs` or `clone` and `ELEVENLABS_API_KEY` is in `.env`. It reads the narration from `script.md`: with `elevenlabs`, in one of the account's stock voices; with `clone`, in the copy of the creator's voice saved in `me/voice/elevenlabs.json`. With `clone` and no copy saved yet, it stops and says so instead of using a stock voice.
 3. Otherwise it stops and says what to do. With no key it says exactly: "No ElevenLabs key, so record the voice-over on your phone and drop it in work/<video>/take/" (with the video's name filled in). Pass that on, and carry on when the creator says the file is there.
 
 Ask the creator to record in a quiet room, phone held a hand's width from the mouth, reading the narration straight through. A retake of a sentence is fine: tell them to pause, then say the whole sentence again, and cut the bad one out before dropping the file in.
 
-A copy of the creator's voice is made only with their consent, which the profile records as `voice_over: "clone"`. Then run `uv run python -m kit.voice clone '<their name>' <sample files>` with one to two minutes of their voice alone. It saves the voice for later videos.
+A copy of the creator's voice is made only with their consent, which the profile records as `voice_over: "clone"`. Right before making it, ask them once, plainly: "This uploads these recordings of your voice to ElevenLabs so it can make a copy of your voice. Shall I go ahead?" Run `uv run python -m kit.voice clone '<their name>' <sample files>` only after a clear yes, with one to two minutes of their voice alone. It saves the voice for later videos, and it is used only while `voice_over` stays `clone`.
 
-The pace. The voice-over is made at its final pace before anything is timed to it, so the pictures land on the words as they are heard and the finish runs at 1.0. ElevenLabs reads at its speed setting of 1.15, which sounds more natural than stretching the sound afterwards. A recording gets the same 1.15 with a pitch-keeping tempo change, the factor a filmed Reel is sped up by. Pauses over 0.35 s are cut to 0.24 s, because the style has no dead air. `python -m kit.voice record <video> --keep-pace` keeps the creator's own pace when they ask for it.
+The pace. The voice-over is made at its final pace before anything is timed to it, so the pictures land on the words as they are heard and the finish runs at 1.0. ElevenLabs reads at its speed setting of 1.15, which sounds more natural than stretching the sound afterwards. A recording gets the same 1.15 with a pitch-keeping tempo change, the factor a filmed Reel is sped up by. Pauses over 0.35 s are cut to 0.24 s, because the style has no dead air. `python -m kit.voice record <video> --keep-pace` keeps the creator's own pace when they ask for it. When a recording is paced, the voice step prints one line saying so. After the creator's first voice-over, tell them in one sentence that their recording was sped up to 1.15x with long pauses cut, and that they can keep their own pace (`python -m kit.voice auto <video> --keep-pace`, or say "keep my pace").
 
 The voice step writes `vo.m4a` at -13 LUFS, and `words.json` with every word timed by the speech model and aligned. Read `words.json` against the narration: a name the model spelt wrong is fine to leave, because the pages are edited by hand next.
 
 ## The pages
 
-`uv run python .claude/skills/mini-me/kit/beats.py <video>` turns `words.json` into `beats.json`: one page per spoken phrase. Each page is `{"t", "text", "pose", "field", "prop"}`:
+`uv run python .claude/skills/mini-me/kit/beats.py <video>` turns `words.json` into `beats.json`: one page per spoken phrase. Each page is `{"t", "text", "pose", "field", "prop"}`: Pages are numbered from 1, and the same numbers are used everywhere: in `beats.py`, `check.py`, the stage's notes and `Stage.page(n)`.
 
 | Key | What it is |
 |---|---|
@@ -75,13 +75,13 @@ The voice step writes `vo.m4a` at -13 LUFS, and `words.json` with every word tim
 | `field` | `dark` or `light`, taking turns |
 | `prop` | what arrives because of the pose (below) |
 
-The first draft comes from word lists. Read every page and sharpen it before writing scenes: a headline is the keyword of the phrase (`3 OF 5`, `WEEK THREE`, `HERE'S WHY`), never a running caption. Keep `t` as it is unless two pages need joining. Then check it: `beats.py <video> --check`.
+The first draft comes from word lists. Read every page and sharpen it before writing scenes: a headline is the keyword of the phrase (`3 OF 5`, `WEEK THREE`, `HERE'S WHY`), never a running caption. Keep `t` as it is unless two pages need joining. Then check it: `beats.py <video> --check`. Running `beats.py` again on pages you edited keeps your version as `beats.backup.json`.
 
 Pick the pose for what the phrase means:
 
 | Pose | When |
 |---|---|
-| `point_up` | the hook, pointing at its headline; a number or a first step; the closing page |
+| `point_up` | the hook, pointing at its headline; a number or a first step |
 | `point_left`, `point_right` | showing something: the card slides in from the side it points to |
 | `thinking` | a question |
 | `shrug` | "maybe", "it depends", something nobody knows |
@@ -92,7 +92,8 @@ Pick the pose for what the phrase means:
 | `hold_card` | a checklist, a plan, the thing they get |
 | `typing` | writing, a prompt, a search, a message |
 | `wave` | hello and goodbye |
-| `talking`, `idle` | the in-between, when nothing else fits |
+| `idle` | the close: a big head-and-shoulders punch-in where the mouth does the work; or when nothing else fits |
+| `talking` | the in-between, when nothing else fits |
 
 Props:
 
@@ -100,7 +101,7 @@ Props:
 |---|---|
 | `card: <a few words>` or `card: assets/<file>.png` | a white receipt card from the side the pose points to, or dropping from the top |
 | `stamp` or `stamp: <TEXT>` | a stamp slams down beside the head with a thud (the page's accent word by default) |
-| `count` | the headline's number counts up from 0 |
+| `count` | one number in the headline counts up from 0: the accented one, or the first |
 | `burst` | sparkles burst around the head |
 | `bubble: <text>` | a speech bubble by the head, such as `?` or `!` |
 | `cta` | the closing call to action (one page, made from the closing line) |
@@ -112,10 +113,10 @@ These are the house rules of the style. They are what makes it work, so keep the
 
 - Two flat fields, the creator's `--field-dark` and `--field-light`, each with a faint dot grid. The field flips on every page with a push and speed lines, and a whoosh lands on every flip. Nothing sits still: a new page, pose and field about every 1.5 to 2.5 seconds.
 - The headline is the keyword of the spoken phrase, at most four words, in `--font-display` capitals at the heaviest weight the font has, fitted to the width from y 190 down to about y 620. Sizes mix inside a lockup: a short word set huge under a smaller line reads well. One accent word at most, on an accent plate. There is no caption track: the headlines carry the words.
-- The character is big: scale 6 to 8 (each art pixel 6 to 8 screen pixels), cropped by the bottom of the frame at the waist, the crown around y 1000 to 1320. A white sticker outline 12 px wide follows the silhouette, with a 3 px edge in the ink colour on the light field, built from the sprite's own pixels so it stays hard. The stage picks the largest scale that keeps the pose inside x 90 to 990. The mouth moves with the voice.
+- The character is big and cropped at the waist. The stage measures the waist from the idle drawing (just under the hands, arms down) and shows the character down to it at the largest scale from 8 down (6 to 8 is the look) that keeps the crown at y 960 or lower, so a big-headed character still shows its shoulders and chest, not just hair and face. A white sticker outline 12 px wide follows the silhouette, with a 3 px edge in the ink colour on the light field, built from the sprite's own pixels so it stays hard. The pose always stays inside x 90 to 990, and the mouth moves with the voice.
 - A new pose every page, chosen for meaning. What arrives on screen is caused by the pose: it points and the card comes from that side; it thinks and a question mark pops up; a stamp lands and the character flinches; it celebrates and sparkles burst. Cards sit between the headline and the head, and tuck behind the head when they reach down to it.
 - Receipts are real: a screenshot of the actual page, the product's real mark, a number with its source. A card holds about six words at most, at 26 px or larger. Drawn objects and props are fine when nothing real exists; never invent a number, a quote, a review or a product screen.
-- The close is a punch-in: the character rises to scale 10 to 12 so its head fills the lower half, under a white card with the creator's avatar (their logo, or their initial on the accent), their name and their Instagram handle. A follow call to action presses the Follow button on the spoken "follow". A comment call to action types the keyword into a comment box on the spoken keyword and presses Post.
+- The close is a punch-in: the character grows to scale 10 to 12 with the bottom of its mouth at y 1660, well inside the frame and clear of the phone's caption area, its head tucked behind a white card in front of it. The card shows the creator's avatar (their logo, or their initial on the accent), their name and their Instagram handle with its @ (only the Instagram handle; with none, the name alone). A follow call to action presses the Follow button on the spoken "follow". A comment call to action types the keyword into a comment box on the spoken keyword and presses Post. A pose too wide for the close gives way to idle; when even that cannot be scale 10, `check.py` prints a note saying why.
 - Sound: the voice is forward at -13 LUFS. A whoosh on every field flip and a thud on every stamp and press, both made by `kit.sfx` from numbers. The bed, when the creator has music in `me/music/`, sits at least 15 dB under the voice (`ship.py` puts it 18 dB under) and fades out at the end. The Reel ends on the last word.
 - The safe area: nothing within 90 px of either side, no text under 26 px, and nothing above y 190, where the phone shows its status bar.
 
@@ -124,13 +125,13 @@ These are the house rules of the style. They are what makes it work, so keep the
 `install.py` writes `build/hf/` and a starter `lib/scenes.js`. The stage builds every page on its own: the field, the headline, the character in its pose and the prop from `beats.json`. Write `scenes.js` for this Reel to add what each page needs on top: the real receipts, the objects, a second stamp, a chip. It is never overwritten, so it keeps your work when the project is installed again.
 
 ```js
-Stage.page(1, {                          // pages count from 0, in beats.json order
+Stage.page(2, {                          // the page number, from 1, as beats.py and check.py print it
   build: function (c) {
     Stage.card(c, { img: "assets/watering-can.png" });     // from the side the character points to
     Stage.stamp(c, "6 AM", { t: c.T("morning") });         // lands on the spoken word, with a thud
   }
 });
-Stage.page(4, { lines: ["3 OF 5", "*PLANTS*"], char: { pose: "celebrate" } });
+Stage.page(5, { lines: ["3 OF 5", "*PLANTS*"], char: { pose: "celebrate" } });
 ```
 
 - `c.T("word")` is when a word is said (`"phrase#2"` for its second time, `c.T.e(...)` for its end); `c.keyAt` is when the pose lands; `c.t0` and `c.t1` are the page's start and end. Time everything from these, never from typed seconds.
@@ -153,7 +154,7 @@ K=.claude/skills/mini-me/kit; V=<video>; W=work/$V
 # 1. The narration brief, then script.md (written, humanized and approved)
 uv run python $K/brief.py --number 3
 
-# 2. The voice-over: the recording in take/, or ElevenLabs
+# 2. The voice-over: the recording in take/, or ElevenLabs (--keep-pace keeps a recording's own pace)
 uv run python -m kit.voice auto $V
 
 # 3. The pages: draft, sharpen by hand, check
@@ -175,14 +176,14 @@ uv run python $K/ship.py $V                   # --mood <folder> picks the bed's 
 bash $K/gates.sh $V
 ```
 
-Run `install.py` again after any change to the voice-over, `words.json`, `beats.json`, the profile or the character, then `check.py` again. `check.py` writes `build/hits.json` from the page itself, so the sound follows what is on screen; `ship.py` reads it.
+Run `install.py` again after any change to the voice-over, `words.json`, `beats.json`, the profile or the character, then `check.py` again. `check.py` writes `build/hits.json` from the page itself, so the sound follows what is on screen. `ship.py` reads it, makes it again when it is older than `beats.json` or `scenes.js`, and refuses a render older than `beats.json`, `scenes.js` or the voice-over, because that render does not show the latest changes.
 
 ## Things that go wrong
 
 - A cue phrase the narration never says throws inside the stage, and `check.py` prints which one. Copy cues from `words.json`, spelt the way the speech model heard them.
 - A GSAP timeline is a thenable. Never return one from an async function or from a page script you evaluate: the call waits forever.
 - A pose that is too wide for scale 6 (both arms out) shrinks to fit, and `check.py` notes it. Pick a narrower pose for that page instead.
-- The closing punch-in needs a compact pose. When the page's pose is too wide for scale 10 to 12 the character talks there instead, with a note.
+- The closing punch-in needs a compact pose. When the page's pose is too wide for scale 10 to 12 the close uses idle, and when the head cannot fit between the card and the mouth line at scale 10, it uses a smaller scale with a note saying why.
 - A headline of four long words gets small. Cut it to the two words that carry the phrase.
 - A page shorter than about half a second flashes by. Join it to the page next to it in `beats.json`.
 - HyperFrames keeps a frame cache in the system temp folder (`hyperframes-extract-cache-*`), which is safe to delete when no render is running.
@@ -194,11 +195,11 @@ Run `install.py` again after any change to the voice-over, `words.json`, `beats.
 - [ ] The open reads on mute: the first page's headline says the topic, already on screen at frame 0
 - [ ] Every page has a headline of four words or fewer, and a new pose chosen for what it says
 - [ ] The fields flip on every page, with a whoosh on each flip
-- [ ] The character is big (scale 6 to 8), cropped at the waist, with the white outline and the ink edge on the light field
+- [ ] The character is big (scale 6 to 8) and cropped at its waist, with shoulders and chest in view, the white outline and the ink edge on the light field
 - [ ] What arrives on each page is caused by the pose, and every receipt is real and in `build/sources/SOURCES.md`
 - [ ] The close shows the creator's name and handle, and the follow press or the typed keyword lands on its word
 - [ ] `check.py` and `beats.py --check` pass, and `npx hyperframes lint` shows no errors
-- [ ] `ship.py` passed the speech gate; `gates.sh` passes (format, margins, no caption track, no frozen stretch, -13 LUFS, the bed 15 dB under, the end)
+- [ ] `ship.py` passed the speech gate; `gates.sh` passes (format, margins, no caption track, no frozen stretch, -13 LUFS, the bed measured 15 dB under, picture and sound together, the end)
 
 Then run the `review` skill on `work/<video>/final.mp4`. Its rubric items 2 to 5 belong to UI story; for this style check the fields flipping, a headline page per phrase, the character big and cropped at the waist, and no caption track.
 
@@ -213,8 +214,8 @@ Everything is in `.claude/skills/mini-me/kit/`. Run the scripts with `uv run pyt
 | `install.py` | the HyperFrames project: tokens and fonts, GSAP, the character, the data, `index.html`, a starter `scenes.js` |
 | `stage.js`, `stage.css` | the style: fields, headlines, the character's placement and outline, props, transitions, the close |
 | `check.py` | loads the composition headless, checks it, and writes `build/hits.json` |
-| `render.py` | renders the composition to `build/picture.mp4` in a heavy-job slot |
-| `ship.py` | the sound effects, the bed, the finish at 1.0 and the speech gate, into `final.mp4` |
+| `render.py` | renders the composition to `build/picture.mp4` with the kit's pinned HyperFrames, in a heavy-job slot |
+| `ship.py` | the sound effects, the bed (measured), the finish at 1.0 and the speech gate, into `final.mp4` |
 | `gates.sh` | the checks on `final.mp4`, then the contact sheet for the review |
 | `margin_scan.py` | every frame checked for anything inside the 90 px side margins |
 | `test_clip.py` | a short clip of the character saying one line, for onboarding |
