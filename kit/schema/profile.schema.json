@@ -177,7 +177,7 @@
         "$ref": "#/$defs/time",
         "description": "a time in 24 hour HH:MM form, such as 18:00"
       },
-      "description": "a group with your default posting time for each platform, in 24 hour HH:MM form such as 18:00, or an empty group if you post by hand"
+      "description": "a group with your usual posting time for each platform, in 24 hour HH:MM form such as 18:00, or an empty group if you would rather give a time with each post"
     },
     "colours": {
       "type": "object",

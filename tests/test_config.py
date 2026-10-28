@@ -96,6 +96,19 @@ def test_every_schema_setting_has_a_description():
     assert missing == []
 
 
+def test_the_posting_times_hint_fits_a_creator_who_posts_by_hand_too(example_me):
+    # A creator who posts by hand has usual times as well: the file for posting by hand lists them. The hint the
+    # error repeats says how to leave the times out, not that posting by hand means having none.
+    schema = json.loads(config.SCHEMA_PATH.read_text())
+    hint = schema["properties"]["posting_times"]["description"]
+    assert "usual posting time" in hint and "give a time with each post" in hint
+    assert "post by hand" not in hint
+
+    _edit(example_me, lambda data: data.update(posting_times="18:00"))
+    said = "\n".join(_problems(example_me))
+    assert "usual posting time for each platform" in said, said
+
+
 def test_platform_list_comes_from_the_schema():
     assert config.PLATFORMS == ("instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter")
 

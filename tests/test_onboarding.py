@@ -1544,7 +1544,7 @@ def test_posting_times_are_asked_whether_or_not_the_kit_posts():
     # time uses it, so a creator who posts by hand needs the times as much as one who uses Zernio.
     posting = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[7][1]
     zernio, both_ways = posting.split("Both ways", 1)
-    assert "posting time" in both_ways, "the question about posting times sits outside the Zernio branch"
+    assert "usual posting time" in both_ways, "the question about posting times sits outside the Zernio branch"
     assert "posting time" not in zernio
     assert "leave the posting times empty" not in posting
     assert "post/manual.md" in both_ways, "it says where the times show up for a creator who posts by hand"
@@ -1552,6 +1552,7 @@ def test_posting_times_are_asked_whether_or_not_the_kit_posts():
     step = re.search(r"^7\. (.+)$", guide, re.M).group(1)
     before_zernio = step.split("If you want the kit to post for you", 1)[0]
     assert "usual posting time" in before_zernio, "the guide asks for the times whether or not Zernio posts"
+    assert "hashtags for your posts" in before_zernio, "LinkedIn gets no hashtags, so they are not for every post"
 
 
 def test_the_styles_step_hands_mini_me_to_the_character_skill_and_keeps_its_gates():
