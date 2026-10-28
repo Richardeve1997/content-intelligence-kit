@@ -8,6 +8,7 @@ page at a moment, which is what each rendered frame is.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import shutil
@@ -257,6 +258,34 @@ def test_fields_and_the_sticker_outline_use_the_tokens(stage, tmp_path):
         else:
             assert near(frame[crown - 13, x], field, 6), "no ink edge on the dark field"
         assert near(frame[crown - 24, x], field, 6)
+
+
+def test_a_light_page_writes_in_the_colour_that_reads_on_the_light_field(browser, example_me, tmp_path):
+    # A mid grey light field: white reads on it and the dark ink does not, so the headline and the dots turn white.
+    profile = config.load_profile()
+    profile = dataclasses.replace(profile, colours=dataclasses.replace(profile.colours, field_light="#707070"))
+    (tmp_path / "tokens.css").write_text(brand.tokens_css(profile, tmp_path), encoding="utf-8")
+    shutil.copy(ROOT / ".claude" / "skills" / "mini-me" / "kit" / "stage.css", tmp_path / "stage.css")
+    (tmp_path / "index.html").write_text(
+        '<!doctype html><html><head><link rel="stylesheet" href="tokens.css"><link rel="stylesheet" href="stage.css">'
+        '</head><body style="margin:0"><div id="mm"><div class="mm-sc light" style="display:block"><div class="mm-sci">'
+        '<div class="mm-dots"></div><div class="mm-hl"><div class="mm-pg"><span class="mm-ln">Grow</span></div></div>'
+        "</div></div></div></body></html>",
+        encoding="utf-8",
+    )
+    page = browser.new_page(viewport={"width": 1080, "height": 1920})
+    try:
+        page.goto((tmp_path / "index.html").as_uri())
+        assert page.evaluate("getComputedStyle(document.querySelector('.mm-ln')).color") == "rgb(255, 255, 255)"
+        page.screenshot(path=str(tmp_path / "light.png"))
+    finally:
+        page.close()
+    frame = np.asarray(Image.open(tmp_path / "light.png").convert("RGB")).astype(int)
+    field = np.array(rgb("#707070"))
+    assert near(frame[1800, 20], field, 4), "the margin is the bare field"
+    # The grid starts at x 102 and y -20 in 60 px tiles, so a dot sits at the middle of each tile: x 252, y 1210 is one.
+    dot = frame[1210, 252]
+    assert (dot > field + 8).all(), (tuple(dot), "a dot is the text colour at low strength, so white lifts it above the field")
 
 
 def test_margin_scan_inside_90_990(stage, tmp_path):

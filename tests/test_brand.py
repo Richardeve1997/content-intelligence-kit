@@ -26,6 +26,7 @@ PINNED_PROPERTIES = [
     "field-dark",
     "field-light",
     "on-field-dark",
+    "on-field-light",
     "grid",
     "font-display",
     "font-body",
@@ -134,15 +135,17 @@ def test_low_contrast_accent(example_me):
 
 
 def test_every_warning_is_one_plain_sentence(example_me):
-    # Poor on all four pairs at once: a mid grey accent and dark field, and a pale ink on a white canvas.
-    profile = _with(config.load_profile(), accent="#777777", ink="#bbbbbb", canvas="#ffffff", field_dark="#777777")
+    # Poor on all five pairs at once: a mid grey accent and two mid grey fields, and a pale ink on a white canvas.
+    poor = {"accent": "#777777", "ink": "#bbbbbb", "canvas": "#ffffff", "field_dark": "#777777", "field_light": "#787878"}
+    profile = _with(config.load_profile(), **poor)
     warnings = brand.check(profile)
-    assert len(warnings) == 4
+    assert len(warnings) == 5
     assert [w.split(" has ")[0].split(" is ")[0] for w in warnings] == [
         "The accent #777777 on the canvas #ffffff",
         "The best text colour on the accent #777777",
         "Your ink #bbbbbb on the canvas #ffffff",
         "The best text colour on the dark field #777777",
+        "The best text colour on the light field #787878",
     ]
     for warning in warnings:
         assert EM_DASH not in warning and EN_DASH not in warning
@@ -160,8 +163,11 @@ def test_check_passes_just_above_the_threshold_and_warns_just_below(example_me):
 def test_check_warns_when_the_ink_is_hard_to_read_on_the_canvas(example_me):
     profile = _with(config.load_profile(), ink="#bbbbbb", canvas="#ffffff")
     warnings = brand.check(profile)
-    assert len(warnings) == 1
-    assert warnings[0].startswith("Your ink #bbbbbb on the canvas #ffffff")
+    # A pale ink is just as hard to read on the example's light field, so that pair is named too.
+    assert [w.split(" has ")[0].split(" is ")[0] for w in warnings] == [
+        "Your ink #bbbbbb on the canvas #ffffff",
+        "The best text colour on the light field #eaf1e4",
+    ]
 
 
 def test_check_warns_when_no_text_colour_reads_on_the_dark_field(example_me):
@@ -177,6 +183,22 @@ def test_check_warns_when_no_text_colour_reads_on_the_accent(example_me):
     profile = _with(config.load_profile(), accent="#777777")
     warnings = brand.check(profile)
     assert any(w.startswith("The best text colour on the accent #777777") for w in warnings)
+
+
+def test_check_warns_when_no_text_colour_reads_on_the_light_field(example_me):
+    # Mid grey again: white reaches 4.48 and the dark ink about 3.5, so neither passes.
+    profile = _with(config.load_profile(), field_light="#777777")
+    warnings = brand.check(profile)
+    assert len(warnings) == 1
+    assert warnings[0].startswith("The best text colour on the light field #777777 is #ffffff")
+    assert "4.4:1" in warnings[0]
+
+
+def test_a_mid_tone_light_field_gets_white_text(example_me):
+    # The ink reaches only 3.2:1 on this grey and white reaches 4.9:1, so white is the text colour and nothing warns.
+    profile = _with(config.load_profile(), field_light="#707070")
+    assert brand.colour_tokens(profile)["on-field-light"] == "#ffffff"
+    assert brand.check(profile) == []
 
 
 # --- the bundled fonts ----------------------------------------------------------------------------
@@ -268,6 +290,7 @@ def test_tokens_exact_names(example_me, tmp_path):
 
     assert props["on-accent"] == readable(c.accent)
     assert props["on-field-dark"] == readable(c.field_dark)
+    assert props["on-field-light"] == readable(c.field_light)
 
     def mix(i):  # one channel of the ink at 6% over the canvas
         ink, canvas = int(c.ink[1 + 2 * i : 3 + 2 * i], 16), int(c.canvas[1 + 2 * i : 3 + 2 * i], 16)

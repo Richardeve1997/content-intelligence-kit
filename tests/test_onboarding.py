@@ -1260,6 +1260,15 @@ def test_the_preview_grid_follows_the_accent_and_the_canvas(me):
     assert "--canvas-grid: #ffe8e8;" in page
 
 
+def test_the_preview_writes_on_each_field_in_the_colour_that_reads_there(me):
+    # A mid grey light field takes white text in mini me, so the preview card shows it the same way.
+    look = {**LOOK, "colours": {**EXAMPLE["colours"], "field_light": "#707070"}}
+    page = onboarding.preview(look)[0].read_text(encoding="utf-8")
+    assert "--on-field-light: #ffffff;" in page
+    assert ".field.light { background: var(--field-light); color: var(--on-field-light); }" in page
+    assert ".field.dark { background: var(--field-dark); color: var(--on-field-dark); }" in page
+
+
 def test_the_preview_uses_the_saved_name_when_none_is_given(me):
     State().save("who", {"name": "Example Studio"})
     path, _ = onboarding.preview(LOOK)

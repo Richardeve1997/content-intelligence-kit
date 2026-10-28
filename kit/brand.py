@@ -98,6 +98,7 @@ def colour_tokens(profile: Profile) -> dict[str, str]:
         "field-dark": c.field_dark,
         "field-light": c.field_light,
         "on-field-dark": text_on(c.field_dark, c.ink),
+        "on-field-light": text_on(c.field_light, c.ink),
         "grid": grid_colour(c.ink, c.canvas),
     }
 
@@ -106,11 +107,11 @@ def check(profile: Profile) -> list[str]:
     """Warnings, as plain sentences, for colour pairs that will be hard to read. An empty list means all is well.
 
     Each pair needs a contrast of at least 4.5:1: the accent on the canvas, the best text colour
-    on the accent, the ink on the canvas, and the best text colour on the dark field.
+    on the accent, the ink on the canvas, and the best text colour on each of the two fields.
     """
     c = profile.colours
     tokens = colour_tokens(profile)
-    on_accent, on_dark = tokens["on-accent"], tokens["on-field-dark"]
+    on_accent = tokens["on-accent"]
     short = f"below the {MIN_CONTRAST}:1 needed to read easily"
 
     warnings = []
@@ -131,12 +132,16 @@ def check(profile: Profile) -> list[str]:
         warnings.append(
             f"Your ink {c.ink} on the canvas {c.canvas} has a contrast of only {_ratio_text(ratio)}, {short}."
         )
-    ratio = contrast(on_dark, c.field_dark)
-    if ratio < MIN_CONTRAST:
-        warnings.append(
-            f"The best text colour on the dark field {c.field_dark} is {on_dark}, "
-            f"which has a contrast of only {_ratio_text(ratio)}, {short}."
-        )
+    for name, field, on_field in (
+        ("dark", c.field_dark, tokens["on-field-dark"]),
+        ("light", c.field_light, tokens["on-field-light"]),
+    ):
+        ratio = contrast(on_field, field)
+        if ratio < MIN_CONTRAST:
+            warnings.append(
+                f"The best text colour on the {name} field {field} is {on_field}, "
+                f"which has a contrast of only {_ratio_text(ratio)}, {short}."
+            )
     return warnings
 
 

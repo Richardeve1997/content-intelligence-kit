@@ -475,7 +475,7 @@ p { margin: 0; }
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .field { padding: 28px 24px; border-radius: 16px; font-family: var(--font-display); font-size: 24px; line-height: 1.2; font-weight: 600; }
 .field.dark { background: var(--field-dark); color: var(--on-field-dark); }
-.field.light { background: var(--field-light); color: var(--ink); }
+.field.light { background: var(--field-light); color: var(--on-field-light); }
 .mono { font-family: var(--font-mono); font-size: 16px; }
 .swatches { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .swatches li { display: flex; align-items: center; gap: 12px; }

@@ -10,12 +10,12 @@
 /* ---- one scene per page, stacked, shown by the director ---- */
 .mm-sc { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; overflow: hidden; display: none; }
 .mm-sc.dark { background: var(--field-dark); color: var(--on-field-dark); }
-.mm-sc.light { background: var(--field-light); color: var(--ink); }
+.mm-sc.light { background: var(--field-light); color: var(--on-field-light); }
 .mm-sci, .mm-back, .mm-front, .mm-chl, .mm-dots { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
 /* the dot grid stops inside the safe lines, so the side margins are pure field colour */
 .mm-dots { left: 102px; width: 876px; top: -20px; height: 1960px; background-size: 60px 60px; background-position: 0 0; }
 .dark .mm-dots { background-image: radial-gradient(circle, color-mix(in srgb, var(--on-field-dark) 12%, transparent) 0, color-mix(in srgb, var(--on-field-dark) 12%, transparent) 2.4px, transparent 3px); }
-.light .mm-dots { background-image: radial-gradient(circle, color-mix(in srgb, var(--ink) 13%, transparent) 0, color-mix(in srgb, var(--ink) 13%, transparent) 2.4px, transparent 3px); }
+.light .mm-dots { background-image: radial-gradient(circle, color-mix(in srgb, var(--on-field-light) 13%, transparent) 0, color-mix(in srgb, var(--on-field-light) 13%, transparent) 2.4px, transparent 3px); }
 /* receipts, stickers and the character are clipped just inside the safe lines: a pop, a punch or a burst
    can never cross x 90 / 990 */
 .mm-back, .mm-front { clip-path: inset(0 92px 0 92px); }
@@ -93,6 +93,6 @@
 /* ---- transitions ---- */
 .mm-streak { position: absolute; top: 0; width: 8px; border-radius: 4px; }
 .dark .mm-streak { background: color-mix(in srgb, var(--on-field-dark) 55%, transparent); }
-.light .mm-streak { background: color-mix(in srgb, var(--ink) 30%, transparent); }
+.light .mm-streak { background: color-mix(in srgb, var(--on-field-light) 30%, transparent); }
 #mm-flash { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; background: #ffffff; display: none; }
 #mm-probe { position: absolute; left: 0; top: 0; visibility: hidden; }
