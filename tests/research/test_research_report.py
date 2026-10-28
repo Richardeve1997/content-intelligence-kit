@@ -170,9 +170,8 @@ def test_the_counts_at_the_top_match_what_the_run_printed(offline_run):
 
     profile, run_dir = offline_run
     data = load(run_dir)
-    for video in data["videos"][: len(data["videos"]) // 2]:
-        video["set"] = "earlier"  # half the pull is older than the window
-    save(run_dir, data)
+    recent = [v for v in data["videos"] if v.get("set") == "recent"]
+    assert 0 < len(recent) < data["videos_total"], "the sample has videos both inside and outside the window"
     printed: list[str] = []
     pipeline._summarise(data, printed.append)
     page = rebuild(profile, run_dir)
@@ -181,7 +180,6 @@ def test_the_counts_at_the_top_match_what_the_run_printed(offline_run):
     videos_printed = sum(int(m.group(1)) for m in per_platform if m)
     creators_printed = sum(int(m.group(2)) for m in per_platform if m)
     assert (tiles["Videos"], tiles["Creators"]) == (str(videos_printed), str(creators_printed)), (tiles, printed)
-    recent = [v for v in data["videos"] if v.get("set") == "recent"]
     lede = visible(re.search(r'<p class="lede">(.*?)</p>', page, re.S).group(1))
     assert f"{data['videos_total']} videos" in lede and f"{len(recent)} of them from the last" in lede, lede
 

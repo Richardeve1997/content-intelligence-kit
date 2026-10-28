@@ -76,13 +76,19 @@ def _hero(p: Page) -> str:
     sentence above them says how many of those videos are from the last two weeks."""
     data = p.data
     videos = data.get("videos", [])
-    total = max(len(videos), data.get("videos_total") or 0) if videos else 0  # the list is cut short on big pulls
+    this_run = [v for v in videos if v.get("source", "run") == "run"]  # not the earlier standouts from past runs
+    recent = [v for v in this_run if v.get("set") == "recent"]
+    if "videos_recent" in data:  # counted by the run before the list was cut short, as the terminal counts
+        total, recent_count = data.get("videos_total", 0), data["videos_recent"]
+    else:  # a run from before these counts: its total also counted the earlier standouts it listed
+        total = max(len(this_run), (data.get("videos_total") or 0) - (len(videos) - len(this_run)))
+        recent_count = len(recent)
+    total = total if this_run else 0
     pulled = [c for c in data.get("creators", []) if c.get("pulled")]
-    recent = [v for v in videos if v.get("set") == "recent"]
     scored = [v for v in recent if v.get("outlier") is not None]
     days = data.get("window_days", common.WINDOW_DAYS)
     if total:
-        window = f"{len(recent)} of them from the last {days} days" if recent else f"none of them from the last {days} days"
+        window = f"{recent_count} of them from the last {days} days" if recent_count else f"none of them from the last {days} days"
         lede = f"{common.plural(total, 'video')} from {_plural_creators(len(pulled))} this time, {window}."
         if scored:
             top = max(scored, key=lambda v: v["outlier"])
