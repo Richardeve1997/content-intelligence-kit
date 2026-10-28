@@ -20,7 +20,7 @@ Version 1 has five parts (onboarding, research, the UI story and mini me video s
 | Feedback | "the captions are too long, fix that going forward" | the fix, plus a rule in your rules file that every later video follows |
 | Update | "update the kit" | the latest kit files, with your own files left alone |
 
-Both video styles run quality checks and a visual review before a Reel counts as done. "What's next" tells you the next step for the video you are working on. Without a Zernio key, every Reel still ends with the MP4 and a caption file for each platform, ready to post by hand.
+Both video styles run quality checks and a visual review before a Reel counts as done. "What's next" tells you the next step for the video you are working on. Without a Zernio key, every Reel still ends with the MP4 and one file with each platform's caption, ready to post by hand.
 
 ### UI story
 
@@ -41,11 +41,11 @@ Version 1 leaves out:
 - comment-to-DM rules
 - email capture and resource pages
 - an analytics dashboard and a weekly performance review
-- any other style or method: Kallaway's edit style and script method, clips, plain motion graphics, carousels and thumbnails
+- other edit styles and script methods, clips, plain motion graphics, carousels and thumbnails
 - a standalone script skill (script writing lives inside the two video styles)
 - Slack as a research input
 - Cowork, which cannot run the video renders
-- Windows or Linux support beyond best effort
+- Windows, Linux and Intel Macs: setup stops on them
 
 ## What you need
 
@@ -59,7 +59,7 @@ Setup takes care of the rest and asks before each install: Homebrew, ffmpeg, uv 
 
 ### How the install is tested
 
-A GitHub Actions job, `.github/workflows/smoke.yml`, is started by hand before each release and runs on a clean Apple silicon Mac. It installs ffmpeg and yt-dlp with Homebrew, Python 3.11 and the Python tools with uv, HyperFrames with `npm ci`, Chromium and GSAP, then runs the machine check, the tests and a three second test render. Those install steps are tested only on that job, because the Mac the kit is built on already had Homebrew, ffmpeg, Node and uv. Nothing tests installing Homebrew itself, or installing uv and Node with Homebrew, because the job sets those up another way. Onboarding and both video styles are run end to end on a real Mac.
+A GitHub Actions job, `.github/workflows/smoke.yml`, is started by hand before each release and runs on a clean Apple silicon Mac. It installs ffmpeg with Homebrew, Python 3.11 and the Python tools (yt-dlp among them) with uv, HyperFrames with `npm ci`, Chromium and GSAP, then runs the machine check, the tests and a three second test render. Those install steps are tested only on that job, because the Mac the kit is built on already had Homebrew, ffmpeg, Node and uv. Nothing tests installing Homebrew itself, or installing uv and Node with Homebrew, because the job sets those up another way. Onboarding and both video styles are run end to end on a real Mac.
 
 ## Quick start
 
@@ -68,7 +68,9 @@ git clone https://github.com/Richardeve1997/content-intelligence-kit
 cd content-intelligence-kit
 ```
 
-Open the folder in Claude Code or Codex and say "set me up". Setup is one conversation of 30 to 45 minutes. It asks about one thing at a time and saves after every step, so you can stop and pick it up later. [ONBOARDING.md](ONBOARDING.md) walks through each step.
+On a new Mac, `git clone` first asks to install Apple's command line developer tools. Say yes, and run it again once they are installed.
+
+Open the folder in Claude Code or Codex by running `claude` or `codex` inside it, then say "set me up". Setup is one conversation of 30 to 45 minutes. It asks about one thing at a time and saves after every step, so you can stop and pick it up later. [ONBOARDING.md](ONBOARDING.md) walks through each step.
 
 ### Clone it, don't fork it
 
@@ -87,7 +89,9 @@ Apart from your Claude or ChatGPT plan, every paid tool is optional, and each ha
 
 ## Codex
 
-Codex reads `AGENTS.md`, which points it to `CLAUDE.md`, and it finds the same skills through `.agents/skills`, a link to `.claude/skills`. Codex runs no hooks, so it runs the start-of-session check itself, and each skill records your corrections in its own Feedback step. In Codex the video styles need a paid ChatGPT plan, as they need Claude Max in Claude Code.
+Codex reads `AGENTS.md`, which points it to `CLAUDE.md`, and it finds the same skills through `.agents/skills`, a link to `.claude/skills`. The kit sets up no hooks for Codex, so Codex runs the start-of-session check itself, and each skill records your corrections in its own Feedback step. In Codex the video styles need a paid ChatGPT plan, as they need Claude Max in Claude Code.
+
+Codex usually runs commands in a sandbox that can write only inside this folder and cannot reach the internet. Rendering video, installing tools, research, voice-overs and posting cannot run there, so for those steps Codex asks before it runs a command outside the sandbox. Say yes when it asks.
 
 ## Updating
 
@@ -100,7 +104,7 @@ When a release changes the dependencies, the update says so and names the comman
 
 ### This repo takes no pull requests
 
-The kit has one maintainer and takes no changes from anyone else. GitHub cannot turn pull requests off for a public repository, so please don't open one here. Your copy is yours to change. Edit anything in it, and keep lasting preferences as rules (say "going forward"), which updates never undo.
+Pull requests are turned off for this repository, because the kit has one maintainer and takes no changes from anyone else. Clone it and make it yours instead. Edit anything in your copy, and keep lasting preferences as rules (say "going forward"), which updates never undo.
 
 ## Credits
 
