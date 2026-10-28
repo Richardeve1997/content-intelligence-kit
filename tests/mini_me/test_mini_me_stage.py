@@ -402,6 +402,36 @@ def test_a_count_from_the_scenes_never_shows_a_single_digit(stage):
     assert min(seen21) >= 10 and seen21[-1] == 21 and seen21 == sorted(seen21), seen21
 
 
+COUNT_PAGES = [
+    {"t": 0.0, "text": "BASIL *DIES*", "pose": "point_up", "field": "dark", "prop": "card: Week three"},
+    {"t": 1.6, "text": "21 DAYS", "pose": "thumbs_up", "field": "light", "prop": "count"},
+    {"t": 3.4, "text": "COMMENT GROW", "pose": "point_up", "field": "dark", "prop": "cta"},
+]
+COUNT_SPOKEN = "Basil dies in week three. It roots in 21 days. Comment GROW and I'll send you the checklist."
+
+
+def test_a_page_counts_a_number_of_20_or_more_up_from_10_and_lands_on_it(tmp_path, monkeypatch, browser):
+    """The page's own count prop, the way beats.py drafts it: 21 rolls up from 10 and lands on 21 within the
+    page's first 0.7 s, never showing a single digit, and no note says it was left whole."""
+    root, me = tmp_path / "kit", tmp_path / "me"
+    shutil.copytree(ROOT / "me.example", me)
+    monkeypatch.setenv("KIT_ME", str(me))
+    monkeypatch.setattr(config, "kit_root", lambda: root)
+    page = Page(browser, build_project(root, me, spoken=COUNT_SPOKEN, pages=COUNT_PAGES))
+    assert page.errors == []
+    start, seen = COUNT_PAGES[1]["t"], []
+    for k in range(0, 54):  # every frame from the page's start to 0.9 s into it
+        page.seek(round(start + k / 60, 4))
+        seen.append(page.js("document.querySelector('#mm-p2 .mm-num').textContent"))
+    values = [int(v) for v in seen]
+    assert values[0] == 10 and values[-1] == 21, seen
+    assert min(values) >= 10 and values == sorted(values) and len(set(values)) >= 5, seen
+    assert values.index(21) <= 45, "it lands on its number within about 0.7 s"
+    notes = [p for p in page.js("Stage.audit()")["problems"] if "page 2" in p]
+    assert notes == [], notes
+    page.page.close()
+
+
 def test_a_count_in_the_teens_shows_whole(stage):
     """Counting 12 up from 10 would show 10 and 11 under the words first, so a number under 20 stays whole."""
     page = stage["page"]
