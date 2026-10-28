@@ -164,7 +164,12 @@ def test_the_skill_says_what_a_refused_resend_that_keeps_its_record_means():
     failing = section("When something fails")
     line = next(line for line in failing.splitlines() if schedule_module.EARLIER_ATTEMPT.split(",")[0] in line)
     assert "record" in line and "on purpose" in line, "the record is kept, and the skill says why"
-    assert "same `schedule` command" in line and "never delete" in line.lower()
+    # a passing refusal (a rate limit) needs only time, and a definite one (a caption Zernio will not take) a fix first
+    assert "same `schedule` command" in line and "later" in line
+    assert "fix that reason first" in line and "approve" in line
+    # keeping the record is tied to this refusal, so it never contradicts the message that says when to delete it
+    assert "Do not delete the record to get past this refusal" in line
+    assert "sent more than 23 hours ago" in line and "Never delete" not in line
 
 
 def test_the_skill_says_list_finds_a_post_whose_create_was_interrupted():
