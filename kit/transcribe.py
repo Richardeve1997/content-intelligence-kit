@@ -14,6 +14,9 @@ How it works, and why:
   names are aligned in their spoken form ("37" as "thirty seven", "21st.dev" as "twenty first dot dev")
   and folded back into the word as written. Without WhisperX, or for a language it has no model for,
   the speech model's own word times are used and a note says so.
+* For French, German, Spanish, Italian and Vietnamese, WhisperX's alignment model is licensed for
+  non-commercial use only, and a creator's videos are commercial use. The kit never loads those models: it
+  keeps the speech model's own word times for these languages, and a note says so.
 
 Transcription is heavy, so it runs inside a heavy-job slot (kit.media.heavy_slot).
 
@@ -45,6 +48,7 @@ from kit import media
 from kit.config import KitError
 
 __all__ = [
+    "NON_COMMERCIAL_ALIGNMENT",
     "NO_SPEECH_MODEL",
     "Word",
     "audio_samples",
@@ -70,6 +74,14 @@ _SPOKEN = re.compile(r"\w")
 _FLOOR_DB = -45.0
 _MIN_GAP = 0.28
 _PAD = 0.12
+# The languages whose default WhisperX alignment model is licensed CC BY-NC 4.0, for non-commercial use only: the
+# VoxPopuli models for French, German, Spanish and Italian, and nguyenvulebinh/wav2vec2-base-vi-vlsp2020 for
+# Vietnamese. The kit never loads them, so these languages keep the speech model's own word times.
+NON_COMMERCIAL_ALIGNMENT = {"fr": "French", "de": "German", "es": "Spanish", "it": "Italian", "vi": "Vietnamese"}
+NON_COMMERCIAL_NOTE = (
+    "note: the word alignment model for {name} may not be used commercially, so the word times come from the "
+    "speech model instead."
+)
 
 
 @dataclass(frozen=True)
@@ -244,7 +256,7 @@ def _align(samples, text: str, language: str):
         except ImportError:
             return None
         except Exception as problem:  # no model for this language, or a download that failed
-            print(f"Word alignment is not available here ({problem}). Using the speech model's own word times.")
+            print(f"note: word alignment is not available here ({problem}), so the word times come from the speech model.")
             return None
     return [w for segment in result["segments"] for w in segment.get("words", [])]
 
@@ -295,13 +307,16 @@ def chunk_text(samples) -> str:
 
 
 def _words_in(samples, offset: float, *, align: bool, language: str | None) -> tuple[list[Word], str | None]:
-    if not align:
+    if not align or language in NON_COMMERCIAL_ALIGNMENT:
         heard = _asr(samples, word_times=True, language=language)
-        return [Word(w, round(offset + s, 3), round(offset + e, 3)) for w, s, e in heard["words"] if w], heard["language"]
+        found = heard["language"] or language
+        return [Word(w, round(offset + s, 3), round(offset + e, 3)) for w, s, e in heard["words"] if w], found
     heard = _asr(samples, word_times=False, language=language)
     text, found_language = heard["text"], heard["language"] or language or "en"
     if not text:
         return [], found_language
+    if found_language in NON_COMMERCIAL_ALIGNMENT:  # its alignment model is not for commercial use, so never load it
+        return _words_in(samples, offset, align=False, language=found_language)
     tokens = text.split()
     spoken = [spoken_form(token) for token in tokens]
     aligned = _align(samples, " ".join(" ".join(s) for s in spoken), found_language)
@@ -335,9 +350,13 @@ def words(
                     break
         chunks = [c for c in chunks if not any(d0 <= c[0] and c[1] <= d1 for d0, d1 in drop)]
         found: list[Word] = []
+        told = False
         for a, b in chunks:
             piece, language = _words_in(samples[int(a * SR) : int(b * SR)], a, align=align, language=language)
             found += [w for w in piece if _SPOKEN.search(w.text) and not any(d0 <= w.start <= d1 for d0, d1 in drop)]
+            if align and not told and language in NON_COMMERCIAL_ALIGNMENT:
+                print(NON_COMMERCIAL_NOTE.format(name=NON_COMMERCIAL_ALIGNMENT[language]), flush=True)
+                told = True
     return sorted(found, key=lambda w: w.start)
 
 

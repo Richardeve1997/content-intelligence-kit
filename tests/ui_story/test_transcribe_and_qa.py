@@ -73,6 +73,127 @@ def test_a_chunk_heard_as_punctuation_alone_gives_no_word(tmp_path, monkeypatch)
     assert [w.text for w in transcribe.words(audio)] == ["Fresh", "basil,", "37"]
 
 
+# --- word alignment and the licences of its models -----------------------------------------------------------
+
+
+def _whisperx_default_aligners() -> dict:
+    """WhisperX's own table of default alignment models, {language: model}, read from its source without importing
+    it (an import loads torch)."""
+    import ast
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.find_spec("whisperx")
+    if spec is None or not spec.submodule_search_locations:
+        pytest.skip("WhisperX is not installed (it comes with the video tools)")
+    source = Path(next(iter(spec.submodule_search_locations))) / "alignment.py"
+    table = {}
+    for node in ast.parse(source.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in (
+            "DEFAULT_ALIGN_MODELS_TORCH", "DEFAULT_ALIGN_MODELS_HF",
+        ):
+            table.update(ast.literal_eval(node.value))
+    assert table, "WhisperX's table of default alignment models was not found"
+    return table
+
+
+# The default alignment models whose licence is CC BY-NC 4.0, checked against torchaudio's notes on the VoxPopuli
+# bundles and the Hugging Face model card of the Vietnamese one.
+NON_COMMERCIAL_DEFAULTS = {
+    "fr": "VOXPOPULI_ASR_BASE_10K_FR",
+    "de": "VOXPOPULI_ASR_BASE_10K_DE",
+    "es": "VOXPOPULI_ASR_BASE_10K_ES",
+    "it": "VOXPOPULI_ASR_BASE_10K_IT",
+    "vi": "nguyenvulebinh/wav2vec2-base-vi-vlsp2020",
+}
+
+
+def test_the_languages_left_unaligned_are_the_ones_whose_default_model_is_non_commercial():
+    table = _whisperx_default_aligners()
+    assert {code: table.get(code) for code in transcribe.NON_COMMERCIAL_ALIGNMENT} == NON_COMMERCIAL_DEFAULTS
+    voxpopuli = {code for code, model in table.items() if "VOXPOPULI" in model.upper()}
+    assert voxpopuli <= set(transcribe.NON_COMMERCIAL_ALIGNMENT), "every VoxPopuli model is CC BY-NC 4.0"
+
+
+def _speech_model_says(monkeypatch, language: str, text: str = "Le basilic aime le soleil"):
+    """A stand-in speech model that hears `text` in `language`, with its own word times, and an aligner that fails
+    the test if anything loads it. Returns the list of word_times flags the speech model was asked with."""
+    import contextlib
+
+    import numpy as np
+
+    asked = []
+
+    def asr(samples, *, word_times, language=None):
+        asked.append(word_times)
+        found = [(w, 0.5 + i * 0.4, 0.8 + i * 0.4) for i, w in enumerate(text.split())] if word_times else []
+        return {"text": text, "language": heard_language, "words": found}
+
+    heard_language = language
+
+    def no_aligner(*args, **kwargs):
+        raise AssertionError("an alignment model was loaded for a language whose model is not for commercial use")
+
+    monkeypatch.setattr(transcribe, "audio_samples", lambda path: np.zeros(6 * transcribe.SR, np.float32))
+    monkeypatch.setattr(transcribe, "speech_chunks", lambda samples: [(0.0, 2.5), (3.0, 5.5)])
+    monkeypatch.setattr(transcribe.media, "heavy_slot", lambda **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(transcribe, "_asr", asr)
+    monkeypatch.setattr(transcribe, "_align", no_aligner)
+    monkeypatch.setattr(transcribe, "_aligner", no_aligner)
+    return asked
+
+
+@pytest.mark.parametrize(
+    "language,name", [("fr", "French"), ("de", "German"), ("es", "Spanish"), ("it", "Italian"), ("vi", "Vietnamese")]
+)
+def test_a_language_whose_alignment_model_is_non_commercial_keeps_the_speech_models_word_times(
+    tmp_path, monkeypatch, capsys, language, name
+):
+    audio = tmp_path / "take.wav"
+    audio.write_bytes(b"stand-in")
+    _speech_model_says(monkeypatch, language)
+
+    found = transcribe.words(audio)
+
+    assert [w.text for w in found] == "Le basilic aime le soleil".split() * 2
+    assert found[0] == Word("Le", 0.5, 0.8) and found[5] == Word("Le", 3.5, 3.8), "the speech model's own times"
+    notes = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert len(notes) == 1, "one note for the whole take, not one for each stretch of speech"
+    assert notes[0].startswith("note: ") and name in notes[0] and "commercial" in notes[0]
+
+
+def test_a_language_named_up_front_is_never_aligned_either(tmp_path, monkeypatch, capsys):
+    audio = tmp_path / "take.wav"
+    audio.write_bytes(b"stand-in")
+    asked = _speech_model_says(monkeypatch, "fr")
+    found = transcribe.words(audio, language="fr")
+    assert len(found) == 10 and asked == [True, True], "with the language known, each stretch is heard once"
+    assert capsys.readouterr().out.count("note: ") == 1
+
+
+def test_an_alignment_that_is_not_available_says_so_in_a_note(monkeypatch, capsys):
+    import types
+
+    import numpy as np
+
+    def fails(language):
+        raise ValueError(f"No default align-model for language: {language}")
+
+    monkeypatch.setitem(sys.modules, "whisperx", types.SimpleNamespace(align=None))
+    monkeypatch.setattr(transcribe, "_aligner", fails)
+    assert transcribe._align(np.zeros(transcribe.SR, np.float32), "hello", "xx") is None
+    out = capsys.readouterr().out
+    assert out.startswith("note: ") and out.count("\n") == 1, out
+
+
+def test_the_licence_notes_say_the_kit_never_runs_the_non_commercial_alignment_models():
+    notes = (ROOT / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    speech = notes.split("## Speech to text", 1)[1].split("\n## ", 1)[0]
+    assert "never runs" in speech
+    for name in ("French", "German", "Spanish", "Italian", "Vietnamese"):
+        assert name in speech, name
+
+
 def _stand_in_models(monkeypatch, request, tmp_path, here: str):
     """A stand-in for the model hub and mlx-whisper. `here` is what this Mac holds of the model: "whole" (its config
     and weights), "half" (a download that stopped after the config) or "none". It records how the model was looked

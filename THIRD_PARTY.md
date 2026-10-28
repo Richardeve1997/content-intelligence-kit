@@ -63,7 +63,7 @@ Three packages turn speech into text and line the captions up with the words. Se
 
 On Apple silicon, mlx-whisper runs `mlx-community/whisper-large-v3-turbo`, a conversion of OpenAI's Whisper large-v3-turbo, which OpenAI released under MIT. Elsewhere faster-whisper runs `Systran/faster-whisper-small`, also MIT. Setting `KIT_ASR_MODEL` picks another model, which comes under its own licence.
 
-WhisperX picks an alignment model by the language it hears. For English that is wav2vec 2.0 base 960h through torchaudio, published under MIT. For French, German, Spanish and Italian it is a VoxPopuli model under CC BY-NC 4.0, a licence that does not allow commercial use. Other languages get a model from Hugging Face under that model's own licence. When no alignment model is available, the kit uses the speech model's own word times instead.
+WhisperX picks an alignment model by the language it hears. For English that is wav2vec 2.0 base 960h through torchaudio, published under MIT. For French, German, Spanish and Italian it is a VoxPopuli model, and for Vietnamese a model from Hugging Face, all under CC BY-NC 4.0, a licence that does not allow commercial use. The kit never runs those five models: for these languages it keeps the speech model's own word times and prints a note saying so. Other languages get a model from Hugging Face under that model's own licence. When no alignment model is available, the kit uses the speech model's own word times instead.
 
 ## Matting
 

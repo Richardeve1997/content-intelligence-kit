@@ -137,6 +137,21 @@ def test_a_slot_is_a_locked_file_while_held_and_free_after(slots):
     assert media.SLOT_ENV not in os.environ
 
 
+def test_waiting_for_a_slot_is_a_note(slots, monkeypatch, capsys):
+    # The clip summary in onboarding keeps a failure's first line that is not a note, so the line a job prints
+    # while it waits has to be a note: otherwise it can push out the line that says which step stopped.
+    real, busy = media._try_take, iter([True])
+
+    def all_busy_once(folder, limit, label):
+        return None if next(busy, False) else real(folder, limit, label)
+
+    monkeypatch.setattr(media, "_try_take", all_busy_once)
+    with media.heavy_slot(poll=0.01):
+        pass
+    (line,) = capsys.readouterr().out.splitlines()
+    assert line.startswith("note: ") and "heavy-job slot" in line
+
+
 def test_a_nested_slot_in_the_same_process_does_not_take_a_second_one(slots, monkeypatch):
     monkeypatch.setenv("HEAVY_SLOTS", "1")
     with media.heavy_slot() as outer:

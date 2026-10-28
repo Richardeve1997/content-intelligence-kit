@@ -205,7 +205,7 @@ def heavy_slot(*, label: str = "", timeout: float | None = None, poll: float = 5
                 "Wait for the running render or encode to finish, then try again."
             )
         if not told:
-            print(f"Waiting for a heavy-job slot: {limit} heavy jobs are already running.", flush=True)
+            print(f"note: waiting for a heavy-job slot, because {limit} heavy jobs are already running.", flush=True)
             told = True
         time.sleep(poll if timeout is None else max(0.01, min(poll, timeout)))
         taken = _try_take(folder, limit, label)
