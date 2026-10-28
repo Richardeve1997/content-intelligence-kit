@@ -79,6 +79,56 @@ def test_the_first_window_starts_at_zero(tmp_path):
     assert done.returncode != 0
 
 
+LOOKUP = """
+const fs = require('fs'), vm = require('vm');
+globalThis.window = globalThis;
+vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'));
+vm.runInThisContext(fs.readFileSync(process.argv[2], 'utf8'));
+const out = {};
+for (const key of JSON.parse(process.argv[3])) {
+  try { out[String(key)] = UIS.win(key); } catch (e) { out[String(key)] = 'error: ' + e.message; }
+}
+out.second = window.UIS_LAYOUT[1];
+console.log(JSON.stringify(out));
+"""
+
+
+def lookup(hf, keys):
+    """UIS.win for each key, run in Node on the project's lib/layout.js and the kit's uistory.js."""
+    done = subprocess.run(["node", "-e", LOOKUP, str(hf / "lib" / "layout.js"), str(ROOT / ".claude" / "skills" / "ui-story"
+                           / "kit" / "uistory.js"), json.dumps(keys)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node")
+def test_a_window_is_found_by_its_name_or_a_time_after_another_is_inserted_before_it(tmp_path):
+    """A timeline that reads windows by their place in lib/layout.js breaks when a window is added before them.
+    UIS.win finds a window by its name in layout.json, by the phrase it starts at, or by a time inside it."""
+    hf = tmp_path / "hf"
+    windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret", "name": "payoff"},
+               {"mode": "canvas", "at": "not the seeds"}]
+    assert resolve(tmp_path, {"windows": windows}, hf=hf).returncode == 0
+    before = lookup(hf, ["payoff", "not the seeds", 4.2])
+    assert before["payoff"]["mode"] == "face" and before["payoff"]["name"] == "payoff", before
+    assert before["4.2"] == before["payoff"], "a time inside the window finds it too"
+
+    windows.insert(1, {"mode": "canvas", "at": "took ten minutes"})  # a window added before the one looked up
+    assert resolve(tmp_path, {"windows": windows}, hf=hf).returncode == 0
+    after = lookup(hf, ["payoff", "not the seeds", 4.2, "parsley"])
+    assert after["second"][0] == "canvas", "the old index now points at the inserted window"
+    assert after["payoff"] == before["payoff"] and after["4.2"] == before["payoff"], (before, after)
+    assert after["not the seeds"] == before["not the seeds"] and after["not the seeds"]["mode"] == "canvas"
+    assert after["parsley"].startswith("error: ") and "parsley" in after["parsley"], "a name no window has is an error"
+
+
+def test_two_windows_with_one_name_are_refused(tmp_path):
+    done = resolve(tmp_path, {"windows": [{"mode": "split", "t": 0, "name": "list"},
+                                          {"mode": "canvas", "at": "the secret", "name": "list"}]})
+    assert done.returncode != 0
+    assert "list" in done.stdout + done.stderr and "name" in done.stdout + done.stderr
+
+
 # --- karaoke captions --------------------------------------------------------------------------------------
 
 

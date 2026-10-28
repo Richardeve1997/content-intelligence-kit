@@ -187,7 +187,7 @@ uv run python $K/ship.py $V                            # composite, finish at 1.
 uv run python $K/postcheck.py $V                       # format, loudness, captions, stills, safe area, sheet
 ```
 
-`build/layout.json` lists the layout windows in order. Each one starts at its cue minus `lead` (or at `t` seconds) and runs until the next one starts. Cues are phrases as the speech model heard them (copy them from `base.lines.txt`); `nth` picks a later time the phrase was said. Zooms go in face windows only: a punch eases in on its cue and cuts back at `until` (or the end of the window), and a slow push drifts from its cue (or the window start) to the end of the window. Start a window with `"t"` on a take join (from `seg_starts.json`) so no frame of the next take shows in the previous layout. `layout.py --help` prints the same format.
+`build/layout.json` lists the layout windows in order. Each one starts at its cue minus `lead` (or at `t` seconds) and runs until the next one starts. Cues are phrases as the speech model heard them (copy them from `base.lines.txt`); `nth` picks a later time the phrase was said. Zooms go in face windows only: a punch eases in on its cue and cuts back at `until` (or the end of the window), and a slow push drifts from its cue (or the window start) to the end of the window. Start a window with `"t"` on a take join (from `seg_starts.json`) so no frame of the next take shows in the previous layout. Give a window a `"name"` when a scene needs its times, and find it in the timeline with `UIS.win('the list')`, by the phrase it starts at, or by a time inside it (`UIS.win(31.2)`), never by its place in `lib/layout.js`: a window added later moves every place after it. `layout.py --help` prints the same format.
 
 ```json
 {"lead": 0.12,
@@ -196,7 +196,7 @@ uv run python $K/postcheck.py $V                       # format, loudness, capti
    {"mode": "face", "at": "one big problem", "zooms": [
      {"kind": "punch", "at": "big problem", "z": 1.14, "until": "you're stuck"},
      {"kind": "slow", "at": "you're stuck", "z": 1.06}]},
-   {"mode": "canvas", "at": "four things"},
+   {"mode": "canvas", "at": "four things", "name": "the list"},
    {"mode": "split", "t": 14.13}]}
 ```
 
@@ -229,7 +229,7 @@ Everything is in `.claude/skills/ui-story/kit/`. Run the scripts with `uv run py
 | `scaffold.py` | a HyperFrames project with the creator's tokens and fonts copied in, and GSAP |
 | `template.html` | the composition the scaffold starts from |
 | `uistory.css` | cards, rows, chips, pills, rings, `.vidcard`, cursor, the closer; every colour from the tokens |
-| `uistory.js` | seek-safe GSAP helpers: `cue`, `show`, `pop`, `rise`, `tick`, `chip`, `fill`, `type`, `count`, `light`, `detail`, `cursor`, `click`, `ring`, `captions` |
+| `uistory.js` | seek-safe GSAP helpers: `cue`, `win`, `show`, `pop`, `rise`, `tick`, `chip`, `fill`, `type`, `count`, `light`, `detail`, `cursor`, `click`, `ring`, `captions` |
 | `karaoke.css` | the karaoke caption look |
 | `build_captions.py` | the karaoke caption track, `lib/words.js` and the transcript the speech gate reads |
 | `fill_times.py` | `{{ c("phrase") }}` cue expressions into frame-snapped seconds |

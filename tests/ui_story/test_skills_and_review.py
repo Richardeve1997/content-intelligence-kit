@@ -278,3 +278,13 @@ def test_the_cleanup_waits_for_the_render_gate_and_the_review():
     assert "After the composite passes" not in cleanup, cleanup
     assert "snap_render_gate.py" in cleanup and "review" in cleanup, cleanup
     assert cleanup.index("review") < cleanup.index("delete `build/gfx.webm`"), "the order comes first"
+
+
+def test_the_skill_finds_windows_by_name_or_time_never_by_place():
+    body = text(SKILLS["ui-story"])
+    layout_note = next(line for line in body.splitlines() if line.startswith("`build/layout.json` lists"))
+    assert "UIS.win(" in layout_note and '"name"' in layout_note, layout_note
+    assert "never by its place" in layout_note, layout_note
+    assert '"name":' in body.split('"windows": [')[1].split("```")[0], "the example layout.json shows a name"
+    helpers = next(line for line in body.splitlines() if line.startswith("| `uistory.js` |"))
+    assert "`win`" in helpers, helpers
