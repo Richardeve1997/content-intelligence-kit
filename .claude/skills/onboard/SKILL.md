@@ -277,7 +277,7 @@ uv run python -m kit.onboarding save posting '{"posting_times": null}'
 uv run python -m kit.onboarding save posting '{"posting_times": {"instagram": "17:00"}}'
 ```
 
-A value that is only wrong, such as a mistyped handle, is fixed by saving the right one over it. A save with a platform name that is not one of the six is refused, and the message lists the right names. `status` lists an answer saved as null as still needed.
+A value that is only wrong, such as a mistyped handle, is fixed by saving the right one over it. A save with a platform name that is not one of the six is refused, and the message lists the right names. Before the profile is written, `status` lists a required answer saved as null as still needed. An optional answer saved as null, such as `posting_times` or `logo`, is not listed, because it takes its default.
 
 ## Coming back later
 

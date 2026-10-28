@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1713,16 +1714,33 @@ def test_the_skill_says_in_steps_3_and_7_that_x_is_saved_as_twitter():
     assert found[3][1].count('X is saved as "twitter"') == 1 and found[7][1].count('X is saved as "twitter"') == 1
 
 
-def test_the_skill_has_the_recipe_for_clearing_a_group():
+def test_the_skill_has_the_recipe_for_clearing_a_group(me, capsys):
     body = read(SKILLS / "onboard" / "SKILL.md")
     section = body.split("## Fixing a saved answer", 1)[1].split("\n## ", 1)[0]
     assert "save it as null, then save the full group" in section
     assert 'save posting \'{"posting_times": null}\'' in section
     assert 'save posting \'{"posting_times": {"instagram": "17:00"}}\'' in section
     assert sections(body).index("Fixing a saved answer") < sections(body).index("Coming back later")
-    # the commands in the recipe are real: run them
-    for line in re.findall(r"^uv run python -m kit\.onboarding (save posting .+)$", section, re.M):
-        assert line.startswith("save posting '{") and line.endswith("}'")
+    # the commands in the recipe are real: run them, as a shell would split them, on a group saved wrong
+    fill(State(), answers_for(posting_times={"instagram": "18:00", "tiktok": "19:00"}))
+    commands = re.findall(r"^uv run python -m kit\.onboarding (save posting .+)$", section, re.M)
+    assert len(commands) == 2
+    for command in commands:
+        assert run(shlex.split(command), capsys)[0] == 0, command
+    assert State().answers["posting_times"] == {"instagram": "17:00"}, "only the full group is left"
+
+
+def test_the_skill_says_which_answers_saved_as_null_status_lists(me, capsys):
+    state = fill(State(), answers_for(posting_times={"instagram": "18:00"}), through="look")
+    state.save("look", {"logo": None, "colours": None})
+    status = run(["status"], capsys)[1]
+    assert "Answers still needed before the profile can be written: timezone, colours, styles." in status
+    assert "logo" not in status, "an optional answer saved as null is not listed: it takes its default"
+
+    section = read(SKILLS / "onboard" / "SKILL.md").split("## Fixing a saved answer", 1)[1].split("\n## ", 1)[0]
+    note = next(line for line in section.splitlines() if "saved as null" in line and "status" in line)
+    assert "required answer saved as null" in note, "only a required answer shows in status"
+    assert "default" in note, "and an optional one goes back to its default"
 
 
 def test_the_onboard_skill_keeps_keys_out_of_the_conversation():
