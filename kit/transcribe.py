@@ -63,6 +63,9 @@ FASTER_MODEL = "small"
 # --inexact keeps the other groups: without it uv removes every group the command does not name.
 NO_SPEECH_MODEL = "No speech model is installed. Install the video tools with: uv sync --group video --inexact"
 _FRAME = 0.02  # seconds per energy frame
+# A word has a letter or a digit, in any script. A rustle or a breath can come back from the speech model as a
+# lone "." or "...", and that is not something anyone said.
+_SPOKEN = re.compile(r"\w")
 _FLOOR_DB = -45.0
 _MIN_GAP = 0.28
 _PAD = 0.12
@@ -308,7 +311,7 @@ def words(
         found: list[Word] = []
         for a, b in chunks:
             piece, language = _words_in(samples[int(a * SR) : int(b * SR)], a, align=align, language=language)
-            found += [w for w in piece if not any(d0 <= w.start <= d1 for d0, d1 in drop)]
+            found += [w for w in piece if _SPOKEN.search(w.text) and not any(d0 <= w.start <= d1 for d0, d1 in drop)]
     return sorted(found, key=lambda w: w.start)
 
 

@@ -53,6 +53,26 @@ def test_chunks_split_at_real_pauses():
     assert chunks[0][0] == pytest.approx(0.5 - 0.12, abs=0.03)
 
 
+def test_a_chunk_heard_as_punctuation_alone_gives_no_word(tmp_path, monkeypatch):
+    # A rustle before anyone speaks can come back from the speech model as a lone ".". It is not a word: kept,
+    # it starts the setup test clip on a silent stretch, and a Reel would give it a caption of its own.
+    import contextlib
+
+    import numpy as np
+
+    audio = tmp_path / "take.wav"
+    audio.write_bytes(b"stand-in")
+    monkeypatch.setattr(transcribe, "audio_samples", lambda path: np.zeros(10 * transcribe.SR, np.float32))
+    monkeypatch.setattr(transcribe, "speech_chunks", lambda samples: [(1.0, 2.0), (5.0, 7.0)])
+    monkeypatch.setattr(transcribe.media, "heavy_slot", lambda **kwargs: contextlib.nullcontext())
+    heard = iter([
+        ([Word(".", 1.3, 1.4)], "en"),
+        ([Word("Fresh", 5.1, 5.5), Word("basil,", 5.6, 6.0), Word("...", 6.1, 6.2), Word("37", 6.3, 6.6)], "en"),
+    ])
+    monkeypatch.setattr(transcribe, "_words_in", lambda samples, offset, *, align, language: next(heard))
+    assert [w.text for w in transcribe.words(audio)] == ["Fresh", "basil,", "37"]
+
+
 def test_words_writes_the_shape_the_kit_reads(tmp_path, monkeypatch):
     monkeypatch.setattr(transcribe, "words", lambda audio, *, align=True: words_of("Fresh basil in March"))
     monkeypatch.setattr(transcribe, "_duration", lambda path: 3.0)
