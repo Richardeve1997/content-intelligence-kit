@@ -850,8 +850,9 @@ def test_a_disk_that_is_nearly_full_stops_before_any_clip_is_started(kit_folder,
 def test_the_folders_the_clips_use_are_the_ones_next_has_to_skip(kit_folder):
     assert onboarding.CLIP_FOLDER == "onboarding-test"
     skill = (ROOT / ".claude" / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8")
-    # the mini me clip script builds in work/mini-me-test-clip/, which stays behind when its run is stopped
-    assert f'SCRATCH = ("{onboarding.CLIP_FOLDER}", "mini-me-test-clip")' in skill
+    # the mini me clip script builds in work/mini-me-test-clip/, which stays behind when its run is stopped, and
+    # the voice skill downloads the creator's own videos into work/voice-samples/
+    assert f'SCRATCH = ("{onboarding.CLIP_FOLDER}", "mini-me-test-clip", "voice-samples")' in skill
 
 
 def test_the_skill_and_the_runner_name_the_same_scripts(capsys):

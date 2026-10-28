@@ -18,7 +18,8 @@ import os
 from pathlib import Path
 
 PLATFORMS = ("instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter")
-SCRATCH = ("onboarding-test", "mini-me-test-clip")  # setup's test take and clips, and the mini me clip's scratch folder: not videos
+# Not videos: setup's test take and clips, the mini me clip's scratch folder, and the voice skill's downloads
+SCRATCH = ("onboarding-test", "mini-me-test-clip", "voice-samples")
 
 work = Path("work")
 folders = [p for p in work.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in SCRATCH] if work.is_dir() else []
@@ -59,13 +60,12 @@ def receipts():
     return found
 
 
+# The files decide first, so a video edited from a take with no plan (and so maybe no idea.json) still gets its step.
 sent = receipts()
 if folder is None:
     state = "no_video"
 elif not folder.is_dir():
     state = "no_such_video"
-elif not has("idea.json"):
-    state = "no_idea"
 elif has("final.mp4") and "scheduled" in sent.values():
     state = "posted"
 elif has("final.mp4") and ("unconfirmed" in sent.values() or "unreadable" in sent.values()):
@@ -76,10 +76,12 @@ elif has("final.mp4"):
     state = "final_ready"
 elif has("script.md"):
     state = "mini_me_in_progress"
-elif has("plan.md") and take_files:
+elif take_files:
     state = "take_ready"
 elif has("plan.md"):
     state = "needs_take"
+elif not has("idea.json"):
+    state = "no_idea"
 else:
     state = "needs_plan"
 
@@ -103,7 +105,8 @@ for f in take_files:
 if has("idea.json"):
     try:
         idea = json.loads((folder / "idea.json").read_text(encoding="utf-8"))
-        print(f"idea: {idea['n']}, {idea['title']}")
+        # an idea from research has its number; one saved for a take with no plan has only its title
+        print(f"idea: {idea['n']}, {idea['title']}" if "n" in idea else f"idea: {idea['title']}")
     except (OSError, ValueError, KeyError, TypeError):
         pass
 runs = sorted(Path("research/runs").glob("*/ideas.json"))
@@ -121,10 +124,10 @@ if runs:
 |---|---|---|
 | `no_video` | `work/` holds no video. | Nothing is in progress. Say "run my research" to find ideas (`research`). If the script printed `ideas:`, they can pick a number from that run instead: "plan the video for number 2" (`ui-story`) or "make number 3 a mini me video" (`mini-me`). |
 | `no_such_video` | There is no folder with the name in `SLUG`. | Check the name against the folders in `work/`. |
-| `no_idea` | The folder has no `idea.json`. | The kit does not know which idea this video belongs to. Pick an idea from the latest research run, or say "run my research". |
+| `no_idea` | The folder has no `idea.json`, and no plan, script, take or finished video either. | The kit does not know which idea this video belongs to. Pick an idea from the latest research run, or say "run my research". |
 | `needs_plan` | The idea is saved. Nothing is planned yet. | Pick a style for the idea the script printed: "plan the video for number N" (`ui-story`) or "make number N a mini me video" (`mini-me`). |
 | `needs_take` | `plan.md` is written and `take/` has no file. | Film the take with the film guide in `plan.md`, then say "here's my raw take, edit it". Filming is the creator's job, so stop here. |
-| `take_ready` | `take/` holds a take and there is no `final.mp4`. | Edit it (`ui-story`). |
+| `take_ready` | `take/` holds a take and there is no `final.mp4`. The take may have no plan, and then `idea.json` holds only its title, or the folder has none. | Edit it (`ui-story`). |
 | `mini_me_in_progress` | `script.md` is written and there is no `final.mp4`. | The narration is ready. The voice-over and the build come next (`mini-me`). |
 | `final_ready` | `final.mp4` exists and there are no captions. | The video is finished. Captions come next. The `post` skill writes one per platform for approval. |
 | `captions_ready` | `captions.json` exists and no platform has a live receipt in `post/`. A `post/` folder that holds only `media.json`, `manual.md`, or receipts for posts that were cancelled or lost counts as nothing scheduled. | Show the captions for approval, then ask when to post, as in "post it everywhere tomorrow at 6pm" (`post`). If `receipts:` lists a platform as cancelled, say which one and ask whether to schedule it again. If the script printed `manual:`, the captions are already written for posting by hand in that file, so ask whether they have posted it. |

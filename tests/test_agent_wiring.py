@@ -633,6 +633,14 @@ STATES = [
         "captions_ready",
         "idea.json, script.md, final.mp4, captions.json, post",
     ),
+    # A take edited with no plan: the ui-story skill saves the title alone in idea.json, and an older video may have
+    # no idea.json at all. Either way the files say how far it got.
+    (["idea.json", "take/take-01.mov"], "take_ready", "idea.json, take"),
+    (["take/take-01.mov"], "take_ready", "take"),
+    (["take/take-01.mov", "final.mp4"], "final_ready", "take, final.mp4"),
+    (["take/take-01.mov", "final.mp4", "captions.json"], "captions_ready", "take, final.mp4, captions.json"),
+    (["plan.md"], "needs_take", "plan.md"),
+    (["take/"], "no_idea", "take"),
 ]
 
 
@@ -668,6 +676,14 @@ def test_next_reads_the_idea_when_it_can(tmp_path):
     assert seen["idea"] == "2, Why windowsill basil dies"
     (folder / "idea.json").write_text("not json")
     assert "idea" not in look(tmp_path)
+
+
+def test_next_reads_an_idea_saved_with_its_title_alone(tmp_path):
+    # the ui-story skill writes this for a take edited with no plan
+    folder = make_video(tmp_path, "example-reel", ["take/take-01.mov"])
+    (folder / "idea.json").write_text(json.dumps({"title": "Three balcony herbs that survive winter"}))
+    seen = look(tmp_path)
+    assert (seen["state"], seen["idea"]) == ("take_ready", "Three balcony herbs that survive winter")
 
 
 def test_next_looks_at_the_video_touched_most_recently(tmp_path):
@@ -818,6 +834,20 @@ def test_next_does_not_mistake_the_setup_test_folder_for_a_video(tmp_path):
     only_scratch = tmp_path / "second"
     make_video(only_scratch, "onboarding-test", [])
     assert look(only_scratch)["state"] == "no_video"
+
+
+def test_next_does_not_mistake_the_voice_samples_folder_for_a_video(tmp_path):
+    # the voice skill downloads the creator's own videos into work/voice-samples/ to transcribe them
+    video = make_video(tmp_path, "example-reel", ["idea.json"])
+    samples = make_video(tmp_path, "voice-samples", [])
+    os.utime(video, (1_700_000_000, 1_700_000_000))
+    os.utime(samples, (1_800_000_000, 1_800_000_000))
+    assert look(tmp_path)["video"] == "example-reel"
+    assert '"work/voice-samples/' in text(SKILLS / "voice" / "SKILL.md"), "the folder the voice skill downloads into"
+
+    only_samples = tmp_path / "second"
+    make_video(only_samples, "voice-samples", [])
+    assert look(only_samples)["state"] == "no_video"
 
 
 def test_next_names_the_same_platforms_as_the_kit():

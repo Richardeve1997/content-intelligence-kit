@@ -256,6 +256,8 @@ def test_an_edit_with_no_plan_names_the_video_and_links_the_take_first():
     assert "no plan" in edit_step, "the edit step covers a take that skipped the plan"
     assert "video name" in edit_step and "work/<video>/take/" in edit_step and "ln -s" in edit_step, edit_step
     assert "never" in edit_step and "copy" in edit_step, "the raw take is linked, never copied"
+    # the title alone goes into idea.json, so the next skill and the folder naming know which video this is
+    assert "title" in edit_step and '`work/<video>/idea.json`' in edit_step and '`{"title": "<title>"}`' in edit_step
 
 
 def test_the_lint_warnings_the_kit_causes_on_purpose_are_named_as_expected():
