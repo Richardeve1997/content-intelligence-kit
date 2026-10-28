@@ -210,7 +210,9 @@ def test_no_retired_or_machine_specific_file_ships():
     assert not names & RETIRED
     assert "_v1" not in names
     for path in KIT.rglob("*"):
-        if path.is_file():
+        # Python writes __pycache__ while the tests run, and its bytecode holds the path it was compiled from.
+        # It is gitignored and never ships, so only the files that ship are read here.
+        if path.is_file() and "__pycache__" not in path.parts:
             text = path.read_text(encoding="utf-8", errors="replace")
             assert HOME_ROOT not in text and "/System/Volumes/Data" not in text, path
             assert not RAW_TAKE_NAME.search(text), path
