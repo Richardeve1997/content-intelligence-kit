@@ -118,6 +118,15 @@ def content(text: str) -> bool:
 # --- phrases --------------------------------------------------------------------------------------------------------
 
 
+CLOSERS = "\"')]}\u2019\u201d\u00bb"  # a closing quote or bracket can follow the mark that ends a sentence
+
+
+def _ends_sentence(word: transcribe.Word) -> bool:
+    """Whether the word ends its sentence: a full stop, a question mark or an exclamation mark, even when a closing
+    quote or bracket follows it ('why."')."""
+    return word.text.rstrip().rstrip(CLOSERS).endswith((".", "!", "?"))
+
+
 def _cta_start(words: list[transcribe.Word], cta: str, keyword: str | None) -> int | None:
     """Index of the first word of the closing call to action, or None when the narration has none."""
     triggers = {"follow", "following"} if cta != "comment" else {bare(keyword or ""), "comment"}
@@ -126,12 +135,12 @@ def _cta_start(words: list[transcribe.Word], cta: str, keyword: str | None) -> i
     if not hits:
         return None
     trigger = hits[-1]
-    after = [w for w in words[trigger + 1 :] if w.text.rstrip().endswith((".", "!", "?"))]
+    after = [w for w in words[trigger + 1 :] if _ends_sentence(w)]
     if len(words) - trigger > 25 or len(after) > 2:
         return None  # the word is said early on, not in the closing line
     start = trigger
     # back to the start of its sentence: a full stop, or a pause when the speech model wrote no punctuation
-    while start > 0 and not words[start - 1].text.rstrip().endswith((".", "!", "?")):
+    while start > 0 and not _ends_sentence(words[start - 1]):
         if words[start].start - words[start - 1].end >= PAUSE or words[trigger].start - words[start - 1].start > 2.5:
             break
         start -= 1
@@ -146,7 +155,7 @@ def _chunks(words: list[transcribe.Word], first: int, last: int) -> list[list[in
         text = words[i].text.rstrip()
         gap = words[i + 1].start - words[i].end if i < last else 0.0
         clause = text.endswith((",", ";", ":")) and len(current) >= 3
-        if i == last or text.endswith((".", "!", "?")) or clause or gap >= PAUSE:
+        if i == last or _ends_sentence(words[i]) or clause or gap >= PAUSE:
             out.append(current)
             current = []
     return out
@@ -179,10 +188,6 @@ def _split(words, group: list[int]) -> list[list[int]]:
     if best is None:
         best = len(group) // 2
     return _split(words, group[:best]) + _split(words, group[best:])
-
-
-def _ends_sentence(word: transcribe.Word) -> bool:
-    return word.text.rstrip().endswith((".", "!", "?"))
 
 
 def _join_short(words, groups: list[list[int]]) -> list[list[int]]:

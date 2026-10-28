@@ -159,6 +159,25 @@ def test_a_short_last_word_after_a_pause_stays_with_its_sentence():
     assert "WHY" in pages[-2]["text"], pages
 
 
+def test_a_sentence_ends_at_a_full_stop_before_a_closing_quote():
+    """A speech model can close a quote after the full stop ('why."'). The sentence still ends there: a short last
+    word said after a pause stays with it, and the next word starts a new phrase."""
+    words = [Word("The", 0.10, 0.30), Word("basil", 0.34, 0.70), Word("wilted", 0.74, 1.10), Word("and", 1.14, 1.30),
+             Word("nobody", 1.34, 1.70), Word("knows", 1.74, 2.00), Word('why."', 2.42, 2.48),
+             Word("You", 2.78, 2.94), Word("did", 2.98, 3.14), Word("nothing", 3.18, 3.50), Word('wrong."', 3.54, 3.90)]
+    said = [[words[i].text for i in group] for group in beats.phrases(words, cta="follow")]
+    assert said[-1] == ["You", "did", "nothing", 'wrong."'], said
+    assert said[-2][-2:] == ["knows", 'why."'], said
+
+
+def test_the_closing_line_starts_after_a_full_stop_before_a_closing_quote():
+    """The closing line is found back to the start of its sentence, which ends at a full stop even when a closing
+    quote follows it, without the pause a full stop usually brings."""
+    words = timed('Three plants made it." Follow for more balcony tips.')
+    groups = beats.phrases(words, cta="follow")
+    assert [words[i].text for i in groups[-1]] == ["Follow", "for", "more", "balcony", "tips."], groups
+
+
 def test_a_short_word_that_opens_a_sentence_still_joins_the_next_phrase():
     words = [Word("It", 0.10, 0.30), Word("died.", 0.34, 0.80), Word("So,", 1.30, 1.40), Word("water", 1.80, 2.10),
              Word("it", 2.14, 2.30), Word("less.", 2.34, 2.80)]
