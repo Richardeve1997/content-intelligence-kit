@@ -1,0 +1,21 @@
+The attached images show a pixel-art character. The first is its approved character sheet and the second is its front view at full size.
+
+Draw the same character in the poses listed at the end. Keep everything that makes it the same character: the face, the hair, the body proportions, the clothes, the colours and the size of the pixels.
+
+Who: {description}
+
+Clothes: {outfit}
+
+Colours: {palette_hint}
+
+Layout: one row of full-body figures standing on a single ground line. First, on the far left, put an exact copy of the attached front view at the same size, as a size reference. Then draw the poses from left to right in the order they are listed, each one the same size as the reference: the same head size, and the same height when standing. Leave clear space between the figures so no two of them touch, and keep every hand, arm and prop inside its own space.
+
+Faces: unless a pose says otherwise, the face looks at the viewer with the eyes open and the mouth closed, exactly as in the front view.
+
+Pixel style: the same crisp pixel art as the sheet, on the same grid. Every pixel is the same size, a dark outline one pixel wide runs around each figure, and the colours are flat. No anti-aliasing, no gradients and no blur.
+
+Picture: wide, in landscape format, with a margin of plain background all round the figures.
+
+Background: one flat, plain light grey, the same colour everywhere. No text, no labels, no numbers, no shadow on the ground and no other objects, apart from props a pose asks for.
+
+The poses, from left to right after the reference:

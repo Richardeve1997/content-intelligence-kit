@@ -1,0 +1,19 @@
+The attached photos show one real person: the creator of these videos. Turn them into a pixel-art character of that person for short videos.
+
+About them: {description}
+
+Clothes: {outfit}
+
+Colours: {palette_hint}
+
+Keep the character recognisable as them: the same face shape, hair style and hair colour, skin tone and eye colour, and their glasses or facial hair if they have any. Do not copy the backgrounds or the lighting of the photos, and use the clothes above rather than the clothes in the photos.
+
+Draw a character sheet: three full-body views of the same character standing side by side on one ground line, all the same height. From left to right: the front view, facing the viewer, standing straight with the arms relaxed at the sides and the feet a little apart; the side view, facing right; the back view.
+
+Proportions: a cute big-head style, about three heads tall, with a friendly face. The eyes are open and look at the viewer, and the mouth is closed in a small smile.
+
+Pixel style: crisp pixel art on a regular grid, where every pixel is the same size and easy to see. A dark outline one pixel wide runs around each figure. Flat colours, with one or two shades each. No anti-aliasing, no gradients, no blur and no texture.
+
+Picture: wide, in landscape format, with a margin of plain background all round the figures.
+
+Background: one flat, plain light grey, the same colour everywhere. Leave clear space between the figures so they do not touch. No text, no labels, no shadow on the ground, no frame and no other objects.

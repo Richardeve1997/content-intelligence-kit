@@ -24,6 +24,7 @@ import argparse
 import json
 import re
 import shutil
+from urllib.parse import quote
 import sys
 from pathlib import Path
 
@@ -46,13 +47,13 @@ def project_tokens(hf: Path) -> str:
     fonts.mkdir(parents=True, exist_ok=True)
 
     def local(match: re.Match) -> str:
-        source = (hf / match.group(1)).resolve()
+        source = brand.url_file(match.group(1), hf)  # the URL is percent-encoded: decode it before reading it
         if not source.is_file():
             raise SystemExit(f"The font file {source.name} named by your profile is missing. Run onboarding again.")
         target = fonts / source.name
         if not target.is_file() or target.stat().st_size != source.stat().st_size:
             shutil.copy2(source, target)
-        return f'url("fonts/{source.name}")'
+        return f'url("fonts/{quote(source.name)}")'
 
     return re.sub(r'url\("([^"]+)"\)', local, css)
 
