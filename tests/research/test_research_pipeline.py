@@ -12,7 +12,7 @@ from kit import config
 from kit.research import __main__ as cli
 from kit.research import common, pipeline
 from research_helpers import (
-    NOW, apify, ig_post, make_yt_dlp, short_info, tt_post, visible, write_ideas_file, write_profile, write_watchlist,
+    NOW, apify, ig_post, make_yt_dlp, short_info, started, tt_post, visible, write_ideas_file, write_profile, write_watchlist,
 )
 
 MISSING = "Instagram and TikTok skipped: add APIFY_TOKEN to .env to include them"
@@ -176,6 +176,37 @@ def test_the_run_prints_a_short_plain_summary(kit_tree, me, youtube, watching_yo
     assert "Wrote research/runs/2026-10-28/items.json and report.html" in lines
     assert lines[-1].startswith("Next:") and "ideas" in lines[-1]
     assert str(kit_tree) not in text and HOME_PREFIX not in text  # paths are shown from the kit folder down
+
+
+def test_creators_who_returned_nothing_are_named_in_the_summary_and_the_report(kit_tree, me, web):
+    (kit_tree / ".env").write_text(f"APIFY_TOKEN={TOKEN}\n", encoding="utf-8")
+    write_watchlist(me, instagram=["@example_gardener_one", "@example_gardener_two"])
+    apify(web, ig=[ig_post("AAA111"), ig_post("BBB222", days_ago=4)])
+    lines = []
+    pipeline.run(no_transcribe=True, say=lines.append)
+    named = "Instagram returned no videos for @example_gardener_two"
+    assert "Instagram: 2 videos from 1 of 2 creators (US$0.12)" in lines  # not "from 1 creator", as if it were everyone
+    assert named in lines
+    data = items_of(kit_tree)
+    assert named in data["notices"]
+    text = visible(page_of(kit_tree))
+    assert text.count(named) == 1 and text.index(named) < text.index("Ideas to film")
+    assert "2 videos from 1 of 2 creators" in text  # the line for Instagram under "How this run went"
+
+
+def test_a_capped_run_is_explained_in_the_summary_and_the_report(kit_tree, me, web):
+    (kit_tree / ".env").write_text(f"APIFY_TOKEN={TOKEN}\n", encoding="utf-8")
+    write_watchlist(me, instagram=["@example_gardener_one", "@example_gardener_two"])
+    apify(web, ig=[ig_post("AAA111")], ig_run=started("run-ig", "ds-ig", "ABORTED", 0.25))
+    lines = []
+    pipeline.run(no_transcribe=True, say=lines.append)
+    notice = (
+        "Instagram stopped at your spending cap of US$0.25, so no videos came back for @example_gardener_two. "
+        "Raise research.cost_cap.instagram in me/profile.json to pull more"
+    )
+    assert notice in lines
+    assert notice in visible(page_of(kit_tree))
+    assert items_of(kit_tree)["sources"]["instagram"]["stopped_by"] == "cap"
 
 
 # --- the creator's files --------------------------------------------------------------------------------

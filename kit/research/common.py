@@ -133,6 +133,13 @@ def plural(count: int, word: str, many: str | None = None) -> str:
     return f"{count} {word if count == 1 else (many or word + 's')}"
 
 
+def creators_phrase(with_videos: int, listed: int) -> str:
+    """"4 creators" when everyone on the list answered, "3 of 4 creators" when some did not."""
+    if with_videos < listed:
+        return f"{with_videos} of {plural(listed, 'creator')}"
+    return plural(with_videos, "creator")
+
+
 def words(text, count: int) -> str:
     """The first `count` words, with an ellipsis when there are more."""
     parts = (text or "").split()

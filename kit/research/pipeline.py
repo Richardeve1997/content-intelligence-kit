@@ -154,9 +154,10 @@ def _summarise(data: dict, say) -> None:
     for platform in common.RESEARCH_PLATFORMS:
         source = data["sources"].get(platform) or {}
         if source.get("status") == "ok":
-            made = [c for c in source.get("creators", []) if c.get("videos")]
+            listed = source.get("creators", [])
+            made = [c for c in listed if c.get("videos")]
             cost = f" (US${source['cost_usd']:.2f})" if isinstance(source.get("cost_usd"), (int, float)) else ""
-            say(f"{common.PLATFORM_LABEL[platform]}: {common.plural(source['videos'], 'video')} from {common.plural(len(made), 'creator')}{cost}")
+            say(f"{common.PLATFORM_LABEL[platform]}: {common.plural(source['videos'], 'video')} from {common.creators_phrase(len(made), len(listed))}{cost}")
     for notice in data["notices"]:
         say(notice)
     posts = data["x_posts"]

@@ -11,6 +11,7 @@ from __future__ import annotations
 import concurrent.futures as futures
 import importlib
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -33,6 +34,10 @@ ACTORS = {
     "tiktok": {"actor": "clockworks~tiktok-scraper", "min_usd": 0.50, "per_creator": 10},
 }
 SHORTS_PER_CREATOR = 10
+CAP_TOLERANCE = 0.005  # US dollars: spending within half a cent of the limit counts as reaching it
+NO_VIDEOS = "no videos returned"  # the note on a creator Apify said nothing about
+MAX_NAMED = 8  # creators named in one notice before it says "and 3 more"
+MAX_REASON = 120  # characters of someone else's reason shown
 
 
 @dataclass
@@ -129,14 +134,22 @@ class _Account:
 
 
 def _apify_run(account: _Account, spec: dict, run_input: dict, cap: float, deadline: float) -> tuple[list, dict]:
-    """Start an actor, wait for it inside the time limit, and return its items and what it cost."""
+    """Start an actor, wait for it inside the time limit, and return its items and what it cost.
+
+    Apify stops a run that reaches its charge limit, and what it had delivered by then is already paid
+    for, so a run that ended at the limit keeps its dataset whatever status it ended with. The meta says
+    when that happened (`stopped_by` is "cap" for the profile's cap, "balance" for the account running low).
+    """
     minimum = spec["min_usd"]
     left = account.left()
+    limit, by_balance = cap, False
     if left is not None:
         if left < minimum:
             raise ApifyLimit(max(left, 0.0), minimum)
-        cap = min(cap, round(left - 0.01, 2))
-    charge = max(cap, minimum)
+        room = round(left - 0.01, 2)
+        if room < cap:
+            limit, by_balance = room, True
+    charge = max(limit, minimum)
     query = urlencode({"maxTotalChargeUsd": charge})
     run = common.http_json(f"{API}/acts/{spec['actor']}/runs?{query}", "POST", run_input, account.auth, timeout=30)["data"]
     run_id, dataset = run["id"], run["defaultDatasetId"]
@@ -152,11 +165,14 @@ def _apify_run(account: _Account, spec: dict, run_input: dict, cap: float, deadl
         wait = int(min(20, remaining - 1))
         run = common.http_json(f"{API}/actor-runs/{run_id}?waitForFinish={wait}", headers=account.auth, timeout=min(30, remaining + 5))["data"]
         status = run.get("status")
-    if status != "SUCCEEDED":
+    spent = run.get("usageTotalUsd")
+    reached = isinstance(spent, (int, float)) and not isinstance(spent, bool) and spent >= charge - CAP_TOLERANCE
+    if status != "SUCCEEDED" and not reached:
         words = {"FAILED": "failed", "ABORTED": "was stopped", "TIMED-OUT": "timed out"}
         raise ApifyRunError(f"the Apify run {words[status]}")
     items = common.http_json(f"{API}/datasets/{dataset}/items?clean=true&format=json", headers=account.auth, timeout=30)
-    return items, {"cost_usd": run.get("usageTotalUsd")}
+    stopped_by = ("balance" if by_balance else "cap") if reached else None
+    return items, {"cost_usd": spent, "stopped_by": stopped_by, "left_usd": left}
 
 
 def _count(value) -> int:
@@ -197,7 +213,7 @@ def _instagram_items(raw: list, creators: list[str]) -> tuple[list[dict], list[d
                 "video_url": post.get("videoUrl"),
             }
         )
-    return items, _creator_rows(per)
+    return items, _creator_rows(per, _reasons(raw, creators))
 
 
 def _tiktok_items(raw: list, creators: list[str]) -> tuple[list[dict], list[dict]]:
@@ -228,14 +244,38 @@ def _tiktok_items(raw: list, creators: list[str]) -> tuple[list[dict], list[dict
                 "subtitle_url": english.get("downloadLink") or english.get("tiktokLink"),
             }
         )
-    return items, _creator_rows(per)
+    return items, _creator_rows(per, _reasons(raw, creators))
 
 
-def _creator_rows(per: dict) -> list[dict]:
+def _short(text, limit: int = MAX_REASON) -> str:
+    """Someone else's words on one line, cut to a sensible length."""
+    text = " ".join(str(text).split()).rstrip(".")
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _reasons(raw, creators: list[str]) -> dict[str, str]:
+    """Why Apify gave nothing for a creator, when it said. It answers some failures with an error item
+    that names the profile, such as one for a private account. {creator in lower case: reason}."""
+    wanted = {name.lower() for name in creators}
+    found: dict[str, str] = {}
+    for item in raw if isinstance(raw, list) else []:
+        reason = item.get("errorDescription") or item.get("error") if isinstance(item, dict) else None
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        for key in ("inputUrl", "url", "input", "profileUrl", "username"):
+            value = item.get(key)
+            handle = common.handle_of(value).lower() if isinstance(value, str) else ""
+            if handle in wanted:
+                found.setdefault(handle, _short(reason))
+                break
+    return found
+
+
+def _creator_rows(per: dict, reasons: dict[str, str]) -> list[dict]:
     rows = list(per.values())
     for row in rows:
         if row["videos"] == 0:
-            row["note"] = "no videos returned"
+            row["note"] = reasons.get(row["creator"]) or NO_VIDEOS
     return rows
 
 
@@ -265,6 +305,41 @@ def _apify_input(platform: str, creators: list[str]) -> dict:
 
 def _article(label: str) -> str:
     return "an" if label[0] in "AEIOU" else "a"
+
+
+def _join(parts: list[str]) -> str:
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _named(rows: list[dict]) -> str:
+    """"@a, @b (private account) and 3 more": who returned nothing, with the reason where there is one."""
+    parts = []
+    for row in rows[:MAX_NAMED]:
+        reason = row.get("note")
+        parts.append(f"@{row['creator']}" + (f" ({reason})" if reason and reason != NO_VIDEOS else ""))
+    if len(rows) > MAX_NAMED:
+        parts.append(f"{len(rows) - MAX_NAMED} more")
+    return _join(parts)
+
+
+def _platform_notice(platform: str, missing: list[dict], *, everyone: bool, stopped=None, cap: float = 0.0, left=None) -> str | None:
+    """The one sentence about a platform that ran: who returned nothing, and a spending limit if one was reached."""
+    label = common.PLATFORM_LABEL[platform]
+    if stopped == "cap":
+        fix = f"Raise research.cost_cap.{platform} in me/profile.json"
+        if missing:
+            return f"{label} stopped at your spending cap of US${cap:.2f}, so no videos came back for {_named(missing)}. {fix} to pull more"
+        return f"{label} used all of its US${cap:.2f} spending cap. {fix} if a creator looks thin"
+    if stopped == "balance":
+        if missing:
+            return (
+                f"{label} stopped because your Apify account only had US${left:.2f} left this month, "
+                f"so no videos came back for {_named(missing)}"
+            )
+        return f"{label} used the US${left:.2f} your Apify account had left this month"
+    if not missing:
+        return None
+    return f"{label} returned no videos {'this time ' if everyone else ''}for {_named(missing)}"
 
 
 def _apify_platform(platform: str, creators: list[str], account: _Account, cap: float, deadline: float) -> tuple[list, dict, str | None]:
@@ -299,12 +374,13 @@ def _apify_platform(platform: str, creators: list[str], account: _Account, cap: 
         return [], source, f"{label} skipped: {common.why(exc)}"
 
     items, rows = (_instagram_items if platform == "instagram" else _tiktok_items)(raw, creators)
-    source.update(creators=rows, videos=len(items), cost_usd=meta.get("cost_usd"))
-    if not items:
-        source["status"] = "failed"
-        return [], source, f"{label} returned no videos this time"
-    source["status"] = "ok"
-    return items, source, None
+    stopped = meta.get("stopped_by")
+    source.update(creators=rows, videos=len(items), cost_usd=meta.get("cost_usd"), status="ok" if items else "failed")
+    if stopped:
+        source["stopped_by"] = stopped
+    missing = [row for row in rows if not row["videos"]]
+    notice = _platform_notice(platform, missing, everyone=not items, stopped=stopped, cap=cap, left=meta.get("left_usd"))
+    return items, source, notice
 
 
 # --- YouTube ----------------------------------------------------------------------------------------------
@@ -330,6 +406,18 @@ def _caption_link(info: dict) -> str | None:
                 if track.get("ext") == "json3" and track.get("url"):
                     return track["url"]
     return None
+
+
+def _ytdlp_reason(exc: BaseException) -> str:
+    """What went wrong with a YouTube channel, in plain words. yt-dlp's errors arrive with colour codes
+    and its own prefixes ("ERROR: [youtube:tab] @name/shorts: ..."), which mean nothing to a creator."""
+    text = re.sub(r"\x1b\[[0-9;]*m", "", str(exc)).strip()
+    text = re.sub(r"^ERROR:\s*", "", text)
+    text = re.sub(r"^\[[^\]]+\]\s*[^:]*:\s*", "", text)
+    text = re.sub(r"\s*\(caused by .*\)\s*$", "", text).strip()
+    if re.search(r"\b404\b", text):
+        return "channel not found"
+    return _short(text) if text else type(exc).__name__
 
 
 def _youtube(creators: list[str], deadline: float) -> tuple[list, dict, str | None]:
@@ -358,22 +446,26 @@ def _youtube(creators: list[str], deadline: float) -> tuple[list, dict, str | No
 
     rows = {name: {"creator": name, "videos": 0} for name in creators}
     ids: list[tuple[str, str]] = []
+    answered: set[str] = set()
     listing_pool = futures.ThreadPoolExecutor(max_workers=max(1, len(creators)))
     try:
         jobs = {listing_pool.submit(listing, name): name for name in creators}
         try:
             for job in futures.as_completed(jobs, timeout=max(MIN_WAIT, deadline - time.monotonic())):
                 name = jobs[job]
+                answered.add(name)
                 try:
                     ids += [(name, video_id) for video_id in job.result()]
                 except Exception as exc:
-                    rows[name]["note"] = common.why(exc)
+                    rows[name]["note"] = _ytdlp_reason(exc)
         except futures.TimeoutError:
-            pass  # a creator that did not answer in time has no note, and is reported as returning nothing
+            pass  # the creators still missing from `answered` get a note below
     finally:
         listing_pool.shutdown(wait=False, cancel_futures=True)  # never wait on a page that will not load
     for name in creators:
-        if "note" not in rows[name] and not any(owner == name for owner, _ in ids):
+        if name not in answered:
+            rows[name]["note"] = "did not answer in time"
+        elif "note" not in rows[name] and not any(owner == name for owner, _ in ids):
             rows[name]["note"] = "no Shorts returned"
 
     items: list[dict] = []
@@ -413,16 +505,16 @@ def _youtube(creators: list[str], deadline: float) -> tuple[list, dict, str | No
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
+    for row in rows.values():
+        if not row["videos"] and "note" not in row:
+            row["note"] = "its Shorts could not be read"
     source["creators"] = list(rows.values())
     source["videos"] = len(items)
     if skipped or len(items) < len(ids):
         source["note"] = f"{len(items)} of {len(ids)} Shorts checked"
-    if not items:
-        source["status"] = "failed"
-        first = next((row["note"] for row in rows.values() if row.get("note") and row["note"] != "no Shorts returned"), "")
-        return [], source, "YouTube returned no videos this time" + (f" ({first})" if first else "")
-    source["status"] = "ok"
-    return items, source, None
+    source["status"] = "ok" if items else "failed"
+    missing = [row for row in rows.values() if not row["videos"]]
+    return items, source, _platform_notice("youtube", missing, everyone=not items)
 
 
 # --- the pull ---------------------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ WATCH = {
     "youtube": [],
 }
 IG_ONLY = {"instagram": ["@example_gardener_one"], "tiktok": [], "youtube": []}
+IG_TWO = {"instagram": ["@example_gardener_one", "@example_gardener_two"], "tiktok": [], "youtube": []}
 
 
 @pytest.fixture
@@ -133,7 +134,7 @@ def test_a_platform_that_returns_no_videos_at_all_is_reported(profile, web):
     apify(web, ig=[ig_post("AAA111")], tt=[])
     pull = scrape.pull(profile, WATCH, token=TOKEN)
     assert pull.sources["tiktok"]["status"] == "failed"
-    assert "TikTok returned no videos this time" in pull.notices
+    assert "TikTok returned no videos this time for @example_tiktoker" in pull.notices
     assert [i["id"] for i in pull.items] == ["ig:AAA111"]
 
 
@@ -142,6 +143,167 @@ def test_the_cost_of_a_run_is_kept(profile, web):
     pull = scrape.pull(profile, IG_ONLY, token=TOKEN)
     assert pull.sources["instagram"]["cost_usd"] == pytest.approx(0.12)
     assert pull.sources["instagram"]["tool"] == "Apify (apify/instagram-scraper)"
+
+
+# --- creators who return nothing are named ---------------------------------------------------------------
+
+
+def test_creators_with_no_videos_are_named_in_one_notice(profile, web):
+    apify(web, ig=[ig_post("AAA111")])
+    watch = {"instagram": ["@example_gardener_one", "@example_gardener_two", "@example_third"], "tiktok": [], "youtube": []}
+    pull = scrape.pull(profile, watch, token=TOKEN)
+    assert pull.notices == ["Instagram returned no videos for @example_gardener_two and @example_third"]
+    assert pull.sources["instagram"]["status"] == "ok"  # one creator did answer
+
+
+def test_a_reason_from_apify_is_given_when_there_is_one(profile, web):
+    error = {"inputUrl": "https://www.instagram.com/Example_Gardener_Two/", "error": "no_items", "errorDescription": "Empty or private data for provided input"}
+    apify(web, ig=[ig_post("AAA111"), error])
+    pull = scrape.pull(profile, IG_TWO, token=TOKEN)
+    assert pull.notices == ["Instagram returned no videos for @example_gardener_two (Empty or private data for provided input)"]
+    row = next(r for r in pull.sources["instagram"]["creators"] if r["creator"] == "example_gardener_two")
+    assert row["note"] == "Empty or private data for provided input"
+
+
+def test_an_error_item_for_a_creator_who_did_return_videos_changes_nothing(profile, web):
+    error = {"inputUrl": "https://www.instagram.com/example_gardener_one/", "error": "rate_limited", "errorDescription": "Too many requests"}
+    apify(web, ig=[ig_post("AAA111"), error])
+    pull = scrape.pull(profile, IG_ONLY, token=TOKEN)
+    assert pull.notices == [] and [i["id"] for i in pull.items] == ["ig:AAA111"]
+
+
+def test_a_platform_where_every_creator_is_silent_names_them_all(profile, web):
+    apify(web, ig=[], tt=[])
+    pull = scrape.pull(profile, WATCH, token=TOKEN)
+    assert "Instagram returned no videos this time for @example_gardener_one and @example_gardener_two" in pull.notices
+    assert "TikTok returned no videos this time for @example_tiktoker" in pull.notices
+
+
+def test_a_long_list_of_silent_creators_is_shortened(profile, web):
+    names = [f"@creator_{n}" for n in range(12)]
+    apify(web, ig=[ig_post("AAA111", owner="creator_0")])
+    pull = scrape.pull(profile, {"instagram": names, "tiktok": [], "youtube": []}, token=TOKEN)
+    (notice,) = pull.notices
+    assert notice.startswith("Instagram returned no videos for @creator_1, @creator_2")
+    assert notice.endswith("@creator_8 and 3 more")  # 11 are silent: eight are named, then "and 3 more"
+    assert "@creator_9" not in notice
+
+
+def test_youtube_names_who_returned_nothing_and_why(profile, web, youtube):
+    watch = {"instagram": [], "tiktok": [], "youtube": ["@example_channel", "@broken_channel", "@empty_channel"]}
+    pull = scrape.pull(profile, watch, token=None)
+    assert "YouTube returned no videos for @broken_channel (channel not found) and @empty_channel (no Shorts returned)" in pull.notices
+
+
+def test_a_youtube_creator_whose_shorts_cannot_be_read_is_named(profile, web, monkeypatch):
+    class Half:
+        def __init__(self, options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=False):
+            if "/@" in url:
+                return {"entries": [{"id": "a1"}, {"id": "a2"}]}
+            raise RuntimeError("Video unavailable")
+
+    module = type(sys)("yt_dlp")
+    module.YoutubeDL = Half
+    monkeypatch.setitem(sys.modules, "yt_dlp", module)
+    pull = scrape.pull(profile, {"instagram": [], "tiktok": [], "youtube": ["@example_channel"]}, token=None)
+    assert "YouTube returned no videos this time for @example_channel (its Shorts could not be read)" in pull.notices
+
+
+@pytest.mark.parametrize(
+    "raw, plain",
+    [
+        ("ERROR: [youtube:tab] @zz_nobody/shorts: Unable to download API page: HTTP Error 404: Not Found (caused by <HTTPError 404: Not Found>)", "channel not found"),
+        ("ERROR: [youtube:tab] example: This channel does not have a shorts tab", "This channel does not have a shorts tab"),
+        ("\x1b[0;31mERROR:\x1b[0m [youtube:tab] x: Something odd happened (caused by <Odd>)", "Something odd happened"),
+        ("plain words with no prefix", "plain words with no prefix"),
+        ("", "RuntimeError"),
+    ],
+)
+def test_yt_dlp_errors_become_plain_reasons(raw, plain):
+    assert scrape._ytdlp_reason(RuntimeError(raw)) == plain
+
+
+def test_a_very_long_reason_is_cut(profile):
+    assert len(scrape._ytdlp_reason(RuntimeError("word " * 100))) <= 120
+
+
+# --- a run that stops at its charge limit -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", ["ABORTED", "FAILED", "TIMED-OUT", "SUCCEEDED"])
+def test_a_run_stopped_at_the_charge_limit_keeps_what_was_paid_for(profile, web, status):
+    apify(web, ig=[ig_post("AAA111")], ig_run=started("run-ig", "ds-ig", status, 0.25))
+    pull = scrape.pull(profile, IG_TWO, token=TOKEN)
+    assert [i["id"] for i in pull.items] == ["ig:AAA111"]  # the videos Apify had already delivered are not thrown away
+    assert pull.sources["instagram"]["status"] == "ok" and pull.sources["instagram"]["stopped_by"] == "cap"
+    assert pull.notices == [
+        "Instagram stopped at your spending cap of US$0.25, so no videos came back for @example_gardener_two. "
+        "Raise research.cost_cap.instagram in me/profile.json to pull more"
+    ]
+
+
+def test_the_cap_that_is_named_is_the_one_in_the_profile(example_me, web):
+    write_profile(example_me, research={"cost_cap": {"instagram": 0.10, "tiktok": 0.75}})
+    apify(web, tt=[tt_post("1")], tt_run=started("run-tt", "ds-tt", "ABORTED", 0.75))
+    watch = {"instagram": [], "tiktok": ["@example_tiktoker", "@example_other"], "youtube": []}
+    pull = scrape.pull(config.load_profile(), watch, token=TOKEN)
+    assert pull.notices == [
+        "TikTok stopped at your spending cap of US$0.75, so no videos came back for @example_other. "
+        "Raise research.cost_cap.tiktok in me/profile.json to pull more"
+    ]
+
+
+def test_using_the_whole_cap_is_said_even_when_everyone_answered(profile, web):
+    apify(web, ig=[ig_post("AAA111")], ig_run=started("run-ig", "ds-ig", "SUCCEEDED", 0.25))
+    pull = scrape.pull(profile, IG_ONLY, token=TOKEN)
+    assert pull.notices == [
+        "Instagram used all of its US$0.25 spending cap. Raise research.cost_cap.instagram in me/profile.json if a creator looks thin"
+    ]
+    assert [i["id"] for i in pull.items] == ["ig:AAA111"]
+
+
+def test_a_cap_reached_with_nothing_delivered_is_a_failure_with_the_cap_named(profile, web):
+    apify(web, ig=[], ig_run=started("run-ig", "ds-ig", "ABORTED", 0.25))
+    pull = scrape.pull(profile, IG_ONLY, token=TOKEN)
+    assert pull.items == [] and pull.sources["instagram"]["status"] == "failed"
+    assert pull.notices == [
+        "Instagram stopped at your spending cap of US$0.25, so no videos came back for @example_gardener_one. "
+        "Raise research.cost_cap.instagram in me/profile.json to pull more"
+    ]
+
+
+def test_the_account_running_low_is_not_blamed_on_the_cap_setting(profile, web):
+    apify(web, ig=[ig_post("AAA111")], left=0.20, ig_run=started("run-ig", "ds-ig", "ABORTED", 0.19))
+    pull = scrape.pull(profile, IG_TWO, token=TOKEN)
+    assert pull.sources["instagram"]["stopped_by"] == "balance"
+    assert pull.notices == [
+        "Instagram stopped because your Apify account only had US$0.20 left this month, so no videos came back for @example_gardener_two"
+    ]
+    assert "cost_cap" not in pull.notices[0]
+
+
+def test_a_run_that_stopped_short_of_its_cap_is_still_a_failure(profile, web):
+    apify(web, ig=[ig_post("AAA111")], ig_run=started("run-ig", "ds-ig", "FAILED", 0.10))
+    pull = scrape.pull(profile, IG_ONLY, token=TOKEN)
+    assert pull.items == [] and pull.notices == ["Instagram skipped: the Apify run failed"]
+
+
+def test_a_polled_run_that_ends_at_the_charge_limit_keeps_its_videos(profile, web):
+    apify(web, ig=[ig_post("AAA111")], ig_run=started("run-ig", "ds-ig", "RUNNING", 0))
+    web.add("GET", "/actor-runs/run-ig", {"data": {"id": "run-ig", "status": "ABORTED", "usageTotalUsd": 0.25}})
+    pull = scrape.pull(profile, IG_ONLY, token=TOKEN, budget=100.0)
+    assert [i["id"] for i in pull.items] == ["ig:AAA111"]
+    assert pull.sources["instagram"]["cost_usd"] == pytest.approx(0.25)
+    assert pull.notices and "research.cost_cap.instagram" in pull.notices[0]
 
 
 # --- the spending caps ----------------------------------------------------------------------------
@@ -169,8 +331,9 @@ def test_a_cap_below_what_a_pull_needs_skips_that_platform_only(example_me, web)
     assert [i["id"] for i in pull.items] == ["ig:AAA111"]
     assert pull.sources["tiktok"]["status"] == "skipped"
     assert pull.notices == [
+        "Instagram returned no videos for @example_gardener_two",  # the second creator on the list answered nothing
         "TikTok skipped: your cost cap of US$0.20 is below the US$0.50 one TikTok pull needs. "
-        "Raise research.cost_cap.tiktok in me/profile.json"
+        "Raise research.cost_cap.tiktok in me/profile.json",
     ]
     assert not [u for u in web.urls("POST") if "tiktok" in u]
 
@@ -305,7 +468,7 @@ def test_a_youtube_creator_that_fails_is_noted_and_the_rest_carry_on(profile, we
     pull = scrape.pull(profile, watch, token=None)
     assert len(pull.items) == 2
     notes = {c["creator"]: c.get("note") for c in pull.sources["youtube"]["creators"]}
-    assert "404" in notes["broken_channel"]
+    assert notes["broken_channel"] == "channel not found"  # yt-dlp's 404, put plainly
     assert notes["empty_channel"] == "no Shorts returned"
     assert notes.get("example_channel") is None
 
@@ -313,7 +476,7 @@ def test_a_youtube_creator_that_fails_is_noted_and_the_rest_carry_on(profile, we
 def test_youtube_with_nothing_at_all_is_a_failure_not_a_crash(profile, web, youtube):
     pull = scrape.pull(profile, {"instagram": [], "tiktok": [], "youtube": ["@broken_channel"]}, token=None)
     assert pull.items == [] and pull.sources["youtube"]["status"] == "failed"
-    assert any(n.startswith("YouTube returned no videos this time") for n in pull.notices)
+    assert "YouTube returned no videos this time for @broken_channel (channel not found)" in pull.notices
 
 
 def test_a_youtube_creator_that_never_answers_does_not_hold_the_run(profile, web, monkeypatch):
@@ -349,6 +512,7 @@ def test_a_youtube_creator_that_never_answers_does_not_hold_the_run(profile, web
         release.set()
     assert took < 5  # the run gave up on the creator and did not wait out the 30 seconds
     assert pull.items == [] and pull.sources["youtube"]["status"] == "failed"
+    assert pull.notices == [MISSING, "YouTube returned no videos this time for @slow_channel (did not answer in time)"]
 
 
 def test_youtube_without_yt_dlp_installed_says_how_to_add_it(profile, web, monkeypatch):

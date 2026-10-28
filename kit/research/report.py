@@ -115,12 +115,15 @@ def _source_rows(p: Page) -> list[tuple[str, str, str, str]]:
         source = (data.get("sources") or {}).get(platform) or {"status": "skipped"}
         status = source.get("status")
         if status == "ok":
-            made = [c for c in source.get("creators", []) if c.get("videos")]
-            detail = f"{common.plural(source.get('videos', 0), 'video')} from {_plural_creators(len(made))}"
+            listed = source.get("creators", [])
+            made = [c for c in listed if c.get("videos")]
+            detail = f"{common.plural(source.get('videos', 0), 'video')} from {common.creators_phrase(len(made), len(listed))}"
             if source.get("tool"):
                 detail += f", {source['tool']}"
             if isinstance(source.get("cost_usd"), (int, float)):
                 detail += f", US${source['cost_usd']:.2f}"
+            if source.get("stopped_by"):
+                detail += ", stopped at its spending limit"
             if source.get("note"):
                 detail += f", {source['note']}"
             rows.append((common.PLATFORM_LABEL[platform], "on", "Sample" if offline else "Live", detail))

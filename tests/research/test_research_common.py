@@ -71,6 +71,14 @@ def test_short_numbers(number, shown):
     assert common.short_num(number) == shown
 
 
+@pytest.mark.parametrize(
+    "with_videos, listed, shown",
+    [(4, 4, "4 creators"), (1, 1, "1 creator"), (3, 4, "3 of 4 creators"), (0, 2, "0 of 2 creators"), (1, 3, "1 of 3 creators"), (0, 0, "0 creators")],
+)
+def test_how_many_creators_answered(with_videos, listed, shown):
+    assert common.creators_phrase(with_videos, listed) == shown
+
+
 def test_words_cuts_with_an_ellipsis():
     assert common.words("one two three four", 2) == "one two ..."
     assert common.words("one two", 5) == "one two"
