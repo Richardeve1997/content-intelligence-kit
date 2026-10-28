@@ -11,7 +11,7 @@ The image tool draws, and the kit does the rest. It snaps each picture onto a tr
 
 ## Before you start
 
-The character steps need the `character` dependency group. Check that at least 5 GB of disk is free, then run `uv sync --group character`. A bare `uv sync` removes the group again, so always name it.
+The character steps need the `character` dependency group. Check that at least 5 GB of disk is free, then run `uv sync --group character --inexact`. A bare `uv sync` removes the group again, and without `--inexact` the sync removes groups installed earlier, so always write both.
 
 The creator picked an image tool during setup (`image_provider` in `me/profile.json`):
 

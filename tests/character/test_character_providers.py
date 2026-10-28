@@ -23,7 +23,7 @@ NO_TOOL_WORDS = "No image tool found, so I'll give you the prompts to paste into
 
 
 def _png_bytes(size=(8, 6)) -> bytes:
-    pytest.importorskip("PIL", reason="needs the character group: uv sync --group character")
+    pytest.importorskip("PIL", reason="needs the character group: uv sync --group character --inexact")
     from PIL import Image
 
     buffer = io.BytesIO()

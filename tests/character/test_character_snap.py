@@ -7,7 +7,7 @@ import json
 import pytest
 
 for _name in ("numpy", "PIL", "scipy", "skimage", "sklearn"):
-    pytest.importorskip(_name, reason="needs the character group: uv sync --group character")
+    pytest.importorskip(_name, reason="needs the character group: uv sync --group character --inexact")
 
 import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402

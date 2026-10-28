@@ -32,7 +32,7 @@ from kit.character import providers, store
 from kit.config import KitError
 
 WAITING = 3
-MISSING_GROUP = "Run: uv sync --group character to install the packages the character steps need."
+MISSING_GROUP = "Run: uv sync --group character --inexact to install the packages the character steps need."
 GROUP_MODULES = ("numpy", "PIL", "scipy", "skimage", "sklearn")
 
 
