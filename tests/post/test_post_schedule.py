@@ -289,6 +289,20 @@ def test_the_manual_file_gives_each_platforms_usual_time(reel, profile):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+def test_with_no_key_the_manual_file_keeps_the_time_the_creator_asked_for(reel, when):
+    """Asked for 21:15 tomorrow, the file posted by hand says 21:15 on that day, not each platform's usual time.
+    Platforms that were not asked for keep their usual time, with no date."""
+    asked = when.replace(hour=21, minute=15)
+    captions.approve(reel.slug)
+    with pytest.raises(NoZernio):
+        post.schedule(reel.slug, ["instagram", "youtube"], asked)
+    text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
+    day = f"{asked:%a %d %b}"
+    assert f"## Instagram ({day} 21:15)" in text and f"## YouTube ({day} 21:15)" in text, text
+    assert "## TikTok (19:00)" in text and "## LinkedIn (08:30)" in text, text
+    assert "Europe/London" in text
+
+
 def test_the_manual_file_will_not_hold_a_caption_that_breaks_a_rule(reel):
     path = reel.folder / "captions.json"
     data = json.loads(path.read_text(encoding="utf-8"))

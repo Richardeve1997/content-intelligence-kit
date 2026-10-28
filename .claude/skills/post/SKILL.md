@@ -61,7 +61,7 @@ You drive the kit with `uv run python -m kit.post <command>`. A command prints p
 
 ## Without a Zernio key
 
-Once the creator has approved the captions, `schedule` writes `work/<slug>/post/manual.md` and prints one sentence saying so. The file holds each platform's caption exactly as it should be pasted, the YouTube title, the video's path and the creator's usual time for each platform. Tell the creator in one sentence that the file is ready. Say that a Zernio key in `.env` lets the kit schedule the posts itself. `uv run python -m kit.post manual <slug>` writes the file without trying to schedule.
+Once the creator has approved the captions, `schedule` writes `work/<slug>/post/manual.md` and prints one sentence saying so. The file holds each platform's caption exactly as it should be pasted, the YouTube title, the video's path and the day and time to post each one: the time the creator asked for, or their usual time when they gave none. Tell the creator in one sentence that the file is ready. Say that a Zernio key in `.env` lets the kit schedule the posts itself. `uv run python -m kit.post manual <slug>` writes the file without trying to schedule, with each platform's usual time.
 
 ## Feedback
 

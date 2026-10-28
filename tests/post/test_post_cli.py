@@ -221,6 +221,18 @@ def test_no_key_writes_the_manual_file_and_says_so_in_one_sentence(reel, capsys)
     assert (reel.folder / "post" / "manual.md").is_file()
 
 
+def test_with_no_key_the_manual_file_gives_the_day_and_time_of_every_post(reel, capsys):
+    say(capsys, "approve", reel.slug)
+    day = datetime.strptime(tomorrow(), "%Y-%m-%d").strftime("%a %d %b")
+    assert say(capsys, "schedule", reel.slug, "--on", "tomorrow", "--time", "21:15")[0] == 0
+    text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
+    for name in ("Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"):
+        assert f"## {name} ({day} 21:15)" in text, (name, text)
+    assert say(capsys, "schedule", reel.slug, "--on", "tomorrow")[0] == 0, "no time: each platform's usual time"
+    text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
+    assert f"## Instagram ({day} 18:00)" in text and f"## LinkedIn ({day} 08:30)" in text and f"## X ({day} 12:00)" in text
+
+
 def test_the_manual_command_writes_the_same_file(reel, capsys):
     status, out, _ = say(capsys, "manual", reel.slug)
     assert status == 0 and "manual.md" in out

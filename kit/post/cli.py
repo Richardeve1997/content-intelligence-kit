@@ -184,6 +184,8 @@ def _schedule(args) -> int:
     except post.NoZernio as exc:
         if results:
             raise
+        # the first group wrote the file with its own time, so write it again with every group's time
+        post.write_manual(args.video, profile=profile, times={name: when for when, group in groups.items() for name in group})
         print(exc)  # the manual file is written, and that is the answer
         return 0
     except KitError as exc:

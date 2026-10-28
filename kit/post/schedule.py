@@ -286,8 +286,11 @@ def _fenced(text: str) -> list[str]:
     return ["```text", text, "```"]
 
 
-def write_manual(slug: str, *, profile=None) -> Path:
-    """Write work/<slug>/post/manual.md: each platform's caption and the video's path, ready to post by hand."""
+def write_manual(slug: str, *, profile=None, times: Mapping[str, datetime] | None = None) -> Path:
+    """Write work/<slug>/post/manual.md: each platform's caption and the video's path, ready to post by hand.
+
+    `times` holds the day and time the creator asked for, by platform, and the file gives those. A platform
+    without one gets its usual time from the profile."""
     profile = profile or config.load_profile()
     folder = _folder(slug)
     data = captions.load(slug)
@@ -295,13 +298,20 @@ def write_manual(slug: str, *, profile=None) -> Path:
     if problems:
         raise CaptionProblems(problems)
     video = _video(folder, slug)
+    zone = ZoneInfo(profile.timezone)
+    asked = {name: f"{moment.astimezone(zone):%a %d %b %H:%M}" for name, moment in (times or {}).items()}
     lines = [f"# Post {slug} by hand", "", f"The video: {video}", ""]
-    if profile.posting_times:
+    if asked and all(name in asked for name in profile.platforms):
+        lines += [f"Post each one at the time in brackets, in {profile.timezone}.", ""]
+    elif asked:
+        lines += [f"Post each one at the time in brackets, in {profile.timezone}. A time with no day is your usual "
+                  "time for that platform.", ""]  # fmt: skip
+    elif profile.posting_times:
         lines += [f"Your usual time for each platform is in brackets, in {profile.timezone}.", ""]
     for platform in profile.platforms:
         entry = data[platform]
-        usual = profile.posting_times.get(platform)
-        lines += [f"## {captions.display_name(platform)}" + (f" ({usual})" if usual else ""), ""]
+        shown = asked.get(platform) or profile.posting_times.get(platform)
+        lines += [f"## {captions.display_name(platform)}" + (f" ({shown})" if shown else ""), ""]
         if platform == "youtube":
             lines += ["Title:", "", *_fenced(payloads.youtube_title(entry)), "", "Description:", ""]
         lines += [*_fenced(payloads.content_for(entry, platform)), ""]
@@ -581,7 +591,7 @@ def schedule(
         try:
             client = zernio.Client.from_env()
         except zernio.NoZernio:
-            write_manual(slug, profile=profile)
+            write_manual(slug, profile=profile, times={name: when for name in names})
             raise zernio.NoZernio(
                 "No Zernio key is set, so nothing was scheduled. "
                 f"The captions and the video are in work/{slug}/post/manual.md, ready to post by hand."
