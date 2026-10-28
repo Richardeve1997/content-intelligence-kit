@@ -6,6 +6,7 @@ never touched.
 """
 
 import copy
+import importlib.util
 import io
 import json
 import os
@@ -1397,7 +1398,8 @@ def test_without_a_key_posting_by_hand_is_one_plain_sentence_and_setup_moves_on(
     assert (code, err) == (0, ""), "not a problem: the creator posts by hand"
     assert out.strip() == onboarding.NO_ZERNIO
     assert out.count("\n") == 1, "one sentence"
-    assert "caption file" in out and "by hand" in out and "Traceback" not in out
+    assert "a file with a caption for each platform (post/manual.md)" in out and "by hand" in out
+    assert "Traceback" not in out
 
 
 def test_a_key_that_zernio_turns_away_is_a_sentence_on_the_error_stream(me, monkeypatch, capsys):
@@ -1530,7 +1532,8 @@ def test_each_step_section_names_what_it_runs_and_says_so_when_a_piece_is_missin
 
 def test_posting_without_a_key_is_one_plain_sentence_and_setup_goes_on():
     posting = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[7][1]
-    assert "post by hand" in posting and "caption files" in posting
+    assert "ready to post by hand" in posting and "a file with a caption for each platform" in posting
+    assert "post/manual.md" in posting and "caption files" not in posting, "the kit writes one file, not one per platform"
     assert "exits with an error" in posting and "go on" in posting, "a key Zernio turns away does not stop setup"
 
 
@@ -1548,6 +1551,19 @@ def test_the_styles_step_hands_mini_me_to_the_character_skill_and_keeps_its_gate
     assert "not there yet" in styles, "a copy of the kit without the character skill says so and goes on"
     # the profile has to exist before the handover, because the character skill reads the image tool from it
     assert styles.index("onboarding finish") < styles.index("hand over to the `character` skill")
+    # a copy of the kit without the character skill is told so before any of its commands are given
+    assert styles.index("not there yet") < styles.index("kit.character start")
+
+
+def test_the_pack_step_names_the_separate_check_and_does_not_claim_the_pack_does_it():
+    styles = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[8][1]
+    check = "node .claude/skills/mini-me/kit/character/test_state.mjs me/character/manifest.json"
+    assert check in styles and "all passed" in styles
+    assert (ROOT / ".claude" / "skills" / "mini-me" / "kit" / "character" / "test_state.mjs").is_file()
+    assert styles.index("kit.character pack") < styles.index(check), "the check runs on the pack"
+    assert "checks the character against the mini me runtime" not in styles, "pack only writes the manifest"
+    done = styles[styles.index("The handover is done when") :]
+    assert "all passed" in done.split("\n")[0], "the check is part of being done"
 
 
 def test_the_styles_step_has_the_hdr_tip_and_links_the_test_take():
@@ -1555,6 +1571,8 @@ def test_the_styles_step_has_the_hdr_tip_and_links_the_test_take():
     assert "Settings, Camera, Record Video, HDR Video off" in styles
     assert "work/onboarding-test/take" in styles and "ln -s" in styles
     assert "Never copy or move it" in styles
+    assert "ls -L work/onboarding-test/take/" in styles, "a link that points nowhere is found right after it is made"
+    assert styles.index("ln -s") < styles.index("ls -L work/onboarding-test/take/")
 
 
 def test_the_test_clip_step_runs_the_clips_command_and_says_what_it_leaves_out():
@@ -1563,8 +1581,33 @@ def test_the_test_clip_step_runs_the_clips_command_and_says_what_it_leaves_out()
     assert "one at a time" in clip_step and "5 GB" in clip_step
     assert "full path" in clip_step
     assert "exits with status 1" in clip_step and "carry on" in clip_step
+    # how long it takes, and so how to run it
+    assert "about 90 seconds" in clip_step and "downloads the speech models" in clip_step
+    assert "long timeout" in clip_step and "in the background" in clip_step
+    assert "any note a clip script left" in clip_step and "Pass those on" in clip_step, "the notes are told to the creator"
     body = read(SKILLS / "onboard" / "SKILL.md")
     assert "uv run python -m kit.onboarding clips" in body.split("## Coming back later")[1], "it can be run again later"
+
+
+def test_the_mini_me_clip_step_names_the_voices_in_the_order_the_script_tries_them():
+    clip_step = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[9][1]
+    mini = clip_step[clip_step.index("- Mini me:") :]
+    assert "uv run python -m kit.onboarding clips --voice <file>" in mini
+    assert mini.index("--voice") < mini.index("ElevenLabs") < mini.index("scratch voice")
+    # the line they are asked to record is the one the script says
+    script = ROOT / ".claude" / "skills" / "mini-me" / "kit" / "test_clip.py"
+    spec = importlib.util.spec_from_file_location("mini_me_test_clip_for_the_skill", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    line = module.default_line(type("Creator", (), {"name": "<their name>"})())
+    assert f'"{line}"' in mini
+
+
+def test_ffmpeg_full_is_offered_with_what_it_costs_on_an_older_mac():
+    machine = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[2][1]
+    guide = read(ROOT / "ONBOARDING.md")
+    for text_ in (machine, guide):
+        assert "macOS 15" in text_ and "from source" in text_ and "long time" in text_
 
 
 def test_the_machine_check_step_covers_the_hdr_row():

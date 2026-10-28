@@ -38,6 +38,7 @@ Everything for one video lives in `work/<video>/`:
    - The last point is the close. Start from the closing line in the brief, which comes from the creator's call to action (`profile.cta`): "Comment KEYWORD and I'll send you ..." for a comment CTA, a follow otherwise. Say it the creator's way.
 3. Write the film guide: the standard notes below, plus anything this video needs (a prop, a screen to show, a second location).
    - Film vertical, in 4K if the phone can, at 30 or 60 fps. Lock the phone on a stand.
+   - Turn HDR video off first. On an iPhone: Settings, Camera, Record Video, HDR Video off (if Camera is not in the main list, look under Apps). An HDR take can come out washed out, and the HDR row of the machine check says whether this Mac can fix that.
    - Face a window or a soft light. Avoid a bright window behind you.
    - Frame from the chest up, with a hand's width of room above your head. Your head breaks out of the picture-in-picture, and the cards sit above it.
    - Say each point, then pause for a breath. The pauses are where the cuts go.

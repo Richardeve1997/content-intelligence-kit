@@ -279,6 +279,7 @@ def stand_ins(clip, tmp_path, monkeypatch, example_me):
         clip.media, "probe", lambda path: MediaInfo(1080, 1920, 60.0, state.seconds, None, True)
     )
     state.work = tmp_path / "work" / "onboarding-test"
+    state.build = state.work / clip.SCRATCH  # the folder the clip script builds in, and nothing else of the creator's
     return state
 
 
@@ -302,9 +303,9 @@ def test_with_a_take_the_clip_is_cut_from_it_and_set_in_the_picture(clip, stand_
     assert scripts_run(stand_ins) == [
         "cut_base.py", "light_voice.py", "scaffold.py", "layout.py", "build_captions.py", "render", "composite_v2.py",
     ]
-    cut = json.loads((stand_ins.work / "build" / "edl.json").read_text())
+    cut = json.loads((stand_ins.build / "edl.json").read_text())
     assert cut["keep"][0] == list(clip.pick_window(stand_ins.words, stand_ins.seconds))
-    layout = json.loads((stand_ins.work / "build" / "layout.json").read_text())
+    layout = json.loads((stand_ins.build / "layout.json").read_text())
     assert layout == {"windows": [{"mode": "split", "t": 0}]}
     args = dict(stand_ins.commands)["composite_v2.py"]
     assert "--no-head" in args, "no matte, so the head stays in the picture"
@@ -318,11 +319,11 @@ def test_the_words_the_captions_use_are_the_ones_inside_the_window(clip, stand_i
     with_take(stand_ins, tmp_path)
     stand_ins.words = speech(" ".join(f"w{n}." if n % 6 == 0 else f"w{n}" for n in range(1, 60)))
     clip.clip(tmp_path / "o.mp4", work=stand_ins.work, keep=True)
-    written = json.loads((stand_ins.work / "build" / "base.words.json").read_text())
+    written = json.loads((stand_ins.build / "base.words.json").read_text())
     start, end = clip.pick_window(stand_ins.words, stand_ins.seconds)
     assert written["words"][0]["s"] >= 0 and written["words"][0]["s"] < 0.6, "counted from the window start"
     assert written["words"][-1]["e"] <= end - start + 0.05
-    captions = json.loads((stand_ins.work / "build" / "captions" / "transcript.json").read_text())
+    captions = json.loads((stand_ins.build / "captions" / "transcript.json").read_text())
     assert captions["captions"], "the speech gate reads these"
 
 
@@ -332,7 +333,7 @@ def test_without_a_take_the_card_sits_on_the_canvas_with_a_scratch_voice(clip, s
     assert out.is_file()
     assert scripts_run(stand_ins) == ["scaffold.py", "layout.py", "build_captions.py", "render", "composite_v2.py"]
     assert stand_ins.spoken == [clip.SAMPLE_LINE]
-    layout = json.loads((stand_ins.work / "build" / "layout.json").read_text())
+    layout = json.loads((stand_ins.build / "layout.json").read_text())
     assert layout["windows"][0]["mode"] == "canvas"
     assert stand_ins.said and stand_ins.said[0] == pytest.approx(stand_ins.seconds + clip.SAMPLE_TAIL)
 
@@ -344,13 +345,13 @@ def test_a_line_of_their_own_is_what_the_scratch_voice_reads(clip, stand_ins, tm
 
 def test_the_composition_has_the_card_then_the_captions_then_the_timeline(clip, stand_ins, tmp_path):
     clip.clip(tmp_path / "o.mp4", work=stand_ins.work, keep=True)
-    page = (stand_ins.work / "build" / "hf" / "index.html").read_text()
+    page = (stand_ins.build / "hf" / "index.html").read_text()
     assert page.index('id="testcard"') < page.index("<!-- CAPTIONS:BEGIN -->") < page.index('class="clip cap k')
     assert page.index("UIS.pop(tl, '#brandcard'") < page.index("UIS.captions(tl);")
     assert f"--zone-bottom: {clip.PIP_TOP - 50}px" in page
     assert "@@" not in page
     assert 'data-duration="' in page
-    assert (stand_ins.work / "build" / "hf" / "tokens.css").is_file(), "the creator's tokens travel with the project"
+    assert (stand_ins.build / "hf" / "tokens.css").is_file(), "the creator's tokens travel with the project"
 
 
 def test_a_logo_travels_with_the_project_and_becomes_the_avatar(clip, stand_ins, tmp_path, example_me):
@@ -362,16 +363,42 @@ def test_a_logo_travels_with_the_project_and_becomes_the_avatar(clip, stand_ins,
     profile["logo"] = "brand/logo/logo.png"
     (example_me / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
     clip.clip(tmp_path / "o.mp4", work=stand_ins.work, keep=True)
-    hf = stand_ins.work / "build" / "hf"
+    hf = stand_ins.build / "hf"
     assert (hf / "assets" / "logo.png").is_file(), "HyperFrames only loads files inside the project folder"
     assert 'src="assets/logo.png"' in (hf / "index.html").read_text(encoding="utf-8")
 
 
+def test_it_builds_in_a_folder_of_its_own_and_leaves_a_build_folder_alone(clip, stand_ins, tmp_path):
+    """--work can point at a folder that already holds a video's build/, so the script never uses that name."""
+    assert clip.SCRATCH != "build"
+    other = stand_ins.work / "build"
+    other.mkdir(parents=True)
+    (other / "base.mp4").write_bytes(b"somebody's finished base")
+    clip.clip(tmp_path / "a.mp4", work=stand_ins.work)
+    assert (other / "base.mp4").read_bytes() == b"somebody's finished base"
+    clip.clip(tmp_path / "b.mp4", work=stand_ins.work, keep=True)
+    assert (other / "base.mp4").read_bytes() == b"somebody's finished base"
+    assert stand_ins.build.is_dir() and stand_ins.build.parent == stand_ins.work
+
+
+def test_an_old_scratch_folder_is_cleared_before_a_new_clip_is_built(clip, stand_ins, tmp_path):
+    stand_ins.build.mkdir(parents=True)
+    (stand_ins.build / "left-over.txt").write_text("from a run that was stopped")
+    clip.clip(tmp_path / "o.mp4", work=stand_ins.work, keep=True)
+    assert not (stand_ins.build / "left-over.txt").exists()
+
+
+def test_the_script_is_executable_like_the_other_kit_scripts():
+    assert SCRIPT.stat().st_mode & 0o111
+    siblings = [p for p in SCRIPT.parent.glob("*.py") if p.read_text(encoding="utf-8").startswith("#!")]
+    assert SCRIPT in siblings, "it starts with a shebang line, as the scripts it runs beside do"
+
+
 def test_the_scratch_files_are_deleted_unless_asked_to_stay(clip, stand_ins, tmp_path):
     clip.clip(tmp_path / "a.mp4", work=stand_ins.work)
-    assert not (stand_ins.work / "build").exists()
+    assert not (stand_ins.build).exists()
     clip.clip(tmp_path / "b.mp4", work=stand_ins.work, keep=True)
-    assert (stand_ins.work / "build").is_dir()
+    assert (stand_ins.build).is_dir()
 
 
 def test_a_failed_speech_gate_saves_nothing_and_says_which_words_were_lost(clip, stand_ins, tmp_path):
@@ -381,7 +408,7 @@ def test_a_failed_speech_gate_saves_nothing_and_says_which_words_were_lost(clip,
         clip.clip(out, work=stand_ins.work)
     assert "basil" in str(caught.value) and "not saved" in str(caught.value)
     assert not out.exists()
-    assert not (stand_ins.work / "build").exists(), "cleaned up even when it fails"
+    assert not (stand_ins.build).exists(), "cleaned up even when it fails"
 
 
 def test_a_take_with_nothing_said_falls_back_to_the_sample_card(clip, stand_ins, tmp_path, monkeypatch, capsys):
@@ -460,14 +487,25 @@ import argparse, pathlib, sys
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", required=True)
 ap.add_argument("--work")
+ap.add_argument("--voice")
 a = ap.parse_args()
 log = pathlib.Path(__file__).with_name("calls.log")
 with log.open("a") as handle:
-    handle.write(pathlib.Path(__file__).parent.parent.name + " " + a.out + " " + str(a.work) + "\\n")
+    handle.write(pathlib.Path(__file__).parent.parent.name + " " + a.out + " " + str(a.work) + " " + str(a.voice) + "\\n")
 MODE
 """
-OK = 'pathlib.Path(a.out).write_bytes(b"clip"); print("made it")'
+# A real script says what it used on its last line, after any notes: "test clip <path> (7.2 s, voice: ...)".
+OK = 'pathlib.Path(a.out).write_bytes(b"clip"); print("test clip " + a.out + " (7.0 s, voice: a scratch voice)")'
+NOTES = (
+    'print("note: this take is HDR, so its colours may look washed out"); '
+    'print("take/take-01.mov points to a file that is not there any more, so the clip uses the sample card."); '
+    'pathlib.Path(a.out).write_bytes(b"clip"); print("test clip " + a.out + " (7.0 s, a sample card)")'
+)
 FAILS = 'print("There is no voice for the test clip on this machine."); sys.exit(1)'
+FAILS_LONG = (
+    'print("The test clip stopped while cutting the take (exit 1). What it said:"); '
+    '[print("detail " + str(n)) for n in range(1, 10)]; sys.exit(1)'
+)
 CRASHES = 'raise RuntimeError("boom")'
 
 
@@ -533,8 +571,8 @@ def test_the_ui_story_script_is_told_where_the_take_and_the_scratch_files_are(ki
     folder = kit_folder.root / "work" / "onboarding-test"
     ui = next(c for c in kit_folder.calls() if c[0] == "ui-story")
     mini = next(c for c in kit_folder.calls() if c[0] == "mini-me")
-    assert ui[1:] == [str(folder / "ui-story.mp4"), str(folder)]
-    assert mini[1:] == [str(folder / "mini-me.mp4"), "None"], "the mini me script has no --work"
+    assert ui[1:] == [str(folder / "ui-story.mp4"), str(folder), "None"]
+    assert mini[1:] == [str(folder / "mini-me.mp4"), "None", "None"], "the mini me script has no --work"
 
 
 def test_a_style_the_creator_did_not_choose_gets_no_clip(kit_folder, capsys):
@@ -587,6 +625,90 @@ def test_a_script_that_crashes_is_a_sentence_and_never_a_traceback(kit_folder, c
     assert code == 1
     assert "The UI story test clip did not finish." in out and "RuntimeError: boom" in out
     assert "line " not in out.split("did not finish.")[1].split("mini me")[0], "no stack frames"
+    assert "Try the clip again" in out and "agent" not in out, "words for the creator, who is not the one running it"
+
+
+def test_a_note_the_script_prints_is_shown_when_the_clip_is_made(kit_folder, capsys):
+    kit_folder.script("ui-story", NOTES)
+    code, out, err = clips(capsys)
+    assert code == 0
+    folder = kit_folder.root / "work" / "onboarding-test"
+    assert "note: this take is HDR, so its colours may look washed out" in out
+    assert "take/take-01.mov points to a file that is not there any more, so the clip uses the sample card." in out
+    result = f"UI story test clip: {folder / 'ui-story.mp4'}"
+    assert out.index("washed out") < out.index("points to a file") < out.index(result), "the notes come before the result"
+
+
+def test_the_scripts_own_last_line_is_replaced_by_the_runners(kit_folder, capsys):
+    kit_folder.script("ui-story", NOTES)
+    code, out, err = clips(capsys)
+    folder = kit_folder.root / "work" / "onboarding-test"
+    assert f"test clip {folder / 'ui-story.mp4'} (7.0 s" not in out, "the path is already on the result line"
+    assert out.count(str(folder / "ui-story.mp4")) == 1
+
+
+def test_notes_from_both_styles_are_shown(kit_folder, capsys):
+    kit_folder.script("ui-story", NOTES)
+    kit_folder.script("mini-me", NOTES.replace("this take is HDR", "there is no copy of your voice yet"))
+    kit_folder.built()
+    code, out, err = clips(capsys)
+    assert code == 0
+    assert "this take is HDR" in out and "there is no copy of your voice yet" in out
+
+
+def test_a_clip_with_nothing_to_say_prints_only_its_result(kit_folder, capsys):
+    profile = json.loads((kit_folder.me / "profile.json").read_text())
+    profile["styles"] = ["ui-story"]
+    (kit_folder.me / "profile.json").write_text(json.dumps(profile))
+    kit_folder.script("ui-story")
+    code, out, err = clips(capsys)
+    lines = out.strip().splitlines()
+    assert lines[0].startswith("Making the UI story test clip.")
+    assert len(lines) == 2 and lines[1].startswith("UI story test clip: ")
+
+
+def test_a_failure_keeps_the_line_that_says_which_step_stopped_and_the_last_lines(kit_folder, capsys):
+    kit_folder.script("ui-story", FAILS_LONG)
+    code, out, err = clips(capsys)
+    assert code == 1
+    assert "The test clip stopped while cutting the take (exit 1). What it said:" in out, "the first line stays"
+    assert "detail 9" in out and "detail 4" in out, "and so do the last six"
+    assert "detail 3" not in out and "detail 1\n" not in out, "the middle is left out"
+
+
+def test_a_short_failure_is_not_repeated(kit_folder, capsys):
+    kit_folder.script("ui-story", FAILS)
+    code, out, err = clips(capsys)
+    assert out.count("There is no voice for the test clip on this machine.") == 1
+
+
+def test_a_recording_goes_to_the_mini_me_clip_and_only_to_it(kit_folder, tmp_path, capsys):
+    kit_folder.script("ui-story")
+    kit_folder.script("mini-me")
+    kit_folder.built()
+    recording = tmp_path / "my-line.m4a"
+    recording.write_bytes(b"a phone recording")
+    code, out, err = clips(capsys, "--voice", str(recording))
+    assert code == 0
+    ui = next(c for c in kit_folder.calls() if c[0] == "ui-story")
+    mini = next(c for c in kit_folder.calls() if c[0] == "mini-me")
+    assert mini[3] == str(recording)
+    assert ui[3] == "None", "the UI story clip has no voice to give"
+
+
+def test_without_a_recording_the_mini_me_clip_picks_its_own_voice(kit_folder, capsys):
+    kit_folder.script("mini-me")
+    kit_folder.built()
+    clips(capsys)
+    assert next(c for c in kit_folder.calls() if c[0] == "mini-me")[3] == "None"
+
+
+def test_a_recording_that_is_not_there_is_a_sentence_and_nothing_runs(kit_folder, tmp_path, capsys):
+    kit_folder.script("mini-me")
+    kit_folder.built()
+    code, out, err = clips(capsys, "--voice", str(tmp_path / "nowhere.m4a"))
+    assert code == 1 and "nowhere.m4a is not there" in err
+    assert kit_folder.calls() == []
 
 
 def test_clips_before_setup_is_finished_says_so(tmp_path, monkeypatch, capsys):
@@ -603,10 +725,11 @@ def test_a_disk_that_is_nearly_full_stops_before_any_clip_is_started(kit_folder,
     assert kit_folder.calls() == []
 
 
-def test_the_clips_go_in_the_folder_next_has_to_skip(kit_folder):
+def test_the_folders_the_clips_use_are_the_ones_next_has_to_skip(kit_folder):
     assert onboarding.CLIP_FOLDER == "onboarding-test"
     skill = (ROOT / ".claude" / "skills" / "next" / "SKILL.md").read_text(encoding="utf-8")
-    assert f'SCRATCH = ("{onboarding.CLIP_FOLDER}",)' in skill
+    # the mini me clip script builds in work/mini-me-test-clip/, which stays behind when its run is stopped
+    assert f'SCRATCH = ("{onboarding.CLIP_FOLDER}", "mini-me-test-clip")' in skill
 
 
 def test_the_skill_and_the_runner_name_the_same_scripts(capsys):
@@ -658,4 +781,4 @@ def test_both_clips_render(style, tmp_path, example_me, capsys):
     spoken = SPOKEN[style](profile).split()
     words = [Word(text, round(i * 0.3, 3), round(i * 0.3 + 0.25, 3)) for i, text in enumerate(spoken)]
     assert qa_captions.check(made, words, speed=SPEED[style]) == [], f"the {style} clip lost a caption word"
-    assert not (folder / "build").exists(), "the scratch files are cleaned up"
+    assert not (folder / SCRIPT_MODULE.SCRATCH).exists(), "the scratch files are cleaned up"

@@ -24,7 +24,7 @@ A skill cannot call Python directly, so everything here is also a command:
     python -m kit.onboarding finish                  write me/profile.json and me/brand/tokens.css
     python -m kit.onboarding tokens                  write me/brand/tokens.css again from me/profile.json
     python -m kit.onboarding accounts                which platforms are connected in Zernio (step 7)
-    python -m kit.onboarding clips                   make the test clip for each style they chose (step 9)
+    python -m kit.onboarding clips [--voice FILE]    make the test clip for each style they chose (step 9)
 
 Problems come back as one plain sentence each: an exception from the functions, a printed line and
 exit status 1 from the command.
@@ -608,11 +608,11 @@ def rewrite_tokens() -> tuple[Path, list[str]]:
 
 # --- step 7: which platforms are connected in Zernio -----------------------------------------------------
 
-# What the creator hears when there is no Zernio key. It is not a problem: every video still ends with the
-# MP4 and a caption file for each platform.
+# What the creator hears when there is no Zernio key. It is not a problem: posting then writes post/manual.md in the
+# video's folder, one file with the video's path and a caption for each platform.
 NO_ZERNIO = (
-    "There is no Zernio key, so posting will give you the video and one caption file for each platform, "
-    "ready to post by hand."
+    "There is no Zernio key, so posting will give you the video and a file with a caption for each platform "
+    "(post/manual.md), ready to post by hand."
 )
 
 
@@ -647,23 +647,51 @@ _CLIPS = {
     "ui-story": ("UI story", ".claude/skills/ui-story/kit/test_clip.py"),
     "mini-me": ("mini me", ".claude/skills/mini-me/kit/test_clip.py"),
 }
-_LAST_LINES = 6  # how much of what a script said is passed on when it fails
+_LAST_LINES = 6  # how much of the end of what a script said is passed on when it fails
+
+
+def _lines(text: str | None) -> list[str]:
+    return [line.rstrip() for line in (text or "").splitlines() if line.strip()]
 
 
 def _what_it_said(done: subprocess.CompletedProcess) -> str:
-    """The reason a clip script gave, as plain sentences. A crash gives its last line and no stack."""
-    out, err = (done.stdout or "").strip(), (done.stderr or "").strip()
+    """The reason a clip script gave, as plain sentences. A crash gives its last line and no stack.
+
+    The first line stays with the last few, because it is the one that says which step stopped.
+    """
+    err = (done.stderr or "").strip()
     if "Traceback" in err:
-        return f"It stopped with an error it did not explain ({err.splitlines()[-1].strip()}). Tell your agent if it keeps happening."
-    lines = [line.rstrip() for line in out.splitlines() if line.strip()][-_LAST_LINES:]
+        return (
+            f"It stopped with an error it did not explain ({err.splitlines()[-1].strip()}). "
+            "Try the clip again. If it stops the same way, that error is the reason."
+        )
+    lines = _lines(done.stdout)
+    if len(lines) > _LAST_LINES + 1:
+        lines = [lines[0], *lines[-_LAST_LINES:]]
     return "It said:\n" + "\n".join("  " + line for line in lines) if lines else "It gave no reason."
 
 
-def make_clips(folder: Path | None = None, styles: Iterable[str] | None = None, run=subprocess.run) -> int:
+def _notes(done: subprocess.CompletedProcess) -> list[str]:
+    """What a clip script said to the creator on the way: every line but its last, which gives the result.
+
+    The notes matter even when the clip is made: that a take is HDR and may look washed out, that the take could
+    not be used and the sample card was, or that a saved voice was missing.
+    """
+    lines = _lines(done.stdout)
+    if lines and lines[-1].startswith("test clip "):
+        lines.pop()
+    return lines
+
+
+def make_clips(
+    folder: Path | None = None, styles: Iterable[str] | None = None, run=subprocess.run, voice: Path | str | None = None
+) -> int:
     """Make the test clip for each style one after the other, saying what happened to each. Returns 1 if one failed.
 
     `styles` are the ones to make; the creator's chosen styles by default. A style whose script is not in this
     copy of the kit, or whose character is not built yet, is said plainly and skipped, which is not a failure.
+    `voice` is the creator's recording of the mini me clip's line. Without it that clip uses an ElevenLabs voice
+    when the profile chose one and a key is set, and a scratch voice otherwise.
     Each clip is a heavy job, so they never run side by side, and none starts with under 5 GB of disk free.
     """
     profile = config.load_profile()
@@ -671,6 +699,9 @@ def make_clips(folder: Path | None = None, styles: Iterable[str] | None = None, 
     unknown = [style for style in chosen if style not in _CLIPS]
     if unknown:
         raise ValueError(f"{unknown[0]!r} is not a style. The styles are: {', '.join(_CLIPS)}.")
+    recording = Path(voice).expanduser().absolute() if voice is not None else None
+    if recording is not None and not recording.is_file():
+        raise KitError(f"The recording {recording} is not there. Check the path, or leave it out to use another voice.")
     folder = Path(folder) if folder is not None else config.work_dir(CLIP_FOLDER)
     media.require_free()
     root = config.kit_root()
@@ -689,6 +720,8 @@ def make_clips(folder: Path | None = None, styles: Iterable[str] | None = None, 
         command = [sys.executable, str(root / relative), "--out", str(out)]
         if style == "ui-story":
             command += ["--work", str(folder)]  # the take, if there is one, is in <folder>/take/
+        elif recording is not None:
+            command += ["--voice", str(recording)]
         print(f"Making the {label} test clip. This takes a few minutes.", flush=True)
         done = run(command, cwd=str(root), capture_output=True, text=True)
         if done.returncode != 0 or not out.is_file():
@@ -699,6 +732,8 @@ def make_clips(folder: Path | None = None, styles: Iterable[str] | None = None, 
             length = f" ({media.probe(out).duration:.1f} s)"
         except KitError:
             length = ""
+        for note in _notes(done):
+            print(note)
         print(f"{label} test clip: {out}{length}")
     return 1 if failed else 0
 
@@ -772,7 +807,7 @@ def _run(args: argparse.Namespace) -> int:
         except NoZernio:
             print(NO_ZERNIO)  # not a problem: the creator posts by hand
     elif args.command == "clips":
-        return make_clips()
+        return make_clips(voice=args.voice)
     elif args.command == "finish":
         state = State()
         profile = state.finish()
@@ -807,7 +842,8 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("finish", help="check every answer, then write me/profile.json and me/brand/tokens.css")
     commands.add_parser("tokens", help="write me/brand/tokens.css again from me/profile.json")
     commands.add_parser("accounts", help="show which platforms are connected in Zernio (needs a Zernio key)")
-    commands.add_parser("clips", help="make the test clip for each style the creator chose")
+    one = commands.add_parser("clips", help="make the test clip for each style the creator chose")
+    one.add_argument("--voice", help="a recording of the mini me clip's line, for that clip (default: another voice)")
 
     args = parser.parse_args(argv)
     try:

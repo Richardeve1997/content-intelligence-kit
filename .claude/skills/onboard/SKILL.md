@@ -38,7 +38,7 @@ Say this in your own words, briefly, the way you would across a table.
 | Apify | researches Instagram and TikTok creators | research uses YouTube creators and links they paste |
 | An image model (an OpenAI or Gemini key, or a signed-in Codex CLI) | draws the mini me character | the kit prints prompts they paste into ChatGPT or Gemini |
 | ElevenLabs | a stock or cloned voice for mini me | they record the voice-over on a phone |
-| Zernio | schedules posts on six platforms | they post the MP4 and the caption files by hand |
+| Zernio | schedules posts on six platforms | they post the MP4 by hand, with the captions from a file the kit writes |
 
 Do not quote prices, because they change. The Costs section of the README has the current ones.
 
@@ -48,7 +48,7 @@ Nothing is saved yet. Steps 1 and 2 are saved together when the machine check pa
 
 1. Run `python3 bin/doctor.py` from the kit folder. It uses only the Python that comes with a Mac, so it works before anything is installed. If macOS offers to install the command line developer tools, tell them to say yes, then run it again.
 2. Show the table: each check, its status and, when it is not ok, its fix. Say in one plain line what each missing row is for. ffmpeg builds and checks the video. Node and HyperFrames render the animations. The Python tools transcribe speech and line the captions up with the words.
-   The HDR tone mapping row only warns. It matters when their phone films HDR video, which an iPhone does by default: without the zscale filter, HDR footage can look washed out. Its fix is a big install (the full ffmpeg brings dozens of other tools and takes several minutes), so offer the free way first: turning HDR video off on the phone, which step 8 explains. They can leave the row as a warning. If ffmpeg itself is missing, fix that row first. The HDR row's command installs ffmpeg too, so someone who wants the full build can run it instead of `brew install ffmpeg`.
+   The HDR tone mapping row only warns. It matters when their phone films HDR video, which an iPhone does by default: without the zscale filter, HDR footage can look washed out. Its fix is a big install (the full ffmpeg brings dozens of other tools and takes several minutes), and Homebrew has a ready-made copy only for macOS 15 and newer: on an older macOS it builds the full ffmpeg from source, which takes a long time. So offer the free way first: turning HDR video off on the phone, which step 8 explains. They can leave the row as a warning. If ffmpeg itself is missing, fix that row first. The HDR row's command installs ffmpeg too, so someone who wants the full build can run it instead of `brew install ffmpeg`.
 3. Ask permission before you run any fix, and name what it installs. Fix the rows in the order shown, because later rows depend on earlier ones. Run one fix at a time and read its result before the next. If Homebrew's installer asks for the Mac password, ask the creator to run that one command in their own Terminal window and tell you when it finishes.
 4. The Python tools (`uv sync --group video --group research --inexact`) come to around 2 GB and take several minutes, and Chromium adds a few hundred megabytes more. That install can run in the background while you start the questions in step 3. Save nothing until it has finished.
 5. Run the doctor again. Repeat until no row says `missing`. A `warn` row can stay: low disk space (heavy jobs need at least 5 GB free, and 20 GB is comfortable), or the HDR tone mapping row. The line under the table about optional keys is information, not a problem. Ask whether they want to use any of those keys now. If so, walk them through `.env` as above, then run the doctor again: the key is gone from that line once it is set. If not, move on. They can add a key whenever they like.
@@ -147,7 +147,7 @@ If they do:
 2. Check which platforms they have connected inside Zernio: `uv run python -m kit.onboarding accounts`. It calls `kit.post.accounts_check()` and prints each of their platforms as connected or not connected. For a platform that is not connected, tell them to connect it inside Zernio. The kit reports a platform that is not connected and skips it. It never routes around it. If Zernio turns the key away or cannot be reached, the command prints one sentence and exits with an error: say what it said, keep their key and posting times, and go on.
 3. Ask for their default posting time on each platform, as a 24 hour time such as 18:00 in their own time zone. If they have no preference, suggest 18:00 as a starting point and tell them they can change it later.
 
-If they do not, say that every video still ends with the MP4 and one caption file for each platform, ready to post by hand, and leave the posting times empty. The same goes for someone who said yes and has no key yet: `accounts` then prints one sentence saying that posting will write caption files to post by hand. Pass it on, ask whether they want to add the key now, and go on either way.
+If they do not, say that every video still ends with the MP4 and a file with a caption for each platform (`post/manual.md` in the video's folder), ready to post by hand, and leave the posting times empty. The same goes for someone who said yes and has no key yet: `accounts` then prints one sentence saying so. Pass it on, ask whether they want to add the key now, and go on either way.
 
 Both ways, ask for two more things:
 
@@ -177,7 +177,10 @@ UI story needs nothing generated. Give them the filming tips:
 ```bash
 mkdir -p work/onboarding-test/take
 ln -s "<the path they gave you>" work/onboarding-test/take/
+ls -L work/onboarding-test/take/
 ```
+
+The last command checks the link: it lists the take, and prints an error for a link that points nowhere. Then the path they gave you has a typo, so ask for it again and make the link again.
 
 If they skip the take, the test clip uses a sample card and a scratch voice instead.
 
@@ -202,17 +205,17 @@ uv run python -m kit.onboarding finish
 
 It checks every answer and writes `me/profile.json` and `me/brand/tokens.css`. If an answer is missing or wrong, it writes nothing and prints one sentence for each problem. Go back to the step that owns the answer, ask again, save that step again, and run `finish` again. When it succeeds the kit counts as set up. Tell the creator, with a short summary of the profile in plain words.
 
-For mini me, hand over to the `character` skill now. It runs its own approval gates, so do not repeat them here, and its SKILL.md has the details. In its order:
+For mini me, hand over to the `character` skill now. If `.claude/skills/character/SKILL.md` is not there yet in this copy of the kit, say so in one plain sentence and tell them an update adds it. They can still choose mini me, and the mini me test clip waits for the character. Skip the rest of this section and go on to step 9. Otherwise the skill runs its own approval gates, so do not repeat them here, and its SKILL.md has the details. In its order:
 
 1. Start the character: `uv run python -m kit.character start --description '<their words>' --outfit '<the outfit>' --photos <photo files>`. Leave out `--photos` when they gave none.
 2. The character sheet and the face check: `uv run python -m kit.character sheet`. They approve the sheet before any pose is drawn: `uv run python -m kit.character approve sheet`.
 3. The poses: `uv run python -m kit.character poses`. They approve them by name, as in `approve poses wave thumbs_up`, or all at once with `approve poses all`. Anything they reject is drawn again with `redraw <pose> --note '<what to change>'`.
 4. The in-between drawings for the moving poses: `uv run python -m kit.character moves`, then `approve moves all` once they have looked at them.
-5. The pack: `uv run python -m kit.character pack`. It checks the character against the mini me runtime and writes `me/character/manifest.json`.
+5. The pack: `uv run python -m kit.character pack`, which writes `me/character/manifest.json`. Then the character skill's separate check, which makes the mini me runtime read the pack: `node .claude/skills/mini-me/kit/character/test_state.mjs me/character/manifest.json`. It must end with "all passed". If it fails, show the failing lines and fix the cause before the character is used in a video.
 
 `uv run python -m kit.character status` shows where things stand at any point. The skill needs its dependency group first: `uv sync --group character --inexact`. Keep `--inexact`, or uv removes the video tools. With the manual image tool it stops and asks them to paste a prompt into ChatGPT or Gemini and save the picture back. Carry on with anything else that does not depend on it while they do.
 
-The handover is done when the character is packed and `me/character/manifest.json` exists. If `.claude/skills/character/SKILL.md` is not there yet in this copy of the kit, say so in one plain sentence and tell them an update adds it. They can still choose mini me, and the mini me test clip waits for the character. If they would rather build the character later, that is fine too: they say "make my character" whenever they are ready.
+The handover is done when the pack is made and the check ends with "all passed". If they would rather build the character later, that is fine too: they say "make my character" whenever they are ready.
 
 ### Step 9: Test clip
 
@@ -222,10 +225,10 @@ Make a short clip in their brand for each style they chose, with one command:
 uv run python -m kit.onboarding clips
 ```
 
-The clips are heavy jobs, so it makes them one at a time and first checks that at least 5 GB of disk is free. Each one takes a few minutes, and the first run also downloads the speech models, which adds a few more. Say so, and start nothing else heavy meanwhile. The command prints the full path of each clip it makes.
+The clips are heavy jobs, so it makes them one at a time and first checks that at least 5 GB of disk is free. Each clip takes about 90 seconds on a fast Mac, and the first run also downloads the speech models, which can add several minutes. So run the command with a long timeout (10 minutes), or in the background, and wait for it to finish. Start nothing else heavy meanwhile. The command prints the full path of each clip it makes. It also prints any note a clip script left for the creator, such as an HDR take that may look washed out, a take that could not be used so the sample card was, or a voice copy that is missing. Pass those on in your own words.
 
 - UI story: `.claude/skills/ui-story/kit/test_clip.py`. A branded card with karaoke captions, 5 to 10 seconds long. With their test take in `work/onboarding-test/take/`, it cuts a stretch where they speak and sets it in the rounded picture-in-picture box under the card. Without a take it uses a sample card and a scratch voice. It leaves out the cut-out of their head, so the head stays inside the box. A real edit adds the cut-out.
-- Mini me: `.claude/skills/mini-me/kit/test_clip.py`. Their character saying one line under a headline page. The character has to be built first, and that script arrives with the mini me style.
+- Mini me: `.claude/skills/mini-me/kit/test_clip.py`. Their character saying one line under a headline page: "Hi, this is <their name>. Meet my mini me. It tells my stories while I stay off camera." The character has to be packed first. The voice is the first of these that exists: a recording of that line that they give you (`uv run python -m kit.onboarding clips --voice <file>`, worth offering when they chose `record` for the voice-over, so they hear their own voice), an ElevenLabs voice when their profile chose one and the key is in `.env`, and otherwise a scratch voice from the Mac.
 
 When a script is not there yet in this copy of the kit, or the character is not built, the command says so in one plain sentence and goes on with the other style. Pass that on in your own words, tell them an update adds the missing script, and carry on. If a clip fails, the command prints what the script said and exits with status 1: tell them in plain words, offer to try again, and carry on with the rest of setup meanwhile.
 

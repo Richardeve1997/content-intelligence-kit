@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 
 PLATFORMS = ("instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter")
-SCRATCH = ("onboarding-test",)  # setup's test take and test clips: not a video
+SCRATCH = ("onboarding-test", "mini-me-test-clip")  # setup's test take and clips, and the mini me clip's scratch folder: not videos
 
 work = Path("work")
 folders = [p for p in work.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in SCRATCH] if work.is_dir() else []

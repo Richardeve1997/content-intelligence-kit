@@ -18,14 +18,18 @@ kit.transcribe, layout.py, scaffold.py (the creator's tokens and fonts), build_c
 composite_v2.py, kit.finish and kit.qa_captions. It leaves out the person matte, so the head stays inside the
 picture-in-picture instead of breaking out above it. A real edit makes the matte, and its model downloads then.
 
-The whole run holds one heavy-job slot and checks for 5 GB of free disk first. The scratch files go in
-<work>/build/ and are deleted afterwards unless --keep is given. The take is only read.
+The whole run holds one heavy-job slot and checks for 5 GB of free disk first. The scratch files go in a folder of
+their own, <work>/test-clip-build/, which is cleared before a run and deleted after it unless --keep is given.
+Nothing else in <work> is touched, and the take is only read. Whatever the script prints before its last line is a
+note for the creator, which is why the finish's own loudness report is kept off the screen.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
+import io
 import json
 import shutil
 import subprocess
@@ -38,6 +42,7 @@ from kit.transcribe import Word
 
 KIT = Path(__file__).resolve().parent
 SLUG = "onboarding-test"  # work/onboarding-test/: the test take, the scratch files and the clips
+SCRATCH = "test-clip-build"  # the script builds here, in <work>, and never in a folder called build
 FPS = 60
 SPEED = finish.HOUSE["speed"]
 MIN_SECONDS, MAX_SECONDS = 5.0, 10.0  # how long the finished clip should run
@@ -322,7 +327,7 @@ def clip(out: Path, *, take: Path | None = None, line: str | None = None, work: 
     """Make the test clip at `out`. Returns `out`. Raises KitError with one plain sentence when it cannot."""
     profile = config.load_profile()
     folder = Path(work) if work is not None else config.work_dir(SLUG)
-    build = folder / "build"
+    build = folder / SCRATCH
     source, note = find_take(folder, take)
     if note:
         print(note)
@@ -383,7 +388,8 @@ def _build(profile, build: Path, out: Path, take: Path | None, line: str | None)
                                       "--gfx", gfx, "--audio", voice, "--out", composite])
 
     candidate = build / "final.next.mp4"
-    finish.finish(composite, candidate, speed=SPEED, music=None)
+    with contextlib.redirect_stdout(io.StringIO()):  # its report is about loudness and a scratch file, not for the creator
+        finish.finish(composite, candidate, speed=SPEED, music=None)
     problems = qa_captions.check(candidate, words, speed=SPEED, fallback=composite)
     if problems:
         raise KitError("The test clip lost words from its sound, so it was not saved:\n" + "\n".join(f"- {p}" for p in problems))
@@ -403,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--take", type=Path, help="a take to use (default: the first video in work/onboarding-test/take/)")
     ap.add_argument("--line", help="the words for the scratch voice when there is no take (default: a short sample line)")
     ap.add_argument("--work", type=Path, help="the scratch folder (default: work/onboarding-test)")
-    ap.add_argument("--keep", action="store_true", help="keep the scratch files in <work>/build/ to look at")
+    ap.add_argument("--keep", action="store_true", help=f"keep the scratch files in <work>/{SCRATCH}/ to look at")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
     try:
         clip(args.out, take=args.take, line=args.line, work=args.work, keep=args.keep)
