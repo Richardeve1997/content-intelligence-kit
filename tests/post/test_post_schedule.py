@@ -806,14 +806,29 @@ def test_a_resend_answered_with_the_earlier_post_at_its_earlier_time_says_how_to
     later = when + timedelta(days=1)  # the creator asked for a later time in the meantime
 
     (second,) = run(reel, stub, ["instagram"], later)
-    assert second.status == "failed" and len(stub.posts) == 1
+    # the post is scheduled, at the earlier time: the first answer says so, as the next run's answer does
+    assert second.status == "scheduled" and len(stub.posts) == 1
+    assert datetime.fromisoformat(second.scheduled_for) == when
     assert "already had this post from an earlier attempt" in second.reason
     assert post.describe_time(when) in second.reason and "reschedule" in second.reason
 
     stub.list_lag = False
-    (third,) = run(reel, stub, ["instagram"], later)  # the next run finds it and says the same thing the same way
-    assert third.status == "scheduled" and "instead" in third.reason and "reschedule" in third.reason
+    (third,) = run(reel, stub, ["instagram"], later)  # the next run finds it and gives the same answer
+    assert third.status == second.status and third.scheduled_for == second.scheduled_for
+    assert "instead" in third.reason and "reschedule" in third.reason
     assert len(stub.posts) == 1
+
+
+def test_a_resend_answered_at_another_time_exits_zero_on_the_command_line(reel, stub, when, monkeypatch, capsys):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    stub.list_lag = True
+    later = when + timedelta(days=1)
+    (second,) = run(reel, stub, ["instagram"], later)
+    from kit.post import cli
+
+    assert cli._print_results([second], LONDON) == 0, "a scheduled post is not a failure"
+    assert capsys.readouterr().out.startswith(f"Instagram: scheduled for {post.describe_time(when)}.")
 
 
 def test_after_23_hours_an_attempt_that_left_no_post_is_not_sent_again(reel, stub, when, monkeypatch):
@@ -1052,6 +1067,27 @@ def test_list_notes_a_create_that_never_finished(reel, stub, when):
     run(reel, stub, ["instagram"], when)
     (listed,) = post.list_scheduled(reel.slug, client=stub.client())
     assert listed.status == "unknown" and "interrupted" in listed.reason
+    assert 'no post titled "Example Studio instagram example-reel"' in listed.reason, "it looked, and says so"
+
+
+def test_list_finds_the_post_an_interrupted_create_made_and_says_so(reel, stub, when):
+    stub.drop_creates = ["after"]  # Zernio saved the post, and the answer was lost
+    run(reel, stub, ["instagram"], when)
+    (held,) = stub.posts.values()
+    assert "post_id" not in receipt(reel, "instagram")
+
+    (listed,) = post.list_scheduled(reel.slug, client=stub.client())
+    assert (listed.status, listed.post_id) == ("scheduled", held["_id"])
+    assert datetime.fromisoformat(listed.scheduled_for) == when
+    assert "interrupted" in listed.reason and "found" in listed.reason
+    assert receipt(reel, "instagram")["post_id"] == held["_id"], "and it is remembered from now on"
+
+
+def test_list_needs_the_key_to_look_for_an_interrupted_create(reel, stub, when):
+    stub.drop_creates = ["before"]
+    run(reel, stub, ["instagram"], when)
+    with pytest.raises(NoZernio):
+        post.list_scheduled(reel.slug)
 
 
 def test_list_needs_no_key_when_nothing_was_scheduled(reel):
@@ -1253,8 +1289,19 @@ def test_a_post_that_cannot_be_read_back_is_reported_as_unsure_not_failed(reel, 
     stub.reply("POST", r"/api/v1/posts", 202, {"postId": "post-not-there-yet"})
     (result,) = run(reel, stub, ["instagram"], when)
     assert result.status == "unknown" and result.post_id == "post-not-there-yet"
-    assert "could not read it back" in result.reason
+    assert "read it back" in result.reason and "not confirmed" in result.reason  # Zernio found no such post
     assert receipt(reel, "instagram")["post_id"] == "post-not-there-yet"  # it is remembered, not repeated
+
+
+def test_a_post_zernio_cannot_find_when_it_is_read_back_is_not_confirmed(reel, stub, when):
+    # The create's own answer says scheduled, but reading the post back finds nothing: that is not a confirmation.
+    saved = {"_id": "post-not-found", "status": "scheduled", "scheduledFor": when.astimezone(timezone.utc).isoformat(),
+             "platforms": [{"platform": "instagram", "status": "scheduled"}]}
+    stub.reply("POST", r"/api/v1/posts$", 201, {"post": saved}, times=1)
+    (result,) = run(reel, stub, ["instagram"], when)
+    assert (result.status, result.post_id) == ("unknown", "post-not-found")
+    assert "not confirmed" in result.reason and "Zernio" in result.reason
+    assert receipt(reel, "instagram")["post_id"] == "post-not-found", "kept, so the next run looks before it sends"
 
 
 def test_a_post_zernio_set_for_another_time_is_not_reported_as_scheduled(reel, stub, when, monkeypatch):
@@ -1294,6 +1341,17 @@ def test_a_video_whose_length_cannot_be_read_fails_facebook_alone(reel, stub, wh
     assert results["facebook"].status == "failed" and "length" in results["facebook"].reason
     assert results["instagram"].status == "scheduled"
     assert not (reel.folder / "post" / "facebook.json").exists()  # nothing was sent, so nothing is remembered
+
+
+def test_facebook_alone_with_a_video_it_cannot_measure_uploads_nothing(reel, stub, when, monkeypatch):
+    def unreadable(path):
+        raise PostError("The length of final.mp4 could not be read. Check that it plays and try again.")
+
+    monkeypatch.setattr(payloads, "video_seconds", unreadable)
+    (result,) = run(reel, stub, ["facebook"], when)
+    assert result.status == "failed" and "length" in result.reason
+    assert stub.uploads == [] and not (reel.folder / "post" / "media.json").exists(), "nothing was uploaded for nothing"
+    assert stub.creates() == []
 
 
 def test_a_run_that_posts_nothing_leaves_no_post_folder_behind(reel, stub, when):

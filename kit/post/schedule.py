@@ -74,6 +74,11 @@ EARLIER_ATTEMPT = (
     "An earlier attempt may already have made this post, so the next run looks for it before it sends anything."
 )
 CANCEL_FIRST = "To try again, cancel it first and then schedule it again."
+NOT_CONFIRMED = (
+    "Zernio took the post but could not find it when the kit read it back, so it is not confirmed. "
+    "Look for it in Zernio before you schedule it again."
+)
+FOUND_AFTER_INTERRUPTION = "An earlier attempt was interrupted, and the kit found its post in Zernio."
 PASSED = (
     "The time you picked has passed or is too close to schedule. Pick a time at least five minutes from now, "
     "because Zernio posts at once when a time has passed."
@@ -425,6 +430,9 @@ class _Run:
                 )
 
         _require_lead(self.when, CREATE_MARGIN)
+        # Facebook needs the video's length. It is read before the upload, so a video whose length cannot be read
+        # fails here and uploads nothing when Facebook is the only platform.
+        seconds = self.seconds() if platform == "facebook" else None
         media = self.media_url()
         _require_lead(self.when, CREATE_MARGIN)  # a long upload can use up the notice
         body = payloads.build_body(
@@ -436,7 +444,7 @@ class _Run:
             media_url=media,
             scheduled_for=self.when.isoformat(),
             timezone=self.profile.timezone,
-            seconds=self.seconds() if platform == "facebook" else None,
+            seconds=seconds,
         )
         receipt["account_id"] = account["_id"]
         receipt["create_attempted"] = True
@@ -488,11 +496,15 @@ class _Run:
         """Read the new post back and report it as Zernio holds it.
 
         `resend` is True when an earlier run had already sent this request, so a post at another time than
-        the one asked for is that earlier post, which Zernio answered with again.
+        the one asked for is that earlier post, which Zernio answered with again. It is scheduled, at its own time,
+        and the Result says so, as the next run would.
+        A read-back that finds no such post (404) is not a confirmation, whatever the create answered.
         """
         try:
             post = self.client.get_post(post_id)
-        except zernio.ZernioError:
+        except zernio.ZernioError as exc:
+            if exc.status == 404:
+                return Result(platform, "unknown", post_id, reason=NOT_CONFIRMED)
             post = fallback
         if not post.get("status"):
             return Result(
@@ -510,8 +522,10 @@ class _Run:
                         f"Zernio already had this post from an earlier attempt, set for {said}. "
                         f"To move it to {describe_time(self.when)}, ask to reschedule it."
                     )
-                else:
-                    note = f"Zernio set it for {said}, not {describe_time(self.when)}. Check it in Zernio."
+                    earlier = self._text_note(platform, post)
+                    return Result(platform, "scheduled", post_id, reason=f"{note} {earlier}" if earlier else note,
+                                  scheduled_for=shown)  # fmt: skip
+                note = f"Zernio set it for {said}, not {describe_time(self.when)}. Check it in Zernio."
                 return Result(platform, "failed", post_id, reason=note, scheduled_for=shown)
             return Result(platform, "scheduled", post_id, reason=self._text_note(platform, post), scheduled_for=shown)
         if status == "published":
@@ -669,17 +683,35 @@ def _adopt_interrupted(
 
 
 def list_scheduled(slug: str, *, client: zernio.Client | None = None) -> list[Result]:
-    """What was scheduled for this video, as Zernio reports it now. Needs a key only when there is something to look up."""
+    """What was scheduled for this video, as Zernio reports it now. Needs a key only when there is something to look up.
+
+    A create whose answer never arrived may still have made its post, so `list` looks for it by its title, as
+    `schedule`, `cancel` and `reschedule` do. A post it finds is kept in the record and said to have been found.
+    """
     profile = config.load_profile()
     folder = _folder(slug)
     records = [(name, *_receipt(folder, name)) for name in config.PLATFORMS]
-    records = [(name, receipt) for name, _, receipt in records if receipt]
-    if any(receipt.get("post_id") for _, receipt in records) and client is None:
+    records = [(name, path, receipt) for name, path, receipt in records if receipt]
+    if any(receipt.get("post_id") or receipt.get("create_attempted") for _, _, receipt in records) and client is None:
         client = zernio.Client.from_env()
     zone = ZoneInfo(profile.timezone)
     results = []
-    for name, receipt in records:
-        post_id = receipt.get("post_id")
+    for name, path, receipt in records:
+        post_id, found_now = receipt.get("post_id"), False
+        if not post_id and receipt.get("create_attempted"):
+            title = receipt.get("title") or post_title(profile, name, slug)
+            try:
+                found_now = _recover(client, receipt, path, title)
+            except zernio.ZernioError as exc:
+                results.append(Result(name, "unknown", reason=f"An earlier attempt was interrupted, and the search for its post failed. {exc}"))
+                continue
+            if not found_now:
+                results.append(Result(
+                    name, "unknown",
+                    reason=f'An earlier attempt was interrupted, and Zernio has no post titled "{title}". Run schedule again to send it.',
+                ))  # fmt: skip
+                continue
+            post_id = receipt["post_id"]
         if not post_id:
             results.append(
                 Result(name, "unknown", reason="An earlier attempt was interrupted before Zernio confirmed it. Run schedule again to check.")
@@ -696,6 +728,8 @@ def list_scheduled(slug: str, *, client: zernio.Client | None = None) -> list[Re
         status, url, reason = _state(post, name)
         actual = _parse(post.get("scheduledFor"))
         shown = None if actual is None else actual.astimezone(zone).isoformat()
+        if found_now:
+            reason = f"{FOUND_AFTER_INTERRUPTION} {reason}" if reason else FOUND_AFTER_INTERRUPTION
         results.append(Result(name, status, post_id, url, reason, shown))
     return results
 
