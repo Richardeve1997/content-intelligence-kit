@@ -19,6 +19,8 @@ for _name in ("numpy", "PIL", "scipy", "skimage", "sklearn"):
 import numpy as np  # noqa: E402
 
 import kit.character  # noqa: E402
+from PIL import Image  # noqa: E402
+
 from character_sprites import FakeProvider, image_size, load_rgba  # noqa: E402
 from kit.config import KitError  # noqa: E402
 from kit.character import faces, moves, poses, sheet, store  # noqa: E402
@@ -205,6 +207,96 @@ def test_the_redraw_note_reaches_the_prompt(built, tmp_path):
     assert "1. wave: " in seen["prompt"] and "Open the hand wider." in seen["prompt"]
 
 
+def test_the_held_card_is_the_largest_clear_rectangle_of_one_light_colour_below_the_head():
+    """The card a pose holds up is a patch of one light colour below the head that the idle drawing does not have
+    there (so a light top is never taken for a card); its clear face is the largest rectangle inside the patch,
+    which leaves out the thumb holding it."""
+    from character_sprites import CARD, draw_figure
+
+    idle, _ = draw_figure("idle")
+    held, _ = draw_figure("hold_card")
+    face = faces.locate(idle)
+    found = poses.held_card(held, idle, face, (0, 0))
+    assert found is not None
+    x, y, w, h = found
+    assert (held[y : y + h, x : x + w, :3] == CARD).all() and (held[y : y + h, x : x + w, 3] == 255).all()
+    assert w * h >= 0.7 * 23 * 21, "the clear face is most of the 23 x 21 card"
+    assert poses.held_card(idle, idle, face, (0, 0)) is None, "the idle drawing holds no card"
+
+
+def test_the_held_card_is_found_when_the_body_stands_off_the_idle_drawing():
+    """The idle comparison follows the head-lock offset: a light top in a pose whose body stands 14 cells off the
+    idle drawing is still the top, not a card, and the real card beside it is found. With no card, nothing is."""
+    from character_sprites import CARD, draw_figure
+
+    shirt = (240, 240, 240)
+    idle, _ = draw_figure("idle", shirt=shirt)
+    held, _ = draw_figure("hold_card", shirt=shirt)
+    face = faces.locate(idle)
+    shifted = np.zeros_like(held)
+    shifted[:, 14:] = held[:, :-14]
+    found = poses.held_card(shifted, idle, face, (14, 0))
+    assert found is not None, "the card was not found"
+    x, y, w, h = found
+    assert (shifted[y : y + h, x : x + w, :3] == CARD).all(), f"{found} is not on the card"
+    no_card = shifted.copy()
+    no_card[(no_card[..., :3] == CARD).all(2)] = 0
+    assert poses.held_card(no_card, idle, face, (14, 0)) is None, "the light top was taken for a card"
+
+
+def test_the_poses_board_outlines_the_measured_card(built):
+    """The poses board draws a thin outline round the clear face of the card the hold_card pose holds up, so a
+    wrong measure is seen before any render."""
+    from kit.character import art
+
+    folder, _, manifest_path = built
+    card = json.loads(manifest_path.read_text())["poses"]["hold_card"]["frame_info"][0]["card"]
+    tile = np.full((40, 60, 3), 200, np.uint8)
+    poses.outline_card(tile, [10, 5, 20, 12], (0, 0))
+    ink = (tile == np.array(art.INK, np.uint8)).all(2)
+    assert ink[5, 10:30].all() and ink[16, 10:30].all() and ink[5:17, 10].all() and ink[5:17, 29].all(), "no outline on the border"
+    assert not ink[6:16, 11:29].any(), "the outline is drawn inside the card's face"
+    board = np.asarray(Image.open(poses.board(folder)).convert("RGB"))
+    assert (board == np.array(art.INK, np.uint8)).all(2).any()
+    # the hold_card tile: its place on the board follows art.board's layout (5 columns, scale 2)
+    state = store.load(folder)
+    drawn = [n for n in poses.POSE_NAMES if (folder / "poses" / f"{n}.png").is_file()]
+    canvases = {n: load_rgba(folder / "poses" / f"{n}.png") for n in drawn}
+    boxes = [art.content_box(c) for c in canvases.values()]
+    x0, y0 = max(0, min(b[0] for b in boxes) - 4), max(0, min(b[1] for b in boxes) - 4)
+    x1 = min(art.CANVAS_W, max(b[2] for b in boxes) + 4)
+    cell_w, cell_h = (x1 - x0) * 2, (art.CANVAS_H - y0) * 2
+    index = drawn.index("hold_card")
+    tile_x = 24 + (index % 5) * (cell_w + 16)
+    tile_y = 24 + 56 + (index // 5) * (cell_h + 48 + 16)
+    cx, cy, cw, ch = card
+    top = board[tile_y + (cy - y0) * 2, tile_x + (cx - x0) * 2 : tile_x + (cx - x0 + cw) * 2]
+    assert (top == np.array(art.INK, np.uint8)).all(1).mean() > 0.9, "the card's top edge is not outlined on the board"
+    assert state["poses"]["hold_card"]["approved"]
+
+
+def test_the_hold_card_pose_carries_the_clear_face_of_its_card(built):
+    """The pack measures the card the hold_card pose holds up and stores its clear face in the manifest, so a
+    video can write on it. No other pose carries one."""
+    folder, _, manifest_path = built
+    manifest = json.loads(manifest_path.read_text())
+    card = manifest["poses"]["hold_card"]["frame_info"][0]["card"]
+    assert card and len(card) == 4, card
+    x, y, w, h = card
+    assert w >= 12 and h >= 8, card
+    canvas = _rgba(folder / "poses" / "hold_card.png")
+    face = canvas[y : y + h, x : x + w]
+    colours = {tuple(int(v) for v in c) for c in face[..., :3].reshape(-1, 3)}
+    assert len(colours) == 1 and (face[..., 3] == 255).all(), "the card's face is one flat colour"
+    assert min(next(iter(colours))) >= 200, "the card is light"
+    assert y >= store.load(folder)["face"]["neck"], "the card sits below the head"
+    for name in CORE:
+        if name != "hold_card":
+            assert manifest["poses"][name]["frame_info"][0]["card"] is None, name
+    for name in ("talking", "point_left", "point_right", "point_up"):
+        assert all(info["card"] is None for info in manifest["moves"][name]["frame_info"]), name
+
+
 def _packed_creator(built, tmp_path, monkeypatch) -> Path:
     folder, _, _ = built
     me = tmp_path / "me"
@@ -228,6 +320,16 @@ def test_a_face_change_after_packing_packs_the_character_again(built, tmp_path, 
     assert packed == {name: [r["w"], r["h"]] for name, r in patches.items()}
     assert packed != before, "the new face reached the pack"
     assert "Packed the character again" in said
+
+
+def test_the_pack_says_what_card_the_hold_card_pose_holds(built, tmp_path, monkeypatch, capsys):
+    from kit.character import __main__ as cli
+
+    copy = _packed_creator(built, tmp_path, monkeypatch)
+    assert cli.main(["pack"]) == 0
+    said = capsys.readouterr().out
+    card = json.loads((copy / "manifest.json").read_text())["poses"]["hold_card"]["frame_info"][0]["card"]
+    assert f"holds a card {card[2]} x {card[3]} cells" in said and "write" in said, said
 
 
 def test_a_face_change_on_a_character_that_cannot_be_packed_now_says_the_pack_is_old(built, tmp_path, monkeypatch, capsys):

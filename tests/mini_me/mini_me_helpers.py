@@ -197,8 +197,12 @@ def _figure_standard(pose: str, step: float = 1.0):
     else:
         left_down()
         right_down()
+        if pose == "hold_card":
+            fill(100, 128, 144, 170, _rgb(PALETTE[7]))  # a plain white card held between the hands
     return canvas
 
+
+STANDARD_CARD = [100, 128, 45, 43]  # the clear face of the card the standard stand-in holds, in canvas cells
 
 BIG_HEAD = {"top": 61, "neck": 153, "waist": 221, "mouth": [116, 140], "eyes": [104, 121]}
 
@@ -275,9 +279,9 @@ def make_character(folder: Path, build: str = "standard") -> Path:
     else:
         draw = _figure_big if build == "big_head" else _figure_standard
     if build == "big_head":
-        anchors = {"mouth": list(BIG_HEAD["mouth"]), "eyes": list(BIG_HEAD["eyes"]), "hand": None}
+        anchors = {"mouth": list(BIG_HEAD["mouth"]), "eyes": list(BIG_HEAD["eyes"]), "hand": None, "card": None}
     else:
-        anchors = {"mouth": [116, 99], "eyes": [107, 85], "hand": None}
+        anchors = {"mouth": [116, 99], "eyes": [107, 85], "hand": None, "card": None}
 
     def entry(kind, frames, sequence, hold, strip, ref=122.0):
         return {"kind": kind, "frames": frames, "fps": 24, "strip": strip, "ref_col": ref, "label": strip,
@@ -288,6 +292,8 @@ def make_character(folder: Path, build: str = "standard") -> Path:
     for name in CORE:
         _save(draw(name), folder / "strips" / f"pose_{name}.png")
         poses[name] = entry("pose", 1, [[0, 1]], 0, f"strips/pose_{name}.png")
+    if build == "standard":
+        poses["hold_card"]["frame_info"][0]["card"] = list(STANDARD_CARD)
     moves = {"idle": entry("pose", 1, [[0, 1]], 0, "strips/idle.png")}
     _save(draw("idle"), folder / "strips" / "idle.png")
     talking = np.concatenate([draw("talking") for _ in range(4)], axis=1)
@@ -326,9 +332,9 @@ SPOKEN = ("Basil dies in week three. Look at this window. Water it early. Three 
 SECONDS = 8.0
 
 
-def words_for(text: str) -> list[dict]:
+def words_for(text: str, pages: list[dict] | None = None) -> list[dict]:
     """Words laid over the pages: each sentence starts on its page."""
-    starts = [p["t"] + 0.12 for p in PAGES]
+    starts = [p["t"] + 0.12 for p in (pages or PAGES)]
     out = []
     for start, sentence in zip(starts, re.findall(r"[^.]+\.", text)):
         t = start
@@ -338,16 +344,18 @@ def words_for(text: str) -> list[dict]:
     return out
 
 
-def build_project(root: Path, me: Path, slug: str = "example-reel", spoken: str = SPOKEN, build: str = "standard") -> Path:
+def build_project(root: Path, me: Path, slug: str = "example-reel", spoken: str = SPOKEN, build: str = "standard",
+                  pages: list[dict] | None = None) -> Path:
     """work/<slug>/ with a voice-over, words and pages, the stand-in character in me/, then install.py."""
+    pages = pages or PAGES
     folder = root / "work" / slug
     folder.mkdir(parents=True, exist_ok=True)
     wav = write_wav(speech_samples([("talk", SECONDS - 0.3), ("gap", 0.3)]), folder / "vo.wav")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-c:a", "aac", "-b:a", "192k", "-ac", "2",
                     str(folder / "vo.m4a")], check=True)
     wav.unlink()
-    (folder / "words.json").write_text(json.dumps({"dur": SECONDS, "words": words_for(spoken)}))
-    (folder / "beats.json").write_text(json.dumps({"duration": SECONDS, "pages": PAGES}))
+    (folder / "words.json").write_text(json.dumps({"dur": SECONDS, "words": words_for(spoken, pages)}))
+    (folder / "beats.json").write_text(json.dumps({"duration": SECONDS, "pages": pages}))
     if not (me / "character" / "manifest.json").exists():
         make_character(me / "character", build)
     return load("install").install(slug)

@@ -95,7 +95,7 @@ def test_poses_and_props_follow_the_meaning(words):
     rot = next(p for p in pages if "ROT" in p["text"].split())
     assert rot["pose"] == "facepalm"
     counted = next(p for p in pages if "3" in p["text"])
-    assert counted["prop"] != "count", "a number under 10 shows whole: counting up to 3 would show 1 and 2 first"
+    assert counted["prop"] != "count", "a number under 20 shows whole: counting up to 3 would show 1 and 2 first"
     made = next(p for p in pages if "MADE" in p["text"])
     assert made["pose"] in {"thumbs_up", "celebrate"}
     assert len(by_text) == len(pages), "no two pages share a headline"
@@ -157,6 +157,25 @@ def test_a_short_last_word_after_a_pause_stays_with_its_sentence():
     pages = beats.build(words, cta="follow")["pages"]
     assert "WHY" not in pages[-1]["text"], pages
     assert "WHY" in pages[-2]["text"], pages
+
+
+def test_a_sentence_ends_at_a_full_stop_before_a_closing_quote():
+    """A speech model can close a quote after the full stop ('why."'). The sentence still ends there: a short last
+    word said after a pause stays with it, and the next word starts a new phrase."""
+    words = [Word("The", 0.10, 0.30), Word("basil", 0.34, 0.70), Word("wilted", 0.74, 1.10), Word("and", 1.14, 1.30),
+             Word("nobody", 1.34, 1.70), Word("knows", 1.74, 2.00), Word('why."', 2.42, 2.48),
+             Word("You", 2.78, 2.94), Word("did", 2.98, 3.14), Word("nothing", 3.18, 3.50), Word('wrong."', 3.54, 3.90)]
+    said = [[words[i].text for i in group] for group in beats.phrases(words, cta="follow")]
+    assert said[-1] == ["You", "did", "nothing", 'wrong."'], said
+    assert said[-2][-2:] == ["knows", 'why."'], said
+
+
+def test_the_closing_line_starts_after_a_full_stop_before_a_closing_quote():
+    """The closing line is found back to the start of its sentence, which ends at a full stop even when a closing
+    quote follows it, without the pause a full stop usually brings."""
+    words = timed('Three plants made it." Follow for more balcony tips.')
+    groups = beats.phrases(words, cta="follow")
+    assert [words[i].text for i in groups[-1]] == ["Follow", "for", "more", "balcony", "tips."], groups
 
 
 def test_a_short_word_that_opens_a_sentence_still_joins_the_next_phrase():
@@ -238,16 +257,69 @@ def test_running_it_again_keeps_an_edited_beats_json(kit_home, capsys):
     assert "beats.backup-2.json" in capsys.readouterr().out
 
 
-def test_only_numbers_of_10_or_more_are_drafted_to_count():
-    pages = beats.build(timed("Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days."), cta="follow")["pages"]
+def test_only_numbers_of_20_or_more_are_drafted_to_count():
+    pages = beats.build(timed("Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days. Mine took 12 days."),
+                        cta="follow")["pages"]
     by_number = {re.search(r"\d+", p["text"]).group(): p for p in pages if re.search(r"\d", p["text"])}
     assert by_number["21"]["prop"] == "count" and by_number["40"]["prop"] == "count"
     assert by_number["3"]["prop"] != "count", "the counted number is the first one, 3, which shows whole"
+    assert by_number["12"]["prop"] != "count", "counting 12 up from 10 would show 10 and 11 under the words first"
 
 
 def test_the_first_page_never_counts_so_frame_0_reads_right():
     pages = beats.build(timed("Basil roots in 21 days. Here is why."), cta="follow")["pages"]
     assert "21" in pages[0]["text"] and pages[0]["prop"] != "count"
+
+
+def test_the_draft_picks_hold_card_only_when_the_character_holds_a_measured_card():
+    """"Plan", "checklist" and "list" draft hold_card with a card, whose words go on the card the character holds
+    up. When the pack measured no card on that drawing, the card would drop in beside a blank one, so the draft
+    picks a pose that shows a card instead."""
+    words = timed("Basil dies in week three. Here is my plan for the week. Water it early. Then move it to the sun.")
+    with_card = beats.build(words, cta="follow", held_card=True)["pages"]
+    plan = next(p for p in with_card if "PLAN" in p["text"])
+    assert plan["pose"] == "hold_card" and plan["prop"] == "card", plan
+    without = beats.build(words, cta="follow", held_card=False)["pages"]
+    assert all(p["pose"] != "hold_card" for p in without), without
+    plan = next(p for p in without if "PLAN" in p["text"])
+    assert plan["pose"] in ("point_left", "point_right") and plan["prop"] == "card", plan
+
+
+def test_without_a_packed_character_the_draft_never_picks_hold_card(kit_home):
+    """With no packed character to read, the draft cannot know whether the card was measured, so it does not pair
+    hold_card with a card."""
+    assert beats.held_card_measured() is None
+    pages = beats.build(timed("Here is my plan for the week. Type the prompt. Then the checklist."), cta="follow")["pages"]
+    assert all(p["pose"] != "hold_card" for p in pages), pages
+
+
+def test_check_refuses_a_hold_card_page_with_a_card_when_no_card_was_measured():
+    pages = [{"t": 0.0, "text": "HELLO", "pose": "wave", "field": "dark", "prop": "none"},
+             {"t": 1.0, "text": "THE PLAN", "pose": "hold_card", "field": "light", "prop": "card: Water early"},
+             {"t": 2.0, "text": "A LIST", "pose": "typing", "field": "dark", "prop": "none"}]
+    beats_ = {"duration": 3.0, "pages": pages}
+    assert beats.check(beats_, held_card=True) == []
+    problems = beats.check(beats_, held_card=False)
+    errors = [p for p in problems if not p.startswith("note:")]
+    assert len(errors) == 1 and errors[0].startswith("page 2") and "hold_card" in errors[0] and "draw hold_card again" in errors[0], problems
+
+
+def test_a_year_never_counts():
+    """2024 would roll up from 10 like any number of 20 or more, but a year is not a count: it shows whole, even
+    when it is the accented word. A number with a comma or a sign is not a year."""
+    pages = beats.build(timed("I started this in 2024 with one shop. Since *2019* it grew. We baked 2,024 loaves."), cta="follow")["pages"]
+    by_number = {re.search(r"[\d,]+", p["text"]).group(): p for p in pages if re.search(r"\d", p["text"])}
+    assert by_number["2024"]["prop"] != "count" and by_number["2019"]["prop"] != "count", by_number
+    assert by_number["2,024"]["prop"] == "count", by_number
+    counted = [{"t": 0.0, "text": "HELLO", "pose": "wave", "field": "dark", "prop": "none"},
+               {"t": 1.0, "text": "IN 2024", "pose": "point_up", "field": "light", "prop": "count"}]
+    problems = beats.check({"duration": 2.0, "pages": counted}, held_card=True)
+    assert problems == ["note: page 2 counts 2024, which reads as a year, so it shows whole instead."]
+
+
+def test_a_question_ending_before_a_closing_quote_gets_the_thinking_pose():
+    words = [Word("So", 0.1, 0.3), Word("what", 0.34, 0.6), Word("do", 0.64, 0.8), Word("you", 0.84, 1.0), Word('think?"', 1.04, 1.4)]
+    assert beats._pose(words, [0, 1, 2, 3, 4], 2, "talking") == "thinking"
 
 
 def test_the_counted_number_is_the_accented_one_else_the_first():
@@ -258,9 +330,11 @@ def test_the_counted_number_is_the_accented_one_else_the_first():
     assert beats.counted_number("NO NUMBER") is None
 
 
-def test_check_notes_a_count_under_10():
+def test_check_notes_a_count_under_20():
     pages = [{"t": 0.0, "text": "HELLO", "pose": "wave", "field": "dark", "prop": "none"},
              {"t": 1.0, "text": "3 OF 5", "pose": "point_up", "field": "light", "prop": "count"},
-             {"t": 2.0, "text": "21 DAYS", "pose": "thumbs_up", "field": "dark", "prop": "count"}]
-    problems = beats.check({"duration": 3.0, "pages": pages})
-    assert problems == ["note: page 2 counts 3, which is under 10, so it shows whole instead."]
+             {"t": 2.0, "text": "21 DAYS", "pose": "thumbs_up", "field": "dark", "prop": "count"},
+             {"t": 3.0, "text": "12 YEARS", "pose": "point_up", "field": "light", "prop": "count"}]
+    problems = beats.check({"duration": 4.0, "pages": pages})
+    assert problems == ["note: page 2 counts 3, which is under 20, so it shows whole instead.",
+                        "note: page 4 counts 12, which is under 20, so it shows whole instead."]

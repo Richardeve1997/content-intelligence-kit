@@ -24,14 +24,17 @@
  *     side    "left" | "right" | "up" | null: where the pose points, so a card can arrive from there
  *     char    { scale, x, y, crown, left, right }: the character on screen (crown = top of the head); charEl its layer
  *     zone    { top, bottom, left, right }: the free space between the headline and the head
+ *     held    { left, top, w, h }: the clear face of the card the character holds up (the hold_card pose, measured when
+ *             the character was packed), or null
  *     back    layer behind the character (cards tuck behind the head); front: in front (stamps, bursts)
  *     T(cue)  seconds of a spoken word: a word index, "phrase" or "phrase#2"; T.e(cue) is its end
  *     A       motion helpers (all fromTo with both ends given): pop rise slide drop slam punch shake out count burst;
- *             count leaves a number under 10 whole and counts a bigger one up from 10, unless given a start
+ *             count leaves a number under 20 whole, and a year, and counts a bigger one up from 10, unless given a start
  *     win(el, a, b)  show an element only from a to b      hit(kind, t)  a whoosh or thud at t (written to hits.json)
  *
  *   Helpers that build and animate in one call: Stage.card(c, o), Stage.stamp(c, text, o), Stage.bubble(c, text, o),
- *   Stage.chip(c, html, o). Stage.el / Stage.h / Stage.box make elements.
+ *   Stage.chip(c, html, o), Stage.heldCard(c, { text } or { img }) (the words or picture on the card the character
+ *   holds up; a card prop on a hold_card page does this by itself). Stage.el / Stage.h / Stage.box make elements.
  *
  * Safe to seek: what is visible is a pure function of time, set by one director tween, and every motion is a
  * fromTo with both ends given (a value set only in the from-vars never applies in a sequential render).
@@ -39,11 +42,11 @@
 (function () {
   "use strict";
   var W = 1080, H = 1920, SAFE_L = 92, SAFE_R = 988, RING = 12, EDGE = 3, OUT = RING + EDGE;
-  var HEAD_TOP = 190, HEAD_BOTTOM = 620, FIT_W = 884, MAX_SIZE = 240, MIN_SIZE = 84, LEAD_KEY = 0.15, COUNT_FROM = 10;
+  var HEAD_TOP = 190, HEAD_BOTTOM = 620, FIT_W = 884, MAX_SIZE = 240, MIN_SIZE = 84, LEAD_KEY = 0.15, COUNT_FROM = 10, COUNT_MIN = 20;
   // a page shows the character down to its waist, at the largest scale that keeps the crown at y 960 or lower
   var PAGE_SCALES = [8, 7, 6, 5, 4], CROWN_MIN = 960, CROWN_MAX = 1320;
   // the close: scale 10 to 12 with the mouth's bottom edge at y 1660, clear of the phone's caption area
-  var CLOSE_SCALES = [11, 12, 10], CLOSE_LOWER = [9, 8], MOUTH_Y = 1660, CARD_H = 300;
+  var CLOSE_SCALES = [11, 12, 10], CLOSE_LOWER = [9, 8], MOUTH_Y = 1660, CARD_H = 300, HELD_MIN_SIZE = 26;
   var D = null, WORDS = [], DUR = 0, tl = null, root = null, TOK = {};
   var OVERRIDES = {}, SC = [], WINS = [], HITS = [], PROBLEMS = [];
   var r3 = function (x) { return Math.round(x * 1000) / 1000; };
@@ -149,14 +152,15 @@
     },
     out: function (n, t, o) { o = o || {}; tl.fromTo(n, { opacity: 1, scale: 1 }, { opacity: 0, scale: o.to != null ? o.to : 0.4, duration: o.d || 0.18, ease: "power2.in", immediateRender: false }, t); },
     /** count a number up to the one written in the element, landing exactly on it. Without `from`, a number under
-     *  10 stays whole (counting to 3 would show 1 and 2 first) and a bigger one counts up from 10, so no single
-     *  digit ever shows under the words. Returns false when it left the number whole. */
+     *  20 stays whole (counting to 3 would show 1 and 2 first, and 12 would show 10 and 11 under the spoken word)
+     *  and a bigger one counts up from 10, so no single digit ever shows and a count has at least ten steps.
+     *  Returns false when it left the number whole. */
     count: function (n, t, d, from) {
       var text = n.getAttribute("data-to") || n.textContent, m = /^(\D*)([\d,]*\.?\d+)(.*)$/.exec(text);
       if (!m) return false;
       var target = parseFloat(m[2].replace(/,/g, "")), decimals = (m[2].split(".")[1] || "").length, commas = m[2].indexOf(",") >= 0;
       if (from == null) {
-        if (target < COUNT_FROM) return false;
+        if (target < COUNT_MIN || (!m[1] && !m[3] && /^(19|20)\d\d$/.test(m[2]))) return false;  // too small, or a year
         from = COUNT_FROM;
       }
       var fmt = function (v) {
@@ -376,7 +380,15 @@
     if (inst.driver && inst.driver.duration() > DUR) inst.driver.duration(DUR);  // the Reel ends at DUR
     var side = /left/.test(poseName) ? "left" : /right/.test(poseName) ? "right" : /up|hold_card|celebrate/.test(poseName) ? "up" : null;
     if (o.flip && side === "left") side = "right"; else if (o.flip && side === "right") side = "left";
-    return { el: holder, inst: inst, pose: poseName, keyAt: keyAt, side: side, char: where };
+    // the clear face of the card this drawing holds up, on screen: a canvas cell lands at x + (col - ref_col) * scale
+    // from the head column and y + (row - baseline) * scale from the feet; a flip mirrors it about the head column
+    var fi0 = (e.frame_info || [])[0] || {}, held = null;
+    if (fi0.card) {
+      var cx = fi0.card[0], cw = fi0.card[2], sc = where.scale;
+      held = { left: Math.round(where.x + (o.flip ? e.ref_col - cx - cw : cx - e.ref_col) * sc), top: Math.round(where.y + (fi0.card[1] - D.baseline) * sc),
+        w: cw * sc, h: fi0.card[3] * sc };
+    }
+    return { el: holder, inst: inst, pose: poseName, keyAt: keyAt, side: side, char: where, held: held };
   }
 
   // ---- props: what arrives because of the pose ---------------------------------------------------------------------------
@@ -404,6 +416,29 @@
     else if (from === "pop") A.pop(n, t, { rot: o.rot || 0 });
     else if (from === "drop") A.drop(n, t, { rot: o.rot || 2, dist: y + 400 });
     else A.rise(n, t, { y: 140, rot: o.rot || 2, d: 0.3, ease: "back.out(1.6)" });  // up from below, never through the headline
+    return n;
+  }
+  /** the page's card written on the card the character holds up (c.held): a few words fitted to its clear face at a
+   *  readable size, or a picture. It sits in the character's layer, so it moves when the character flinches. Returns
+   *  the element, or null when the words do not fit at 26 px, so the caller can drop a card in instead. */
+  function heldCard(c, o) {
+    o = o || {};
+    var r = c.held;
+    if (!r) return null;
+    var pad = Math.round(Math.min(r.w, r.h) * 0.08), bw = r.w - 2 * pad, bh = r.h - 2 * pad, n;
+    if (o.img) {
+      n = h(o.layer || c.charEl, '<div class="mm-held img" style="' + box(r.left + pad, r.top + pad, bw, bh) + '"><img src="' + esc(o.img) + '" alt=""></div>');
+    } else {
+      n = h(o.layer || c.charEl, '<div class="mm-held" style="' + box(r.left + pad, r.top + pad, bw, bh) + '"><span></span></div>');
+      var span = n.firstChild, size = Math.min(76, Math.floor(bh * 0.6));
+      span.textContent = String(o.text != null ? o.text : "");
+      for (; size >= HELD_MIN_SIZE; size -= 2) {
+        span.style.fontSize = size + "px";
+        if (span.scrollWidth <= bw + 1 && span.getBoundingClientRect().height <= bh + 1) break;
+      }
+      if (size < HELD_MIN_SIZE) { n.parentNode.removeChild(n); return null; }
+    }
+    A.pop(n, o.t != null ? o.t : c.keyAt + 0.05, { from: 0.7, d: 0.2, ease: "back.out(2)" });
     return n;
   }
   function stamp(c, text, o) {
@@ -450,19 +485,30 @@
     var kind = String(s.prop).split(":")[0].trim().toLowerCase(), what = content(s.prop);
     if (kind === "stamp") stamp(c, what || headWord(s));
     else if (kind === "count") {
-      // one number counts: the accented one, else the first, and only when it is 10 or more ("3 OF 5" stays whole)
+      // one number counts: the accented one, else the first, and only when it is 20 or more ("3 OF 5" and "12 YEARS" stay whole)
       var num = s.pageEl.querySelector(".mm-acc .mm-num") || s.pageEl.querySelector(".mm-num");
       if (!num) PROBLEMS.push("note: page " + s.n + " counts, but its headline has no number.");
       else if (s.i === 0) PROBLEMS.push("note: page 1 shows its number whole, so the first frame reads right.");
       else if (!A.count(num, s.t0 + 0.02, Math.min(0.7, s.dur * 0.6))) {
-        PROBLEMS.push("note: page " + s.n + " counts " + num.textContent + ", which is under 10, so it shows whole instead.");
+        var why = /^(19|20)\d\d$/.test(num.textContent) ? "reads as a year" : "is under 20";
+        PROBLEMS.push("note: page " + s.n + " counts " + num.textContent + ", which " + why + ", so it shows whole instead.");
       }
     }
     else if (kind === "burst") A.burst(c.front, c.char.x, c.char.crown + 140, c.keyAt + 0.05, { r: 260 });
     else if (kind === "bubble") bubble(c, what || "?");
     else if (kind === "card" && what) {
-      if (/\.(png|jpe?g|webp|gif|svg)$/i.test(what)) card(c, { img: what });
-      else card(c, { text: what });
+      // on a hold_card page the words (or the picture) go on the card the character holds up
+      var picture = /\.(png|jpe?g|webp|gif|svg)$/i.test(what);
+      if (c.held && heldCard(c, picture ? { img: what } : { text: what })) return;
+      if (c.held) {
+        s.heldNote = true;
+        PROBLEMS.push("note: page " + s.n + ": the words " + JSON.stringify(what) + " do not fit on the card the character holds at " + HELD_MIN_SIZE + " px, so the card drops in beside it instead. Cut them to a few words.");
+      } else if (s.shot.pose === "hold_card") {
+        // a problem, not a note: the page would show a blank held card with a second card beside it
+        s.heldNote = true;
+        PROBLEMS.push("page " + s.n + " pairs hold_card with a card, but no card was measured on the character's hold_card drawing, so the card drops in beside a blank card. Give the page another pose, or draw hold_card again with a large plain white card and pack again.");
+      }
+      if (picture) card(c, { img: what }); else card(c, { text: what });
     } else if (kind === "card") PROBLEMS.push("note: page " + s.n + " has a card with nothing on it. Name what it shows in beats.json.");
   }
 
@@ -559,8 +605,8 @@
     s.shot = shoot(s, Object.assign({}, o.char || {}));
     var zone = { top: s.headBottom + 30, bottom: Math.max(s.headBottom + 200, s.shot.char.crown + 40), left: 120, right: 960 };
     var c = { n: s.n, page: s.page, t0: s.t0, t1: s.t1, dur: s.dur, field: s.field, keyAt: s.shot.keyAt, side: s.shot.side,
-      char: s.shot.char, charEl: s.shot.el, zone: zone, tl: tl, T: T, A: A, back: s.back, front: s.front, win: win, hit: hit,
-      el: el, h: h, box: box };
+      char: s.shot.char, charEl: s.shot.el, held: s.shot.held, zone: zone, tl: tl, T: T, A: A, back: s.back, front: s.front,
+      win: win, hit: hit, el: el, h: h, box: box };
     s.c = c;
     // a slow vertical drift on every layer, so no page ever sits dead still (sideways would cross the margins)
     var d0 = Math.max(0, s.t0 - 0.06), dd = Math.max(0.05, Math.min(s.dur + 0.2, DUR - d0));
@@ -670,10 +716,15 @@
         return { left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), bottom: Math.round(r.bottom), size: ln._size };
       });
       s.el.style.display = shown;
-      var p = { n: s.n, t0: s.t0, t1: s.t1, field: s.field, pose: s.shot.pose, prop: s.prop, char: s.shot.char, lines: lines,
-        headBottom: s.headBottom };
+      var p = { n: s.n, t0: s.t0, t1: s.t1, field: s.field, pose: s.shot.pose, prop: s.prop, char: s.shot.char, held: s.shot.held || null,
+        lines: lines, headBottom: s.headBottom };
       if (s.ctaEl) p.cta = { name: s.ctaEl.querySelector(".nm").textContent, handle: s.ctaEl.querySelector(".hd").textContent };
       pages.push(p);
+      if (s.shot.pose === "hold_card" && !s.heldNote && !s.el.querySelector(".mm-held")) {
+        problems.push("note: page " + p.n + ": the hold_card pose holds a blank card" + (s.shot.held
+          ? ". Give the page a card prop with the words to write on it, or pick another pose."
+          : ", and no card was measured on it when the character was packed, so nothing can be written on it. Pick another pose, or draw hold_card again with a large plain white card and pack again."));
+      }
       lines.forEach(function (L) {
         if (L.left < 90 || L.right > 990) problems.push("page " + p.n + ": the headline reaches x " + L.left + " to " + L.right + ", outside 90 to 990.");
       });
@@ -688,6 +739,6 @@
   }
 
   window.Stage = { page: function (n, o) { OVERRIDES[n] = Object.assign(OVERRIDES[n] || {}, o); }, boot: boot, audit: audit, T: T, A: A,
-    el: el, h: h, box: box, win: win, hit: hit, card: card, stamp: stamp, bubble: bubble, chip: chip, idx: idx, hits: [], ready: false,
-    tl: null };
+    el: el, h: h, box: box, win: win, hit: hit, card: card, heldCard: heldCard, stamp: stamp, bubble: bubble, chip: chip, idx: idx,
+    hits: [], ready: false, tl: null };
 })();

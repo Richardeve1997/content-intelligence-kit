@@ -42,7 +42,7 @@ Everything for one video lives in `work/<video>/`:
    - Short phrases. Every phrase becomes a page with at most four words on it, so write phrases of three to six words with a comma or a full stop between them.
    - One idea per sentence. About 60 to 110 words, which is 20 to 40 seconds at the style's pace.
    - Name real things: the product, the number, the place. Each fact needs a source; list them under `## Notes` with what each page could show.
-   - Write numbers as digits when they matter on screen ("3 of my 5 plants", "21 days"). A number of 10 or more can count up on its page; 1 to 9 show whole, because counting up to 3 would flash 1 and 2 under the words first.
+   - Write numbers as digits when they matter on screen ("3 of my 5 plants", "21 days"). A number of 20 or more can count up on its page, from 10; 1 to 19 show whole, because counting up to 3 would flash 1 and 2 under the words first, and counting to 12 would flash 10 and 11. A year such as 2024 always shows whole.
    - End on the closing line from the brief. A comment call to action says the keyword ("Comment GROW and I'll send you the checklist."); a follow says "Follow for more." in the creator's words. That line becomes the closing page.
 3. Put the narration through the `humanizer` skill in embedded mode. Keep every fact, number, name and the call-to-action wording. Use no em or en dashes.
 4. Save `work/<video>/script.md` in the shape the brief prints and show it to the creator.
@@ -89,7 +89,7 @@ Pick the pose for what the phrase means:
 | `mind_blown` | a big number or a surprise |
 | `thumbs_up` | a payoff that works |
 | `celebrate` | a win, with a burst of sparkles |
-| `hold_card` | a checklist, a plan, the thing they get |
+| `hold_card` | a checklist, a plan, the thing they get. Give the page a card prop: its words go on the card the character holds up. The draft picks this pose only when the pack measured that card. Without one, a hold_card page with a card is refused by `beats.py --check`, `install.py` and `check.py`, because the card would drop in beside a blank card: pick another pose for the card, or draw hold_card again with a large plain white card and pack again |
 | `typing` | writing, a prompt, a search, a message |
 | `wave` | hello and goodbye |
 | `idle` | the close: a big head-and-shoulders punch-in where the mouth does the work; or when nothing else fits |
@@ -99,9 +99,9 @@ Props:
 
 | Prop | What arrives |
 |---|---|
-| `card: <a few words>` or `card: assets/<file>.png` | a white receipt card from the side the pose points to, or dropping from the top |
+| `card: <a few words>` or `card: assets/<file>.png` | a white receipt card from the side the pose points to, or dropping from the top. On a `hold_card` page the words, or the picture, go on the card the character holds up instead |
 | `stamp` or `stamp: <TEXT>` | a stamp slams down beside the head with a thud (the page's accent word by default) |
-| `count` | one number in the headline counts up: the accented one, or the first. Only a number of 10 or more counts, and it counts up from 10; 1 to 9 show whole, and so does any number on the first page, so frame 0 reads right. `check.py` notes a count it left whole |
+| `count` | one number in the headline counts up: the accented one, or the first. Only a number of 20 or more counts, and it counts up from 10; 1 to 19 show whole, and so do a year such as 2024 and any number on the first page, so frame 0 reads right. `check.py` notes a count it left whole |
 | `burst` | sparkles burst around the head |
 | `bubble: <text>` | a speech bubble by the head, such as `?` or `!` |
 | `cta` | the closing call to action (one page, made from the closing line) |
@@ -114,7 +114,7 @@ These are the house rules of the style. They are what makes it work, so keep the
 - Two flat fields, the creator's `--field-dark` and `--field-light`, each with a faint dot grid. The field flips on every page with a push and speed lines, and a whoosh lands on every flip. Nothing sits still: a new page, pose and field about every 1.5 to 2.5 seconds.
 - The headline is the keyword of the spoken phrase, at most four words, in `--font-display` capitals at the heaviest weight the font has, fitted to the width from y 190 down to about y 620. Sizes mix inside a lockup: a short word set huge under a smaller line reads well. One accent word at most, on an accent plate. There is no caption track: the headlines carry the words.
 - The character is big and cropped at the waist. The stage measures the waist from the idle drawing (just under the hands, arms down) and shows the character down to it at the largest scale from 8 down (6 to 8 is the look) that keeps the crown at y 960 or lower, so a big-headed character still shows its shoulders and chest, not just hair and face. A white sticker outline 12 px wide follows the silhouette, with a 3 px edge in the ink colour on the light field, built from the sprite's own pixels so it stays hard. The pose always stays inside x 90 to 990, and the mouth moves with the voice.
-- A new pose every page, chosen for meaning. What arrives on screen is caused by the pose: it points and the card comes from that side; it thinks and a question mark pops up; a stamp lands and the character flinches; it celebrates and sparkles burst. Cards sit between the headline and the head, and tuck behind the head when they reach down to it.
+- A new pose every page, chosen for meaning. What arrives on screen is caused by the pose: it points and the card comes from that side; it holds up a card and the words are written on it; it thinks and a question mark pops up; a stamp lands and the character flinches; it celebrates and sparkles burst. Cards sit between the headline and the head, and tuck behind the head when they reach down to it.
 - Receipts are real: a screenshot of the actual page, the product's real mark, a number with its source. A card holds about six words at most, at 26 px or larger. Drawn objects and props are fine when nothing real exists; never invent a number, a quote, a review or a product screen.
 - The close is a punch-in: the character grows to scale 10 to 12 with the bottom of its mouth at y 1660, well inside the frame and clear of the phone's caption area, its head tucked behind a white card in front of it. The card shows the creator's avatar (their logo, or their initial on the accent), their name and their Instagram handle with its @ (only the Instagram handle; with none, the name alone). A follow call to action presses the Follow button on the spoken "follow". A comment call to action types the keyword into a comment box on the spoken keyword and presses Post. A pose too wide for the close gives way to idle; when even that cannot be scale 10, `check.py` prints a note saying why.
 - Sound: the voice is forward at -13 LUFS. A whoosh on every field flip and a thud on every stamp and press, both made by `kit.sfx` from numbers. The bed, when the creator has music in `me/music/`, sits at least 15 dB under the voice (`ship.py` puts it 18 dB under) and fades out at the end. The Reel ends on the last word.
@@ -136,11 +136,12 @@ Stage.page(5, { lines: ["3 OF 5", "*PLANTS*"], char: { pose: "celebrate" } });
 
 - `c.T("word")` is when a word is said (`"phrase#2"` for its second time, `c.T.e(...)` for its end); `c.keyAt` is when the pose lands; `c.t0` and `c.t1` are the page's start and end. Time everything from these, never from typed seconds.
 - `c.zone` is the free space between the headline and the head. `c.side` is where the pose points. `c.back` is behind the character and `c.front` in front of it.
-- `Stage.card`, `Stage.stamp`, `Stage.bubble` and `Stage.chip` build and animate in one call. `c.A` has the motion helpers (`pop`, `rise`, `slide`, `drop`, `slam`, `punch`, `shake`, `count`, `burst`). `c.A.count` follows the same rule as the prop: under 10 it leaves the number whole, and 10 or more counts up from 10, unless you give it a starting number. `c.hit("thud", t)` adds a sound to `hits.json`.
+- `Stage.card`, `Stage.stamp`, `Stage.bubble` and `Stage.chip` build and animate in one call. `c.A` has the motion helpers (`pop`, `rise`, `slide`, `drop`, `slam`, `punch`, `shake`, `count`, `burst`). `c.A.count` follows the same rule as the prop: under 20 it leaves the number whole, and 20 or more counts up from 10, unless you give it a starting number. `c.hit("thud", t)` adds a sound to `hits.json`.
 - Every motion is a `fromTo` with both ends given. A value set only in the from-vars never applies in the render.
 - Keep everything inside x 90 to 990. The receipt layers are clipped just inside those lines, so anything that strays shows cut off.
 - A picture a scene uses is saved under `build/sources/` with its URL and date in `build/sources/SOURCES.md`, then copied into `build/hf/assets/`: HyperFrames loads only files inside the project folder.
 - `Stage.page(n, { prop: "none" })` turns a page's prop off; `char: { scale: 6, x: 600 }` moves the character (it is kept inside the safe lines).
+- `Stage.heldCard(c, { text: "..." })` or `{ img: "assets/<file>.png" }` writes on the card a `hold_card` pose holds up, fitted to its clear face at 26 px or larger. `c.held` is that face on screen, or null when the pack measured no card. A card prop on a `hold_card` page does this by itself.
 
 The full list of what `c` holds is at the top of `stage.js`.
 
@@ -185,6 +186,7 @@ Run `install.py` again after any change to the voice-over, `words.json`, `beats.
 - A pose that is too wide for scale 6 (both arms out) shrinks to fit, and `check.py` notes it. Pick a narrower pose for that page instead.
 - The closing punch-in needs a compact pose. When the page's pose is too wide for scale 10 to 12 the close uses idle, and when the head cannot fit between the card and the mouth line at scale 10, it uses a smaller scale with a note saying why.
 - A headline of four long words gets small. Cut it to the two words that carry the phrase.
+- A `hold_card` page shows a blank card when its prop is not a card (`check.py` notes it). When the pack measured no card on the pose, a `hold_card` page with a card is refused by `beats.py --check`, `install.py` and `check.py`. Give the page another pose, or draw `hold_card` again with a large plain white card and pack again.
 - A page shorter than about half a second flashes by. Join it to the page next to it in `beats.json`.
 - HyperFrames keeps a frame cache in the system temp folder (`hyperframes-extract-cache-*`), which is safe to delete when no render is running.
 - After `ship.py` passes, delete `build/picture.mp4` and `build/edit.mov` once the creator has signed off; keep `vo.m4a`, `words.json`, `beats.json` and `build/hf/`.

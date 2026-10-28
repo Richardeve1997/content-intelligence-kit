@@ -614,19 +614,139 @@ def _smile_marked_narrow():
     return rgba, marked, [(x + OX, y + OY) for x, y in tips], MOUTH, OUTLINE
 
 
-def test_an_open_mouth_paints_over_all_of_the_drawn_mouth_not_just_the_marked_box():
-    """The tips of a smile drawn wider than the marked box are painted over when the mouth opens, and the mouth
-    patch is big enough to hold them, so they never float beside the opening."""
-    rgba, face, tips, _, outline = _smile_marked_narrow()
+def _mouth_cells(patch, skin):
+    """Which cells of a mouth patch belong to the mouth: anything opaque that is not skin."""
+    return np.array([[a > 0 and tuple(int(v) for v in c) not in skin for c, a in zip(row[..., :3], row[..., 3])] for row in patch])
+
+
+def test_an_open_mouth_keeps_the_drawn_mouths_width_and_corners():
+    """The open states are drawn from the drawn mouth's own shape, not from the marked box: they span the smile's
+    full width, its raised tips stay as the corners, and the opening reaches up to them, so no tip ever floats
+    beside a narrower opening."""
+    from character_sprites import OX
+
+    rgba, face, tips, _, _ = _smile_marked_narrow()
+    skin = faces.skin_colours(rgba, face.skin)
+    first, last = 19 + OX, 36 + OX  # the drawn smile, tip to tip
     states = faces.face_states(rgba, face, open_rows=2)
     for name in ("mouth_mid", "mouth_open"):
         rect, patch = states.rects[name], states.patches[name]
+        mouth = _mouth_cells(patch, skin)
+        cols = np.nonzero(mouth.any(0))[0] + rect.x
+        assert (cols.min(), cols.max()) == (first, last), f"{name} spans x {cols.min()} to {cols.max()}, the smile {first} to {last}"
+        assert mouth.any(0)[first - rect.x : last - rect.x + 1].all(), f"{name} has a gap in it: a tip floats"
         for x, y in tips:
-            assert rect.x <= x < rect.x1 and rect.y <= y < rect.y1, f"{name} patch {rect} misses the tip at {(x, y)}"
-            assert tuple(int(v) for v in patch[y - rect.y, x - rect.x, :3]) != outline, f"{name} keeps the tip {(x, y)}"
+            assert mouth[y - rect.y, x - rect.x], f"{name} lost the corner at {(x, y)}"
+            assert mouth[y + 1 - rect.y, x - rect.x], f"{name}: the opening does not reach the corner at {(x, y)}"
     closed = states.patches["mouth_closed"]
     rect = states.rects["mouth_closed"]
     assert (closed == rgba[rect.y : rect.y1, rect.x : rect.x1]).all(), "the closed mouth is still the sprite as drawn"
+
+
+def test_the_opening_is_as_wide_as_the_drawn_mouth_not_the_marked_box():
+    """A box marked tighter than the mouth is drawn no longer narrows the mouth when it opens: the inside of the
+    open mouth spans nearly the whole drawn width, where it used to be about 72 percent of the box."""
+    from character_sprites import PUPIL  # the sprite's darkest colour, which fills the inside of an open mouth
+
+    rgba, face, _, _, _ = _smile_marked_narrow()
+    states = faces.face_states(rgba, face, open_rows=2)
+    inside = (states.patches["mouth_open"][..., :3] == PUPIL).all(2).any(0)
+    assert inside.sum() >= 16, f"the inside of the open mouth is only {int(inside.sum())} cells wide on an 18 cell smile"
+
+
+def test_the_open_mouth_shows_teeth_under_its_top_edge():
+    """The fully open mouth shows a row of teeth, in the sprite's lightest colour, right under the mouth's top edge
+    and across most of its width. The half open mouth shows none."""
+    from character_sprites import EYE_WHITE
+
+    rgba, face, _, _, _ = _smile_marked_narrow()
+    skin = faces.skin_colours(rgba, face.skin)
+    states = faces.face_states(rgba, face, open_rows=2)
+    open_ = states.patches["mouth_open"]
+    teeth = (open_[..., :3] == EYE_WHITE).all(2)
+    assert teeth.any(), "the open mouth shows no teeth"
+    assert teeth.any(0).sum() >= 7, "the teeth cover less than 40 percent of an 18 cell smile"
+    for y, x in zip(*np.nonzero(teeth)):
+        assert y >= 1 and tuple(int(v) for v in open_[y - 1, x, :3]) not in skin, f"the tooth at {(x, y)} is not under the top edge"
+    assert not (states.patches["mouth_mid"][..., :3] == EYE_WHITE).all(2).any(), "the half open mouth shows teeth"
+
+
+def test_the_half_open_mouth_lowers_the_bottom_edge_and_keeps_the_top():
+    """Half open, the mouth keeps the drawn top edge and reaches lower than the drawn mouth did, closed by the lower
+    lip in the mouth's own colour: the drawn mouth opens rather than being replaced by a block."""
+    from character_sprites import OX
+
+    rgba, face, _, lip, _ = _smile_marked_narrow()
+    skin = faces.skin_colours(rgba, face.skin)
+    states = faces.face_states(rgba, face, open_rows=2)
+    rect = states.rects["mouth_mid"]
+    x = 27 + OX - rect.x  # a column through the middle of the smile
+
+    def run(name):
+        rows = np.nonzero(_mouth_cells(states.patches[name], skin)[:, x])[0]
+        return int(rows.min()), int(rows.max())
+
+    closed_top, closed_bottom = run("mouth_closed")
+    mid_top, mid_bottom = run("mouth_mid")
+    assert mid_top == closed_top, "the top edge moved"
+    assert mid_bottom >= closed_bottom + 1, "the half open mouth is no deeper than the closed one"
+    assert tuple(int(v) for v in states.patches["mouth_mid"][mid_bottom, x, :3]) == lip, "no lower lip closes the opening"
+
+
+def test_a_hand_marked_box_keeps_a_touching_nose_out_of_the_mouth():
+    """A nose drawn in the mouth's own colour, down to the mouth, is not the mouth. With the box marked by hand
+    exactly on the drawn mouth, only strokes that leave the box at its sides are followed (a smile's tips), so the
+    open states change nothing above the box and the patch never grows up into the nose."""
+    from character_sprites import OUTLINE, OX, OY
+
+    rgba, _ = draw_figure("idle", nose=(3, 7), mouth=OUTLINE)
+    box = faces.Box(24 + OX, 29 + OY, 8, 2)  # exactly the drawn mouth
+    face, _ = faces.measure(rgba, {"mouth": [box.x, box.y, box.w, box.h]})
+    states = faces.face_states(rgba, face, open_rows=3)
+    for name in ("mouth_mid", "mouth_open"):
+        rect, patch = states.rects[name], states.patches[name]
+        assert rect.y >= box.y, f"{name} patch {rect} grows up above the marked box into the nose"
+        for y in (27, 28):  # the nose's last two rows, touching the mouth
+            for x in (27, 28, 29):
+                cy, cx = y + OY, x + OX
+                if rect.y <= cy < rect.y1 and rect.x <= cx < rect.x1:
+                    assert tuple(int(v) for v in patch[cy - rect.y, cx - rect.x, :3]) == OUTLINE, f"{name} changed the nose at {(x, y)}"
+
+
+def _tile_in(board: np.ndarray, tile: np.ndarray) -> bool:
+    """Whether `tile` appears, pixel for pixel, somewhere on `board` (both RGB arrays)."""
+    th, tw = tile.shape[:2]
+    bh, bw = board.shape[:2]
+    if th > bh or tw > bw:
+        return False
+    rows, cols = bh - th + 1, bw - tw + 1
+    likely = (board[:rows, :cols] == tile[0, 0]).all(2)
+    likely &= (board[th - 1 :, tw - 1 :][:rows, :cols] == tile[-1, -1]).all(2)
+    likely &= (board[th // 2 :, tw // 2 :][:rows, :cols] == tile[th // 2, tw // 2]).all(2)
+    for y, x in zip(*np.nonzero(likely)):
+        if (board[y : y + th, x : x + tw] == tile).all():
+            return True
+    return False
+
+
+def test_the_face_board_shows_the_states_at_the_close_ups_scale(tmp_path):
+    """The end of a mini me video shows the face at scale 11, so the board shows the four states at that size too,
+    and a creator judges the mouth at the size they will see it."""
+    from character_sprites import FakeProvider
+    from kit.character import sheet, store
+
+    folder = tmp_path / "character"
+    sheet.start(folder, description="a cheerful example character", outfit="a blue shirt and grey trousers", colours=24)
+    sheet.make(folder, FakeProvider(scale=4))  # measures the face and writes the face board
+    canvas = faces.front_canvas(folder, store.load(folder))
+    face, _ = faces.measure(canvas, None)
+    cells = faces.close_up_cells(canvas, faces.face_states(canvas, face, open_rows=3))
+    assert [label for _, label, _ in cells] == ["Closed", "Half open", "Open", "Blink"]
+    assert faces.CLOSE_SCALE == 11
+    board = np.asarray(Image.open(folder / faces.BOARD).convert("RGB"))
+    for image, label, _ in cells:
+        tile = np.kron(image, np.ones((faces.CLOSE_SCALE, faces.CLOSE_SCALE, 1), np.uint8))
+        assert _tile_in(board, tile), f"the {label} state at scale {faces.CLOSE_SCALE} is not on the board"
 
 
 def test_an_open_mouth_keeps_the_lip_colour_the_mouth_is_drawn_with():
