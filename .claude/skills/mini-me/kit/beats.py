@@ -24,7 +24,8 @@ How a phrase is found: the words break at the end of a sentence or clause, at a 
 and before the closing call to action. A phrase holds at most four content words (small words such as
 "the" and "of" do not count), so a long one is split where it joins best: before a word like "because" or
 "in", after a comma, at a breath, keeping the halves even. A lone short word ("So,") joins the next phrase
-rather than flashing on its own. The headline is the whole phrase when it has four words or fewer, and
+rather than flashing on its own, unless it ends the sentence before it (a last word said after a pause), which
+joins the phrase it ends. The headline is the whole phrase when it has four words or fewer, and
 otherwise its best run of four words (the most content words, a number when there is one, the later run on a
 tie). Small words at either end are dropped when two content words are left. From the sentence with the word
 "follow" (or the comment keyword) the rest of the narration is one closing page.
@@ -180,14 +181,24 @@ def _split(words, group: list[int]) -> list[list[int]]:
     return _split(words, group[:best]) + _split(words, group[best:])
 
 
+def _ends_sentence(word: transcribe.Word) -> bool:
+    return word.text.rstrip().endswith((".", "!", "?"))
+
+
 def _join_short(words, groups: list[list[int]]) -> list[list[int]]:
-    """A one-word phrase said in under SHORTEST seconds joins the next phrase (or the one before, at the end)."""
+    """A one-word phrase said in under SHORTEST seconds joins the next phrase (or the one before, at the end).
+
+    A short word that ends a sentence whose start is in the phrase before ("nobody knows ... why.", the last
+    word said after a pause) joins that phrase instead, so it never heads the next sentence's page."""
     out: list[list[int]] = []
     carry: list[int] = []
     for group in groups:
         group = carry + group
         carry = []
         short = len(group) == 1 and words[group[0]].end - words[group[0]].start < SHORTEST
+        if short and out and _ends_sentence(words[group[0]]) and not _ends_sentence(words[out[-1][-1]]):
+            out[-1] = out[-1] + group
+            continue
         if short:
             carry = group
             continue

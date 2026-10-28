@@ -143,6 +143,29 @@ def test_long_phrases_split_and_short_words_join():
     assert min(b - a for a, b in zip(starts, starts[1:])) >= 0.45
 
 
+def test_a_short_last_word_after_a_pause_stays_with_its_sentence():
+    """A voice often pauses before the last word of a sentence ("nobody knows ... why."). That word, said quickly,
+    ends the phrase before it. Joined to the next sentence instead, it would head that sentence's page."""
+    words = [Word("The", 0.10, 0.30), Word("basil", 0.34, 0.70), Word("wilted", 0.74, 1.10), Word("and", 1.14, 1.30),
+             Word("nobody", 1.34, 1.70), Word("knows", 1.74, 2.00), Word("why.", 2.42, 2.48),
+             Word("You", 2.78, 2.94), Word("did", 2.98, 3.14), Word("nothing", 3.18, 3.50), Word("wrong.", 3.54, 3.90)]
+    groups = beats.phrases(words, cta="follow")
+    said = [[words[i].text for i in group] for group in groups]
+    assert [i for group in groups for i in group] == list(range(len(words))), said
+    assert said[-1] == ["You", "did", "nothing", "wrong."], said
+    assert said[-2][-2:] == ["knows", "why."], said
+    pages = beats.build(words, cta="follow")["pages"]
+    assert "WHY" not in pages[-1]["text"], pages
+    assert "WHY" in pages[-2]["text"], pages
+
+
+def test_a_short_word_that_opens_a_sentence_still_joins_the_next_phrase():
+    words = [Word("It", 0.10, 0.30), Word("died.", 0.34, 0.80), Word("So,", 1.30, 1.40), Word("water", 1.80, 2.10),
+             Word("it", 2.14, 2.30), Word("less.", 2.34, 2.80)]
+    said = [[words[i].text for i in group] for group in beats.phrases(words, cta="follow")]
+    assert said == [["It", "died."], ["So,", "water", "it", "less."]], said
+
+
 def test_a_pause_starts_a_new_phrase():
     words = [Word("Fresh", 0.1, 0.4), Word("basil", 0.45, 0.8), Word("today", 1.4, 1.8), Word("friends", 1.85, 2.2)]
     assert beats.phrases(words, cta="follow") == [[0, 1], [2, 3]]
