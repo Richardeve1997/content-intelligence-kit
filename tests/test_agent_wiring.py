@@ -328,7 +328,7 @@ def test_claude_md_covers_what_the_kit_is_and_the_first_run_rule():
     assert "kit.config.load_profile()" in claude and "NotOnboarded" in claude
     assert 'say: "set me up"' in claude.lower()
     assert "offer onboarding before anything else" in claude
-    assert "bash bin/session_start.sh" in claude, "Codex has no hooks, so it runs the script itself"
+    assert "bash bin/session_start.sh" in claude, "the kit sets up no hooks for Codex, so it runs the script itself"
     assert "uv run python -c" not in claude, "setup comes from the session-start notice, not a command each session"
     assert "ProfileError" in claude
 
@@ -388,12 +388,26 @@ def test_agents_md_is_thin_and_points_at_claude_md():
     assert len(agents.splitlines()) <= 30
     assert "Read `CLAUDE.md`" in agents
     assert ".agents/skills" in agents and ".claude/skills" in agents
-    assert "Hooks do not run in Codex" in agents
+    assert "The kit sets up no hooks for Codex" in agents
+    assert "Hooks do not run in Codex" not in agents, "Codex can run hooks; this kit just sets none up for it"
     assert "Feedback section" in agents and "kit.rules.add" in agents
     assert "a check after each turn that asks for a rule" in agents
     assert "bash bin/session_start.sh" in agents
     for copied in ("Heavy jobs", "Posting", "What they say", "| They say |"):
         assert copied not in agents, "AGENTS.md must not copy CLAUDE.md"
+
+
+def test_agents_md_says_what_cannot_run_inside_codex_sandbox():
+    # Inside Codex's sandbox uv cannot write its cache, HyperFrames cannot reach the Keychain, Chromium cannot
+    # register its Mach port and nothing reaches the network. A sandbox error there is not a missing tool.
+    agents = text(ROOT / "AGENTS.md")
+    assert "sandbox" in agents
+    assert "UV_NO_CACHE=1 uv run python -m kit." in agents, "uv commands run with UV_NO_CACHE=1 in the sandbox"
+    assert "HyperFrames" in agents and "Chromium" in agents, "renders cannot run in the sandbox"
+    assert "internet" in agents, "nothing that reaches the internet runs in the sandbox"
+    assert "approve running that command outside the sandbox" in agents
+    assert "never means a tool is missing" in agents
+    assert "python3 bin/doctor.py" in agents, "the machine check says which rows it could not check"
 
 
 # --- the three skills this task adds --------------------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 # When setup is done and nothing has been learned yet, it prints nothing. It always exits 0.
 #
 # It uses only the shell, so it works before the kit's Python packages are installed.
-# Claude Code runs it when a session starts. Codex has no hooks, so Codex runs it by hand.
+# Claude Code runs it when a session starts. The kit sets up no hooks for Codex, so Codex runs it by hand.
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 me="${KIT_ME:-$root/me}"
