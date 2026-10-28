@@ -15,7 +15,7 @@ Each piece reaches your Mac in one of three ways. Bundled means its files are in
 | faster-whisper | MIT | fetched at setup with the Python tools; its speech model is downloaded at run time |
 | WhisperX | BSD-2-Clause | fetched at setup with the Python tools; its alignment models are downloaded at run time |
 | MediaPipe | Apache-2.0 | fetched at setup with the Python tools; its selfie segmentation model is downloaded at run time |
-| Robust Video Matting | GPL-3.0 | downloaded at run time by torch.hub, code and weights |
+| Robust Video Matting | GPL-3.0 | downloaded at run time: the code by torch.hub, the weights by the kit, which checks their SHA-256 |
 
 ## HyperFrames
 
@@ -86,9 +86,9 @@ When an alignment model cannot be had, the kit uses the speech model's own word 
 
 The UI story style cuts the creator out of their footage with a matte, which `kit/matte.py` makes in one of two ways.
 
-Robust Video Matting is the default. It is licensed under GPL-3.0: https://github.com/PeterL1n/RobustVideoMatting. The first time a video needs a matte, torch.hub downloads its code at commit `53d74c6826735f01f4406b5ca9075eee27bec094` and the `rvm_mobilenetv3` weights from the repository's v1.0.0 release into torch's own cache in your home folder. The kit runs it from there, and never copies or changes it.
+Robust Video Matting is the default. It is licensed under GPL-3.0: https://github.com/PeterL1n/RobustVideoMatting. The first time a video needs a matte, torch.hub downloads its code at commit `53d74c6826735f01f4406b5ca9075eee27bec094` into torch's own cache in your home folder. The kit downloads the weights itself: `rvm_mobilenetv3.pth`, from the pinned address of the repository's v1.0.0 release, into the same cache. It checks the file against the SHA-256 it holds before the model uses it, and never uses a file that does not match. The kit runs the code and the weights from there, and never copies or changes them.
 
-MediaPipe is the fallback, for when torch is missing or that download fails. The `mediapipe` package is licensed under Apache-2.0 (https://github.com/google-ai-edge/mediapipe), and setup installs it with the Python tools. Its selfie segmentation model, version 1 of the float16 `selfie_segmenter.tflite`, is downloaded from Google's model storage the first time it is needed. The kit checks it against the SHA-256 it holds and keeps it in `~/.cache/content-intelligence-kit/models/` (`KIT_MODEL_CACHE` moves it). The model card gives its licence as Apache-2.0.
+MediaPipe is the fallback, for when torch is missing or Robust Video Matting cannot load, as when one of its downloads fails. The `mediapipe` package is licensed under Apache-2.0 (https://github.com/google-ai-edge/mediapipe), and setup installs it with the Python tools. Its selfie segmentation model, version 1 of the float16 `selfie_segmenter.tflite`, is downloaded from Google's model storage the first time it is needed. The kit checks it against the SHA-256 it holds and keeps it in `~/.cache/content-intelligence-kit/models/` (`KIT_MODEL_CACHE` moves it). The model card gives its licence as Apache-2.0.
 
 ## Everything else
 
