@@ -1,0 +1,18 @@
+title = "Content Intelligence Kit"
+
+[extend]
+useDefault = true
+
+# The release manifest lists a SHA-256 beside every kit file path, and one path contains the word
+# "tokens". The default generic rule reads that pair as an API key. The manifest holds no secret.
+[[allowlists]]
+description = "Hashes in the release manifest"
+paths = ['''^\.kit-manifest\.json$''']
+
+# A made-up value in the config tests, reported in the commit that added it. It is allowed only for
+# that file in that commit, so the same kind of value anywhere else is still reported.
+[[allowlists]]
+description = "Made-up value in the config tests"
+condition = "AND"
+commits = ["72a81d43471e99b05f51861555866ac109f42115"]
+paths = ['''^tests/test_config\.py$''']
