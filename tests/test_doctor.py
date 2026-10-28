@@ -1489,6 +1489,53 @@ def test_fetch_gsap_stays_quiet_when_the_file_that_is_there_is_the_pinned_versio
     assert done.stdout.count("\n") == 1 and "Nothing to do" in done.stdout
 
 
+def test_fetch_gsap_names_the_version_asked_for_when_another_one_is_there(gsap_run):
+    gsap_run.vendor.mkdir(parents=True)
+    (gsap_run.vendor / "gsap.min.js").write_text(DIST.format(version="3.15.0"))
+    done = gsap_run(mode="offline", GSAP_VERSION="3.14.2")
+    assert done.returncode == 0 and gsap_run.requests() == []
+    assert "this kit pins GSAP 3.14.2" not in done.stdout, "the kit pins 3.15.0, which is the file that is there"
+    assert "it is GSAP 3.15.0, not the GSAP 3.14.2 asked for" in done.stdout and "delete the file" in done.stdout
+
+    (gsap_run.vendor / "gsap.min.js").write_text(DIST.format(version="3.14.2"))
+    assert gsap_run(mode="offline", GSAP_VERSION="3.14.2").stdout.count("\n") == 1, "the version asked for is there"
+
+
+# Swaps the downloaded package on disk for another one the moment the script has hashed it, the way a change
+# between the check and the use would. Loaded by the script's Python through PYTHONPATH.
+SWAP_AFTER_HASH = """
+import hashlib
+import shutil
+import sys
+
+_new = hashlib.new
+
+
+def _hash_then_swap(name, *args, **kwargs):
+    made = _new(name, *args, **kwargs)
+    if len(sys.argv) > 2 and sys.argv[2].endswith("gsap.tgz"):
+        shutil.copyfile({swap!r}, sys.argv[2])
+    return made
+
+
+hashlib.new = _hash_then_swap
+"""
+
+
+def test_fetch_gsap_unpacks_the_bytes_it_checked_and_never_reads_the_package_again(gsap_run, tmp_path):
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
+    swapped = tmp_path / "swapped"
+    make_registry(swapped, "3.15.0", dist=DIST.format(version="3.15.0") + "stealTheKeys();\n")
+    hook = tmp_path / "hook"
+    hook.mkdir()
+    (hook / "sitecustomize.py").write_text(SWAP_AFTER_HASH.format(swap=str(swapped / "gsap.tgz")))
+
+    done = gsap_run(PYTHONPATH=str(hook))
+
+    assert done.returncode == 0, done.stderr
+    assert (gsap_run.vendor / "gsap.min.js").read_text() == DIST.format(version="3.15.0")
+
+
 def test_third_party_notes_record_the_gsap_version_and_how_it_is_checked(gsap_run):
     gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
     gsap_run()

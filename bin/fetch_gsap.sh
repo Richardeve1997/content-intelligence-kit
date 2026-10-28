@@ -41,7 +41,11 @@ if [ -s "$DEST" ]; then
   HAVE="$(head -c 300 "$DEST" | grep -o 'GSAP [0-9][0-9.]*' | head -n 1 | cut -d ' ' -f 2 || true)"
   echo "fetch_gsap: $SHOWN already present ($(wc -c < "$DEST" | tr -d ' ') bytes). Nothing to do."
   if [ -n "$HAVE" ] && [ "$HAVE" != "$GSAP_VERSION" ]; then
-    echo "fetch_gsap: it is GSAP $HAVE and this kit pins GSAP $GSAP_VERSION. To switch, delete the file and run bash bin/fetch_gsap.sh again."
+    if [ "$GSAP_VERSION" = "$PINNED_VERSION" ]; then
+      echo "fetch_gsap: it is GSAP $HAVE and this kit pins GSAP $PINNED_VERSION. To switch, delete the file and run bash bin/fetch_gsap.sh again."
+    else
+      echo "fetch_gsap: it is GSAP $HAVE, not the GSAP $GSAP_VERSION asked for. To switch, delete the file and run bash bin/fetch_gsap.sh again."
+    fi
   fi
   exit 0
 fi
@@ -98,6 +102,7 @@ fi
 python3 - "$TMP/meta.json" "$TMP/gsap.tgz" "$GSAP_VERSION" "$TMP/gsap.min.js" "$EXPECTED" <<'PY'
 import base64
 import hashlib
+import io
 import json
 import sys
 import tarfile
@@ -145,9 +150,10 @@ if not matched:
         "Run bash bin/fetch_gsap.sh again."
     )
 
-# 2. The package must be this version, and gsap.min.js must say so in its header.
+# 2. The package must be this version, and gsap.min.js must say so in its header. The bytes that were checked
+#    above are the ones unpacked: the file on disk is never read again.
 try:
-    with tarfile.open(tgz_path, "r:gz") as tar:
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         found = json.load(tar.extractfile("package/package.json")).get("version")
         body = tar.extractfile("package/dist/gsap.min.js").read()
 except Exception:
