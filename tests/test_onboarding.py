@@ -1699,6 +1699,13 @@ def test_the_machine_check_step_covers_the_hdr_row():
     assert "uv sync --group video --group research --inexact" in machine
 
 
+def test_the_machine_check_step_lets_a_row_not_checked_inside_codex_sandbox_stay():
+    machine = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[2][1]
+    may_stay = next(line for line in machine.splitlines() if "row can stay" in line)
+    assert "not checked inside Codex's sandbox" in may_stay
+    assert "outside the sandbox" in may_stay, "and it says how that row gets checked"
+
+
 def test_the_skill_says_in_steps_3_and_7_that_x_is_saved_as_twitter():
     found = step_sections(read(SKILLS / "onboard" / "SKILL.md"))
     for number in (3, 7):
