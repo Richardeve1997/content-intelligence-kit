@@ -7,6 +7,7 @@ repo). MediaPipe is the fallback. Either way the matte says which backend made i
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -137,3 +138,41 @@ def test_a_mask_with_a_channel_axis_is_flattened(tmp_path, monkeypatch):
     monkeypatch.setattr(matte, "_mediapipe_segmenter", lambda: with_channel)
     out = matte.matte(tiny_clip(tmp_path / "take.mp4"), tmp_path / "matte.mp4")
     assert frames(out) == (5, 96, 160)
+
+
+def test_the_model_downloads_are_pinned():
+    import re
+
+    repo, _, ref = matte.RVM_REPO.partition(":")
+    assert repo == "PeterL1n/RobustVideoMatting"
+    assert re.fullmatch(r"[0-9a-f]{40}", ref), "a full commit, not a branch"
+    assert "/latest/" not in matte.SELFIE_MODEL_URL and "/float16/1/" in matte.SELFIE_MODEL_URL
+    assert re.fullmatch(r"[0-9a-f]{64}", matte.SELFIE_MODEL_SHA256)
+
+
+def test_a_model_download_that_is_not_the_pinned_file_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
+    monkeypatch.setattr(matte.urllib.request, "urlretrieve", lambda url, to: Path(to).write_bytes(b"not the model"))
+    with pytest.raises(matte.KitError) as caught:
+        matte._selfie_model()
+    assert "not the expected file" in str(caught.value)
+    assert list((tmp_path / "models").iterdir()) == [], "nothing half-downloaded is left behind"
+
+
+def test_the_pinned_model_is_used_from_the_cache_without_a_download(tmp_path, monkeypatch):
+    import hashlib
+
+    content = b"pretend model bytes"
+    monkeypatch.setattr(matte, "SELFIE_MODEL_SHA256", hashlib.sha256(content).hexdigest())
+    monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
+    calls = []
+
+    def fetch(url, to):
+        calls.append(url)
+        Path(to).write_bytes(content)
+
+    monkeypatch.setattr(matte.urllib.request, "urlretrieve", fetch)
+    first = matte._selfie_model()
+    second = matte._selfie_model()
+    assert first == second and first.read_bytes() == content
+    assert calls == [matte.SELFIE_MODEL_URL], "downloaded once, then read from the cache"

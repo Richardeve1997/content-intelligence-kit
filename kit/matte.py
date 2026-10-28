@@ -23,6 +23,7 @@ Command line:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import subprocess
 import sys
@@ -34,13 +35,21 @@ from typing import Callable
 from kit import media
 from kit.config import KitError
 
-__all__ = ["KitError", "SELFIE_MODEL_URL", "main", "matte", "model_cache"]
+__all__ = ["KitError", "RVM_REPO", "SELFIE_MODEL_SHA256", "SELFIE_MODEL_URL", "main", "matte", "model_cache"]
 
+# Both downloads are pinned, so every machine runs the same code and weights.
+# Robust Video Matting: the upstream repo at a fixed commit (the head of master when this was written). Its
+# v1.0.0 tag cannot be used: that code imports a torchvision helper newer torchvision no longer has. torch.hub
+# checks a ref against the repo's branch and tag heads, which a fixed commit stops being once master moves,
+# so the load skips that check; the full commit id is what ties it to the upstream repo. The weights come
+# from the repo's v1.0.0 release.
+RVM_REPO = "PeterL1n/RobustVideoMatting:53d74c6826735f01f4406b5ca9075eee27bec094"
+# MediaPipe selfie segmenter: version 1 of the float16 model, checked against this SHA-256 after download.
 SELFIE_MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/"
+    "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/"
     "selfie_segmenter.tflite"
 )
-RVM_REPO = "PeterL1n/RobustVideoMatting"
+SELFIE_MODEL_SHA256 = "191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b"
 Segmenter = Callable[["object"], "object"]  # an RGB frame (H x W x 3, uint8) in, a 0..1 float mask (H x W) out
 
 
@@ -72,7 +81,8 @@ def _rvm_segmenter(device: str | None = None, downsample: float = 0.5) -> tuple[
         import torch
 
         device = _device(device)
-        model = torch.hub.load(RVM_REPO, "mobilenetv3", trust_repo=True, verbose=False).eval().to(device)
+        model = torch.hub.load(RVM_REPO, "mobilenetv3", trust_repo=True, skip_validation=True, verbose=False)
+        model = model.eval().to(device)
     state = [None, None, None, None]
 
     def segment(rgb):
@@ -85,18 +95,31 @@ def _rvm_segmenter(device: str | None = None, downsample: float = 0.5) -> tuple[
     return segment, device
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _selfie_model() -> Path:
-    path = model_cache() / "selfie_segmenter.tflite"
-    if not path.is_file() or path.stat().st_size == 0:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"Downloading the MediaPipe selfie model (Apache-2.0) into {path.parent} ...", flush=True)
-        part = path.with_suffix(".part")
-        try:
-            urllib.request.urlretrieve(SELFIE_MODEL_URL, part)
-        except OSError as problem:
-            part.unlink(missing_ok=True)
-            raise KitError(f"The MediaPipe model could not be downloaded ({problem}). Check the connection.") from None
-        part.replace(path)
+    """The pinned MediaPipe model file, downloaded once into the cache and checked against its SHA-256."""
+    path = model_cache() / "selfie_segmenter_float16_v1.tflite"
+    if path.is_file() and _sha256(path) == SELFIE_MODEL_SHA256:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading the MediaPipe selfie model (Apache-2.0) into {path.parent} ...", flush=True)
+    part = path.with_suffix(".part")
+    try:
+        urllib.request.urlretrieve(SELFIE_MODEL_URL, part)
+    except OSError as problem:
+        part.unlink(missing_ok=True)
+        raise KitError(f"The MediaPipe model could not be downloaded ({problem}). Check the connection.") from None
+    if _sha256(part) != SELFIE_MODEL_SHA256:
+        part.unlink(missing_ok=True)
+        raise KitError("The MediaPipe model that downloaded is not the expected file, so it was not used.")
+    part.replace(path)
     return path
 
 
