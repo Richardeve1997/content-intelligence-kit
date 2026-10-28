@@ -14,9 +14,10 @@ How it works, and why:
   names are aligned in their spoken form ("37" as "thirty seven", "21st.dev" as "twenty first dot dev")
   and folded back into the word as written. Without WhisperX, or for a language it has no model for,
   the speech model's own word times are used and a note says so.
-* For French, German, Spanish, Italian and Vietnamese, WhisperX's alignment model is licensed for
-  non-commercial use only, and a creator's videos are commercial use. The kit never loads those models: it
-  keeps the speech model's own word times for these languages, and a note says so.
+* A creator's videos are commercial use, so alignment runs only for a language whose default WhisperX model
+  has a licence known to allow that (ALIGNED_LANGUAGES). Every other language keeps the speech model's own
+  word times, and a note says so: French, German, Spanish, Italian and Vietnamese (CC BY-NC 4.0), Danish,
+  Hebrew, Hindi and Croatian (no clear licence), and any language WhisperX has no model for.
 
 Transcription is heavy, so it runs inside a heavy-job slot (kit.media.heavy_slot).
 
@@ -48,8 +49,8 @@ from kit import media
 from kit.config import KitError
 
 __all__ = [
+    "ALIGNED_LANGUAGES",
     "AudioProblem",
-    "NON_COMMERCIAL_ALIGNMENT",
     "NO_SPEECH_MODEL",
     "Word",
     "audio_samples",
@@ -75,13 +76,26 @@ _SPOKEN = re.compile(r"\w")
 _FLOOR_DB = -45.0
 _MIN_GAP = 0.28
 _PAD = 0.12
-# The languages whose default WhisperX alignment model is licensed CC BY-NC 4.0, for non-commercial use only: the
-# VoxPopuli models for French, German, Spanish and Italian, and nguyenvulebinh/wav2vec2-base-vi-vlsp2020 for
-# Vietnamese. The kit never loads them, so these languages keep the speech model's own word times.
-NON_COMMERCIAL_ALIGNMENT = {"fr": "French", "de": "German", "es": "Spanish", "it": "Italian", "vi": "Vietnamese"}
-NON_COMMERCIAL_NOTE = (
-    "note: the word alignment model for {name} may not be used commercially, so the word times come from the "
-    "speech model instead."
+# Word alignment runs only for these languages: WhisperX's default alignment model for each has a licence known to
+# allow commercial use, checked against its own source (torchaudio's notes for the English bundle, the model's card
+# on Hugging Face for the rest; Galician's card gives its licence in the text). Every other language keeps the
+# speech model's own word times, so a model that is CC BY-NC 4.0 or gives no clear licence is never loaded.
+ALIGNED_LANGUAGES = {
+    "en": "MIT",
+    **dict.fromkeys(
+        ("ar", "ca", "cs", "el", "eu", "fa", "fi", "gl", "hu", "id", "ja", "ka", "ko", "lv", "ml", "nl", "nn", "no",
+         "pl", "pt", "ro", "ru", "sk", "sl", "te", "tl", "uk", "ur", "zh"),
+        "Apache-2.0",
+    ),
+    "tr": "CC BY 4.0",
+    "sv": "CC0",
+}
+# Names for the languages in WhisperX's table that are left out, for the note. Any other language is named by code.
+_LEFT_OUT = {"fr": "French", "de": "German", "es": "Spanish", "it": "Italian", "vi": "Vietnamese", "da": "Danish",
+             "he": "Hebrew", "hi": "Hindi", "hr": "Croatian"}
+UNALIGNED_NOTE = (
+    "note: the word times for {name} come from the speech model, because no word alignment model for it is known "
+    "to allow commercial use."
 )
 
 
@@ -311,8 +325,12 @@ def chunk_text(samples) -> str:
     return _asr(samples, word_times=False)["text"]
 
 
+def _unaligned_note(language: str) -> str:
+    return UNALIGNED_NOTE.format(name=_LEFT_OUT.get(language) or f"this take's language ({language})")
+
+
 def _words_in(samples, offset: float, *, align: bool, language: str | None) -> tuple[list[Word], str | None]:
-    if not align or language in NON_COMMERCIAL_ALIGNMENT:
+    if not align or (language is not None and language not in ALIGNED_LANGUAGES):
         heard = _asr(samples, word_times=True, language=language)
         found = heard["language"] or language
         return [Word(w, round(offset + s, 3), round(offset + e, 3)) for w, s, e in heard["words"] if w], found
@@ -320,7 +338,7 @@ def _words_in(samples, offset: float, *, align: bool, language: str | None) -> t
     text, found_language = heard["text"], heard["language"] or language or "en"
     if not text:
         return [], found_language
-    if found_language in NON_COMMERCIAL_ALIGNMENT:  # its alignment model is not for commercial use, so never load it
+    if found_language not in ALIGNED_LANGUAGES:  # no alignment model known to allow commercial use, so none is loaded
         return _words_in(samples, offset, align=False, language=found_language)
     tokens = text.split()
     spoken = [spoken_form(token) for token in tokens]
@@ -359,8 +377,8 @@ def words(
         for a, b in chunks:
             piece, language = _words_in(samples[int(a * SR) : int(b * SR)], a, align=align, language=language)
             found += [w for w in piece if _SPOKEN.search(w.text) and not any(d0 <= w.start <= d1 for d0, d1 in drop)]
-            if align and not told and language in NON_COMMERCIAL_ALIGNMENT:
-                print(NON_COMMERCIAL_NOTE.format(name=NON_COMMERCIAL_ALIGNMENT[language]), flush=True)
+            if align and not told and language and language not in ALIGNED_LANGUAGES:
+                print(_unaligned_note(language), flush=True)
                 told = True
     return sorted(found, key=lambda w: w.start)
 
