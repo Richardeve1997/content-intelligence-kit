@@ -2,13 +2,14 @@
 
 Renders, encodes, transcription and matting are heavy. On a laptop, running four of them at once fills
 the memory and the machine stalls, so every heavy job runs inside `heavy_slot()`: at most HEAVY_SLOTS
-(2 unless the environment says otherwise) run at once, across every process. A slot is a folder under
-work/.slots, made with mkdir, which is atomic, so two processes can never take the same one. A slot left
-behind by a process that died is taken back.
+(2 unless the environment says otherwise) run at once, across every process. Each slot is a lock file in
+the lock folder work/.slots, held with the operating system's file lock. The system gives the lock to one
+process at a time and drops it the moment that process ends, even when it crashes, so a slot can never be
+held twice and a dead job never keeps one.
 
-A slot is held by a process, not by a call. A heavy step inside another one (a render inside a build)
-reuses the slot it is already in, and so does any program it starts, because the slot's path travels in
-the KIT_HEAVY_SLOT environment variable.
+A slot is held by a process, not by a call or a thread: threads in one process share its one slot. A heavy
+step inside another one (a render inside a build) reuses the slot it is already in, and so does any program
+it starts, because the slot's path travels in the KIT_HEAVY_SLOT environment variable.
 
 Command line:
 
@@ -56,7 +57,6 @@ HEAVY_SLOTS = 2  # the default when the HEAVY_SLOTS environment variable is not 
 MIN_FREE_GB = 5.0  # a heavy job does not start with less free disk than this
 SLOT_ENV = "KIT_HEAVY_SLOT"
 _GIB = 1024**3
-_RECLAIM_AFTER = 30.0  # seconds before a slot folder with no owner note counts as abandoned
 
 
 class NotEnoughDisk(KitError):
@@ -134,52 +134,49 @@ def _limit() -> int:
         return HEAVY_SLOTS
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # it exists, it is just someone else's
-    except OSError:
-        return False
-    return True
+if os.name == "nt":  # Windows is best effort: the same idea with msvcrt's byte lock
+    import msvcrt
 
-
-def _abandoned(slot: Path) -> bool:
-    """True when the process that holds this slot is gone."""
-    try:
-        owner = (slot / "owner").read_text(encoding="utf-8").split()
-    except FileNotFoundError:
+    def _lock(fd: int) -> bool:
         try:
-            return time.time() - slot.stat().st_mtime > _RECLAIM_AFTER
-        except FileNotFoundError:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
             return False
-    except OSError:
-        return False
-    try:
-        return not _alive(int(owner[0]))
-    except (IndexError, ValueError):
-        return True
+
+    def _unlock(fd: int) -> None:
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+
+else:
+    import fcntl
+
+    def _lock(fd: int) -> bool:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    def _unlock(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
-def _try_take(folder: Path, limit: int, label: str) -> Path | None:
+def _try_take(folder: Path, limit: int, label: str) -> tuple[Path, int] | None:
+    """The first free slot, locked and labelled, as (its lock file, the open descriptor). None when all are busy."""
     folder.mkdir(parents=True, exist_ok=True)
     for number in range(1, limit + 1):
-        slot = folder / f"slot{number}"
-        try:
-            slot.mkdir()
-        except FileExistsError:
-            if _abandoned(slot):
-                shutil.rmtree(slot, ignore_errors=True)
-                try:
-                    slot.mkdir()
-                except FileExistsError:
-                    continue
-            else:
-                continue
-        (slot / "owner").write_text(f"{os.getpid()} {time.strftime('%H:%M:%S')} {label}\n", encoding="utf-8")
-        return slot
+        path = folder / f"slot{number}.lock"
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        if not _lock(fd):
+            os.close(fd)
+            continue
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()} {time.strftime('%H:%M:%S')} {label}\n".encode("utf-8", "replace"))
+        return path, fd
     return None
 
 
@@ -189,7 +186,8 @@ def heavy_slot(*, label: str = "", timeout: float | None = None, poll: float = 5
 
     It waits for a slot when all of them are busy (printing one line to say so), and raises SlotTimeout
     if `timeout` seconds pass first. Once it has a slot it checks for MIN_FREE_GB of free disk, and
-    raises NotEnoughDisk (after giving the slot back) when there is less.
+    raises NotEnoughDisk (after giving the slot back) when there is less. The slot belongs to the process:
+    a nested call, another thread of the same process, and any program it starts all share it.
     """
     held = os.environ.get(SLOT_ENV)
     if held:
@@ -199,8 +197,8 @@ def heavy_slot(*, label: str = "", timeout: float | None = None, poll: float = 5
     folder, limit = _slots_dir(), _limit()
     label = label or " ".join(sys.argv[:1] + sys.argv[1:4])
     started, told = time.monotonic(), False
-    slot = _try_take(folder, limit, label)
-    while slot is None:
+    taken = _try_take(folder, limit, label)
+    while taken is None:
         if timeout is not None and time.monotonic() - started >= timeout:
             raise SlotTimeout(
                 f"All {limit} heavy-job slots stayed busy for {timeout:g} seconds. "
@@ -210,15 +208,20 @@ def heavy_slot(*, label: str = "", timeout: float | None = None, poll: float = 5
             print(f"Waiting for a heavy-job slot: {limit} heavy jobs are already running.", flush=True)
             told = True
         time.sleep(poll if timeout is None else max(0.01, min(poll, timeout)))
-        slot = _try_take(folder, limit, label)
+        taken = _try_take(folder, limit, label)
 
+    slot, fd = taken
     os.environ[SLOT_ENV] = str(slot)
     try:
         require_free(MIN_FREE_GB)
         yield slot
     finally:
         os.environ.pop(SLOT_ENV, None)
-        shutil.rmtree(slot, ignore_errors=True)
+        try:
+            os.ftruncate(fd, 0)
+            _unlock(fd)
+        finally:
+            os.close(fd)
 
 
 # --- probing ---------------------------------------------------------------------------------------

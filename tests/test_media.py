@@ -113,12 +113,27 @@ def test_require_free_defaults_to_five_gb(monkeypatch):
 # --- heavy slots --------------------------------------------------------------------------------------
 
 
-def test_a_slot_is_a_folder_while_held_and_gone_after(slots):
+def _locked_elsewhere(path) -> bool:
+    """True when another process cannot take the lock on this slot file."""
+    code = (
+        "import fcntl, os, sys\n"
+        "fd = os.open(sys.argv[1], os.O_RDWR)\n"
+        "try:\n"
+        "    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+        "except OSError:\n"
+        "    sys.exit(3)\n"
+    )
+    return subprocess.run([sys.executable, "-c", code, str(path)]).returncode == 3
+
+
+def test_a_slot_is_a_locked_file_while_held_and_free_after(slots):
     with media.heavy_slot() as held:
-        assert held.is_dir() and held.parent == slots
-        assert (held / "owner").read_text().split()[0] == str(os.getpid())
+        assert held.is_file() and held.parent == slots and held.name == "slot1.lock"
+        assert held.read_text().split()[0] == str(os.getpid())
         assert os.environ[media.SLOT_ENV] == str(held)
-    assert not held.exists()
+        assert _locked_elsewhere(held)
+    assert not _locked_elsewhere(held)
+    assert held.read_text() == ""
     assert media.SLOT_ENV not in os.environ
 
 
@@ -127,7 +142,8 @@ def test_a_nested_slot_in_the_same_process_does_not_take_a_second_one(slots, mon
     with media.heavy_slot() as outer:
         with media.heavy_slot(timeout=0.5) as inner:
             assert inner == outer
-        assert outer.is_dir(), "leaving the inner block must not free the outer slot"
+        assert _locked_elsewhere(outer), "leaving the inner block must not free the outer slot"
+        assert os.environ[media.SLOT_ENV] == str(outer)
 
 
 def test_a_child_process_inherits_the_slot(slots, monkeypatch):
@@ -177,15 +193,64 @@ def test_no_more_than_the_limit_run_at_once(slots, monkeypatch):
         pass
 
 
-def test_a_slot_left_by_a_dead_process_is_reclaimed(slots, monkeypatch):
+def test_a_slot_held_by_a_killed_process_is_free_at_once(slots, monkeypatch):
     monkeypatch.setenv("HEAVY_SLOTS", "1")
-    stale = slots / "slot1"
-    stale.mkdir(parents=True)
-    dead = subprocess.Popen([sys.executable, "-c", "pass"])
-    dead.wait()
-    (stale / "owner").write_text(f"{dead.pid} 00:00 something heavy\n")
-    with media.heavy_slot(timeout=2, poll=0.1) as held:
-        assert held == stale
+    code = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from kit import media\n"
+        f"media._slots_dir = lambda: Path({str(slots)!r})\n"
+        "media.MIN_FREE_GB = 0.0\n"
+        "with media.heavy_slot():\n"
+        "    print('held', flush=True)\n"
+        "    time.sleep(60)\n"
+    )
+    holder = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, cwd=ROOT)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        with pytest.raises(media.SlotTimeout):
+            with media.heavy_slot(timeout=0.3, poll=0.1):
+                pass
+        holder.kill()
+        holder.wait(10)
+        with media.heavy_slot(timeout=2, poll=0.1) as held:
+            assert held == slots / "slot1.lock"
+    finally:
+        holder.kill()
+        holder.stdout.close()
+        holder.wait(10)
+
+
+def _enter_and_leave(folder, log, rounds):
+    from pathlib import Path as P
+
+    from kit import media as m
+
+    m._slots_dir = lambda: P(folder)
+    m.MIN_FREE_GB = 0.0
+    for _ in range(rounds):
+        with m.heavy_slot(poll=0.005):
+            with open(log, "a") as out:
+                out.write(f"in {time.monotonic():.6f}\n")
+            time.sleep(0.02)
+            with open(log, "a") as out:
+                out.write(f"out {time.monotonic():.6f}\n")
+
+
+def test_contending_processes_never_hold_one_slot_together(slots, monkeypatch, tmp_path):
+    monkeypatch.setenv("HEAVY_SLOTS", "1")
+    log = tmp_path / "log.txt"
+    context = multiprocessing.get_context("spawn")
+    workers = [context.Process(target=_enter_and_leave, args=(str(slots), str(log), 5)) for _ in range(4)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(120)
+        assert worker.exitcode == 0
+    events = log.read_text().split()
+    kinds = events[0::2]
+    assert len(kinds) == 40
+    assert kinds == ["in", "out"] * 20, "two holders overlapped"
 
 
 def test_a_slot_checks_the_disk_before_the_job_starts(slots, monkeypatch):
@@ -194,7 +259,10 @@ def test_a_slot_checks_the_disk_before_the_job_starts(slots, monkeypatch):
     with pytest.raises(media.NotEnoughDisk):
         with media.heavy_slot():
             pass
-    assert not any(slots.glob("slot*")), "a refused job must give its slot back"
+    monkeypatch.setattr(media, "MIN_FREE_GB", 0.0)
+    monkeypatch.setenv("HEAVY_SLOTS", "1")
+    with media.heavy_slot(timeout=0.5, poll=0.05):
+        pass  # the refused job gave its slot back
 
 
 def test_the_command_line_runs_a_command_in_a_slot(slots, tmp_path):
