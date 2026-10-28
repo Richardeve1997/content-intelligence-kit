@@ -396,6 +396,34 @@ def test_codex_that_makes_no_picture_is_a_plain_error(me, tmp_path, monkeypatch)
     assert "usage limit reached" in str(caught.value)
 
 
+# codex exec repeats the prompt on stderr before its own error lines, and says each error twice.
+ECHOED_PROMPT = "user\nUse your image generation tool exactly once.\n---\nThe move:\nThe raised hand gestures while the character talks.\n---\n\n"
+
+
+def _codex_fails_with(monkeypatch, tmp_path, stderr):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty-home"))
+    monkeypatch.setattr(providers.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout="", stderr=stderr))
+    monkeypatch.setattr(providers.shutil, "which", lambda name: "/usr/local/bin/codex")
+    with pytest.raises(providers.ProviderError) as caught:
+        providers.get("codex").generate("The raised hand gestures while the character talks.", [], tmp_path / "out.png")
+    return str(caught.value)
+
+
+def test_codex_turned_away_by_a_limit_says_so_and_what_to_do(me, tmp_path, monkeypatch):
+    line = "ERROR: exceeded retry limit, last status: 429 Too Many Requests"
+    message = _codex_fails_with(monkeypatch, tmp_path, ECHOED_PROMPT + f"{line}\n{line}\n")
+    assert "raised hand" not in message, "the end of the prompt is not something Codex said"
+    assert message.count("429 Too Many Requests") == 1
+    assert "limit" in message and "nothing was drawn" in message and "run the same command again" in message
+
+
+def test_codex_that_fails_another_way_shows_its_own_error_and_not_the_prompt(me, tmp_path, monkeypatch):
+    message = _codex_fails_with(monkeypatch, tmp_path, ECHOED_PROMPT + "ERROR: unexpected status 500 Internal Server Error\n")
+    assert "raised hand" not in message
+    assert "Codex did not make a picture" in message and "500 Internal Server Error" in message
+    assert "run the same command again" not in message, "only a limit is worth waiting out"
+
+
 def test_codex_counts_as_ready_only_when_signed_in(monkeypatch):
     monkeypatch.setattr(providers.shutil, "which", lambda name: "/usr/local/bin/codex")
     for code, ready in ((0, True), (1, False)):

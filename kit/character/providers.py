@@ -166,6 +166,35 @@ CODEX_INSTRUCTIONS = (
     "When the image is saved, reply with only the full path of the saved image file."
 )
 _PICTURE = re.compile(r"(/[^\s'\"`<>()\[\]]+\.(?:png|jpg|jpeg|webp))", re.IGNORECASE)
+# Codex's words when the plan or the service is holding requests back for a while.
+_CODEX_LIMIT = re.compile(r"\b429\b|too many requests|usage limit|rate limit", re.IGNORECASE)
+
+
+def _codex_errors(*texts: str) -> list[str]:
+    """Codex's own error lines, each once and in order.
+
+    codex exec repeats the prompt on stderr before them, so the end of stderr is mostly prompt, and that is not
+    something Codex said.
+    """
+    found: list[str] = []
+    for text in texts:
+        for line in (text or "").splitlines():
+            line = line.strip()
+            if line.lower().startswith("error") and line not in found:
+                found.append(line)
+    return found
+
+
+def _codex_failure(reply: str, done: subprocess.CompletedProcess) -> ProviderError:
+    """One plain message for a Codex run that made no picture."""
+    errors = _codex_errors(done.stderr, done.stdout)
+    if any(_CODEX_LIMIT.search(line) for line in errors):
+        return ProviderError(
+            "Codex turned the request away because of a limit on your plan, so nothing was drawn. "
+            f"It said: {'; '.join(errors[-2:])}. Wait a while, then run the same command again."
+        )
+    said = errors[-3:] or (reply or done.stdout or done.stderr).strip().splitlines()[-6:]
+    return ProviderError("Codex did not make a picture. The last thing it said:\n" + "\n".join(said))
 
 
 @functools.lru_cache(maxsize=1)
@@ -243,8 +272,7 @@ class CodexProvider:
             reply = last.read_text(encoding="utf-8", errors="replace") if last.is_file() else ""
             picture = _find_codex_picture(reply + "\n" + done.stdout + "\n" + done.stderr, started, list(refs))
             if picture is None:
-                tail = "\n".join((done.stderr or done.stdout or reply).strip().splitlines()[-6:])
-                raise ProviderError(f"Codex did not make a picture. The last thing it said:\n{tail}")
+                raise _codex_failure(reply, done)
             return _save_png(picture.read_bytes(), Path(out))
         finally:
             shutil.rmtree(work, ignore_errors=True)
