@@ -300,3 +300,17 @@ def test_layout_help_wraps_its_usage_example():
     assert lines[first].rstrip().endswith("\\"), "the example breaks the way a shell command does"
     assert lines[first + 1].strip().startswith("--out layout.resolved.json"), lines[first + 1]
     assert max(len(line) for line in lines) <= 120
+
+
+def test_the_number_rule_reads_the_same_in_the_checklist_and_the_rubric():
+    """The real-things section says the spoken number wins and a fact with no spoken number shows the sourced
+    one. The handover checklist and the review rubric once said only "matches the spoken one"."""
+    ui, review = text(SKILLS["ui-story"]), text(SKILLS["review"])
+    assert "is the one the creator says; a fact they give no number for shows the sourced one" in ui
+    handover = ui.split("## Before handing over")[1]
+    checklist = next(line for line in handover.splitlines() if "number on screen" in line)
+    rubric = review.split("## The rubric")[1].split("## Common mistakes")[0]
+    item6 = next(line for line in rubric.splitlines() if line.startswith("6. "))
+    for line in (checklist, item6):
+        assert "is the one the creator says" in line and "no number for shows the sourced one" in line, line
+    assert "matches the spoken one" not in ui and "matches the number spoken" not in review

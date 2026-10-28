@@ -280,7 +280,7 @@ HyperFrames rules for the composition: one `index.html`, a transparent root, `da
 - [ ] Karaoke captions at y 1570 in every layout, light over the canvas, `caption_blink_check.py` reports 0
 - [ ] Tight cuts, `check_trims.py` passes, no pause over about 0.45 s between sentences
 - [ ] `check_static.py` passes; no bare face run over about 5 s
-- [ ] Every number on screen matches the spoken one, one fact shows one number on every card, and each traces to `build/sources/SOURCES.md`
+- [ ] Every number on screen is the one the creator says, and a fact they give no number for shows the sourced one; one fact shows one number on every card, and each traces to `build/sources/SOURCES.md`
 - [ ] The closer shows the creator's call to action from their profile
 - [ ] Nothing meaningful within 90 px of either side (`ig_safe_check.py` frames in `review/safe/`)
 - [ ] `ship.py` passed the speech gate; `postcheck.py` passes (1080x1920, 60 fps, -13 LUFS within 1 LU, true peak at or below -1.5 dBTP)
