@@ -182,6 +182,10 @@ def matte(video: Path, out: Path, *, backend: str = "auto", downsample: float = 
         raise KitError(f"{video.name} has no picture to matte.")
     rate = f"{info.fps:.6f}".rstrip("0").rstrip(".") if info.fps else "30"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # The frames go to a part file beside `out`, which takes its place only once every frame is in. A run that
+    # stops part way (a crash, ctrl-C, a closed laptop) then leaves no half matte at `out`, where prep.py would
+    # take it for a finished one, and keeps a matte that was already there.
+    part = out.with_name(f"{out.stem}.part{out.suffix}")
 
     with media.heavy_slot(label=f"matte {video.name}"):
         segment = _choose(backend, downsample)
@@ -191,10 +195,10 @@ def matte(video: Path, out: Path, *, backend: str = "auto", downsample: float = 
         )
         encoder = subprocess.Popen(
             ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "gray", "-s", f"{width}x{height}",
-             "-r", rate, "-i", "-", *media.encoder_args(), "-an", str(out)],
+             "-r", rate, "-i", "-", *media.encoder_args(), "-an", str(part)],
             stdin=subprocess.PIPE,
         )
-        size, count = width * height * 3, 0
+        size, count, read_all = width * height * 3, 0, False
         try:
             while True:
                 chunk = decoder.stdout.read(size)
@@ -210,6 +214,7 @@ def matte(video: Path, out: Path, *, backend: str = "auto", downsample: float = 
                 count += 1
                 if count % 600 == 0:
                     print(f"    {count} frames", flush=True)
+            read_all = True
         finally:
             decoder.stdout.close()
             decoder.wait()
@@ -218,8 +223,16 @@ def matte(video: Path, out: Path, *, backend: str = "auto", downsample: float = 
             except BrokenPipeError:
                 pass
             encoder.wait()
+            if not read_all:
+                part.unlink(missing_ok=True)
+    if decoder.returncode != 0:  # the frames ended because reading the video failed, not because it ended
+        part.unlink(missing_ok=True)
+        raise KitError(f"ffmpeg stopped reading {video.name} part way, so its matte was not written. "
+                       "Check that the video plays to the end, then run the matte again.")
     if encoder.returncode != 0 or count == 0:
+        part.unlink(missing_ok=True)
         raise KitError(f"The matte for {video.name} could not be written.")
+    os.replace(part, out)
     print(f"matte: {count} frames -> {out}")
     return out
 

@@ -214,6 +214,40 @@ def test_check_trims_catches_a_cut_through_a_word(tmp_path):
     assert "SPEECH-LIKE" in check.stdout
 
 
+# --- the restart check ------------------------------------------------------------------------------------
+
+
+def restart_check(tmp_path, monkeypatch, words, heard):
+    """Run check_restarts.py on a cut heard as one piece, `heard`, with `words` as its words file."""
+    restarts = load("check_restarts")
+    monkeypatch.setattr(restarts.transcribe, "audio_samples", lambda path: np.zeros(16000 * 5, np.float32))
+    monkeypatch.setattr(restarts.transcribe, "speech_chunks", lambda samples, **options: [(0.4, 4.6)])
+    monkeypatch.setattr(restarts.transcribe, "chunk_text", lambda samples: heard)
+    cut = tmp_path / "cut.wav"
+    cut.write_bytes(b"")
+    path, _ = word_file(tmp_path, words=words)
+    monkeypatch.setattr(sys, "argv", ["check_restarts.py", str(cut), "--words", str(path)])
+    assert restarts.main() == 0
+    return path
+
+
+def test_check_restarts_flags_a_word_said_twice_in_a_row(tmp_path, monkeypatch, capsys):
+    """A restart after a pause too short to split on is heard as one clean sentence, but the words file has
+    the restarted word twice in a row."""
+    words = "booking booking forms work better when you know the steps".split()
+    path = restart_check(tmp_path, monkeypatch, words, "Booking forms work better when you know the steps.")
+    printed = capsys.readouterr().out
+    second = json.loads(path.read_text())["words"][1]
+    assert "REPEATED WORD 'booking'" in printed
+    assert f"{second['s']:.2f}s" in printed, "it says where the clean restart starts"
+    assert printed.strip().endswith("1 possible restart(s)")
+
+
+def test_check_restarts_passes_words_that_never_repeat(tmp_path, monkeypatch, capsys):
+    restart_check(tmp_path, monkeypatch, LINE, " ".join(LINE))
+    assert capsys.readouterr().out.strip().endswith("0 possible restart(s)")
+
+
 # --- authored times --------------------------------------------------------------------------------------------
 
 
@@ -248,6 +282,33 @@ def test_seg_starts_finds_each_join(tmp_path):
     assert done.returncode == 0, done.stderr
     starts = json.loads((tmp_path / "seg.json").read_text())["actual_starts"]
     assert starts[0] == 0.0 and starts[1] == pytest.approx(1.0, abs=2 / 60)
+
+
+def test_measure_crowns_reads_the_crown_at_each_sample_time(tmp_path):
+    """The crowns are kept or dropped by the time of each sample, so each sample must be the frame at that time."""
+    measure = load("measure_crowns")
+    matte = tmp_path / "matte.mp4"  # the head sinks 100 px a second, so every moment has its own crown row
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=60:d=2",
+           "-vf", "geq=lum='if(gte(Y\\,200+100*T)\\,255\\,0)':cb=128:cr=128", "-c:v", "libx264", "-qp", "0",
+           "-pix_fmt", "yuv420p", matte)
+    found = measure.crowns(matte, 0.5)
+    assert [t for t, _ in found] == [0.0, 0.5, 1.0, 1.5]
+    for t, row in found:
+        assert abs(row - (200 + 100 * t)) <= 2, f"the sample at {t}s has the crown of a later frame (row {row})"
+
+
+def test_measure_crowns_starts_its_samples_at_zero_when_the_picture_starts_late(tmp_path):
+    """In a file whose sound starts before its picture, the picture keeps its late start. The first samples are
+    the first frame, standing in for the time before it, not a frame from a sample later."""
+    measure = load("measure_crowns")
+    matte = tmp_path / "late.mov"  # the picture starts 0.3 s after the sound; the head sinks 100 px a second
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=60:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+           "-filter_complex", "[0:v]geq=lum='if(gte(Y\\,200+100*T)\\,255\\,0)':cb=128:cr=128,setpts=PTS+0.3/TB[v]",
+           "-map", "[v]", "-map", "1:a", "-t", "2.3", "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p",
+           "-c:a", "pcm_s16le", matte)
+    found = dict(measure.crowns(matte, 0.5))
+    assert abs(found[0.0] - 200) <= 2, f"the sample at 0s is a later frame (row {found[0.0]})"
+    assert abs(found[1.0] - 270) <= 2, "the frame shown at 1.0 s was drawn 0.7 s in"
 
 
 def test_every_kit_script_answers_help():

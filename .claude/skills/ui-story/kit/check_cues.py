@@ -7,18 +7,28 @@ time it was said and can fire before its scene opens. check_js.py catches the th
 catches both before you render, and names the phrase.
 
 It reads C('...') and E('...'), UIS.cue('...') and UIS.cueEnd('...') (index.html) and c("...") and e("...")
-(fill_times.py sources), each with an optional nth.
+(fill_times.py sources), each with an optional nth. It can only read a phrase written in the call itself: a
+helper such as `const at = (p) => C(p)` hides every phrase sent through it. Such a call is named in a WARN,
+and a page with scenes but no phrase it can read fails, because checking nothing is not a pass.
 
-    python check_cues.py <index.html | index.src.html> <base.words.json>   (exit 1 on a missing cue)
+    python check_cues.py <index.html | index.src.html> <base.words.json>   (exit 1 on a missing cue, or none)
 """
 import argparse
 import json
 import re
 import sys
 
+CUE = r"(?:\bUIS\.cue(?:End)?|\b[CEce])\("
+SCENE = re.compile(r"""class=["'][^"']*\bscene\b""")
+
 
 def norm(word):
     return re.sub(r"[^a-z0-9#]", "", str(word).lower())
+
+
+def hidden_cues(html):
+    """Cue calls that take a variable instead of a phrase, such as C(p, n) inside a helper."""
+    return sorted({m.group(0) for m in re.finditer(CUE + r"\s*[A-Za-z_$][\w$.]*\s*(?:,[^()]*)?\)", html)})
 
 
 def main():
@@ -29,7 +39,15 @@ def main():
     html = open(a.index, encoding="utf-8").read()
     words = json.load(open(a.words))["words"]
     ws = [norm(w["w"]) for w in words]
-    calls = re.findall(r"""(?:\bUIS\.cue(?:End)?|\b[CEce])\(\s*(['"])(.+?)\1\s*(?:,\s*(?:nth\s*=\s*)?(\d+))?\s*\)""", html)
+    calls = re.findall(CUE + r"""\s*(['"])(.+?)\1\s*(?:,\s*(?:nth\s*=\s*)?(\d+))?\s*\)""", html)
+    hidden = hidden_cues(html)
+    for call in hidden:
+        print(f"WARN {call} passes a variable, not a phrase, so the phrases sent through it are not checked here. "
+              "Write C('phrase') where the time is used.")
+    if not calls and SCENE.search(html):
+        print("FAIL no cue to check: this page has scenes but no C('phrase'), E('phrase'), UIS.cue('phrase') or "
+              'c("phrase") call, so nothing was checked. Write each cue with its phrase in the call.')
+        sys.exit(1)
     missing, ambiguous = [], set()
     for _, phrase, nth in calls:
         tokens = [norm(t) for t in phrase.split() if norm(t)]

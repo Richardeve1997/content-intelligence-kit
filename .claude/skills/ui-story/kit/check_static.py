@@ -35,6 +35,22 @@ def canvas_rgb():
         return None
 
 
+def frames(video, fps):
+    """The video sampled `fps` times a second at a quarter of its size, as an (n, H, W, 3) array. Sample k is the
+    frame at k/fps, the time a still run is reported at. ffmpeg's fps filter rounds to the nearest slot by default
+    and keeps the last frame of each, which would put every sample nearly half a slot later than its time, and it
+    starts counting at the first frame, which in a file whose sound starts first comes after 0, so the samples
+    are anchored at 0 (the first frame stands in for any time before it)."""
+    proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-vf",
+                             f"fps={fps}:round=up:start_time=0,scale={W}:{H}",
+                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    buf = proc.stdout.read()
+    proc.stdout.close()
+    proc.wait()
+    n = len(buf) // (W * H * 3)
+    return np.frombuffer(buf[: n * W * H * 3], dtype=np.uint8).reshape(n, H, W, 3).astype(np.int16)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Fail on a graphic zone that holds still too long.")
     ap.add_argument("video")
@@ -43,13 +59,8 @@ def main():
     a = ap.parse_args()
     canvas = canvas_rgb()
 
-    proc = subprocess.Popen(["ffmpeg", "-v", "error", "-i", a.video, "-vf", f"fps={a.fps},scale={W}:{H}",
-                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
-    buf = proc.stdout.read()
-    proc.stdout.close()
-    proc.wait()
-    n = len(buf) // (W * H * 3)
-    F = np.frombuffer(buf[: n * W * H * 3], dtype=np.uint8).reshape(n, H, W, 3).astype(np.int16)
+    F = frames(a.video, a.fps)
+    n = len(F)
 
     def is_canvas(pixels):
         if canvas is None:

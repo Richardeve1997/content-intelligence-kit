@@ -90,6 +90,33 @@ def test_check_cues_names_a_cue_that_was_never_spoken(tmp_path):
     assert "WARN 'basil' occurs 2x" in done.stdout
 
 
+def basil_words(tmp_path):
+    words = tmp_path / "words.json"
+    words.write_text(json.dumps({"words": [{"w": w, "s": i, "e": i + 0.5} for i, w in enumerate(
+        "the basil and the basil again".split())]}))
+    return words
+
+
+def test_check_cues_fails_when_the_scenes_have_no_cue_it_can_read(tmp_path):
+    """Cues passed through a helper are invisible to the check. Checking nothing is not a pass."""
+    page = tmp_path / "index.html"
+    page.write_text('<div id="root"><div class="scene" id="s1"></div></div>'
+                    "<script>const at = (p, n) => UIS.snap(C(p, n)); UIS.show(tl, '#s1', at('parsley'));</script>")
+    done = run_kit("check_cues.py", page, basil_words(tmp_path))
+    assert done.returncode == 1
+    assert "no cue" in done.stdout.lower()
+    assert "C(p, n)" in done.stdout, "it names the call that hides the phrases"
+
+
+def test_check_cues_warns_about_a_helper_next_to_cues_it_can_read(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text('<div id="root"><div class="scene" id="s1"></div></div>'
+                    "<script>const at = (p) => C(p); UIS.show(tl, '#s1', C('basil again'));</script>")
+    done = run_kit("check_cues.py", page, basil_words(tmp_path))
+    assert done.returncode == 0
+    assert "WARN" in done.stdout and "C(p)" in done.stdout
+
+
 # --- gates on the finished video --------------------------------------------------------------------------
 
 
@@ -123,6 +150,42 @@ def test_check_static_fails_a_canvas_that_holds_still(tmp_path, example_me):
            "-filter_complex", "[0:v][1:v]overlay=x='200+mod(t*140\\,300)':y=400", "-c:v", "libx264",
            "-pix_fmt", "yuv420p", moving)
     assert run_kit("check_static.py", moving, "--max", "3").returncode == 0
+
+
+def test_check_static_samples_the_frame_at_each_time_it_reports(tmp_path):
+    """A still run is reported by the times of its samples, so each sample must be the frame at that time."""
+    import subprocess
+
+    import numpy as np
+
+    static = load("check_static")
+    ramp = tmp_path / "ramp.mp4"  # brighter every frame, so each moment has its own grey
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=270x480:r=60:d=2", "-vf", "geq=lum='16+100*T':cb=128:cr=128",
+           "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", ramp)
+    samples = static.frames(ramp, 5)
+    for k in range(5):
+        exact = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{k / 5:.3f}", "-i", str(ramp), "-frames:v", "1",
+                                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+        grey = np.frombuffer(exact, np.uint8).astype(np.float32).mean()
+        assert abs(float(samples[k].mean()) - grey) < 4, f"the sample at {k / 5}s shows a later frame"
+
+
+def test_check_static_starts_its_samples_at_zero_when_the_picture_starts_late(tmp_path):
+    """In a file whose sound starts before its picture, the first sample is the first frame, not a later one."""
+    import subprocess
+
+    import numpy as np
+
+    static = load("check_static")
+    clip = tmp_path / "late.mov"  # the picture starts 0.3 s after the sound, brighter every frame
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=270x480:r=60:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+           "-filter_complex", "[0:v]geq=lum='16+100*T':cb=128:cr=128,setpts=PTS+0.3/TB[v]", "-map", "[v]",
+           "-map", "1:a", "-t", "2.3", "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", clip)
+    first = subprocess.run(["ffmpeg", "-v", "error", "-i", str(clip), "-map", "0:v", "-frames:v", "1", "-f", "rawvideo",
+                            "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    grey = np.frombuffer(first, np.uint8).astype(np.float32).mean()
+    samples = static.frames(clip, 5)
+    assert abs(float(samples[0].mean()) - grey) < 4, "the sample at 0s shows a later frame"
 
 
 def test_ig_safe_check_writes_the_marked_frames(tmp_path):
