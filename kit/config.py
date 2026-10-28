@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -511,10 +512,65 @@ def _error_sentences(error) -> Iterator[tuple[str, str]]:
         yield where, f"{where} is not valid.{_should(parts, rule)}"
 
 
+def _usable_amount(value: Any) -> bool:
+    """True for a number that is a real, finite amount. A whole number too big for a float is not."""
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
+
+
+def _cross_field_checks(data: Mapping[str, Any], failed: set[str]) -> Iterator[tuple[str, str]]:
+    """Checks that read two settings together: handles and comment platforms against platforms, and the cost caps.
+
+    A setting the schema already rejected is left alone here, so each mistake is reported once.
+    """
+    known = set(PLATFORMS)
+    platforms = data.get("platforms")
+    posting = None
+    if isinstance(platforms, list) and "platforms" not in failed:
+        posting = [name for name in platforms if isinstance(name, str) and name in known]
+
+    handles = data.get("handles")
+    if posting is not None and isinstance(handles, Mapping) and "handles" not in failed:
+        for platform in posting:
+            path = f"handles.{platform}"
+            value = handles.get(platform)
+            if path in failed or (isinstance(value, str) and value.strip()):
+                continue
+            yield path, (
+                f"{path} is empty, but {platform} is in platforms.{_should(('handles', platform))} "
+                f"If you do not post there, take {platform} out of platforms."
+            )
+
+    cta = data.get("cta")
+    comment = cta.get("comment_platforms") if isinstance(cta, Mapping) else None
+    if posting is not None and isinstance(comment, list) and "cta.comment_platforms" not in failed:
+        for platform in comment:
+            if isinstance(platform, str) and platform in known and platform not in posting:
+                yield "cta.comment_platforms", (
+                    f"cta.comment_platforms lists {platform}, which is not in platforms. "
+                    f"Add {platform} to platforms, or take it out of cta.comment_platforms."
+                )
+
+    research = data.get("research")
+    caps = research.get("cost_cap") if isinstance(research, Mapping) else None
+    if isinstance(caps, Mapping):
+        for platform, value in caps.items():
+            path = f"research.cost_cap.{platform}"
+            if path in failed or isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            if not _usable_amount(value):
+                yield path, (
+                    f"{path} is {_show(value)}, which is not a usable amount."
+                    f"{_should(('research', 'cost_cap', str(platform)))}"
+                )
+
+
 def _checks_beyond_the_schema(
     data: Mapping[str, Any], base: Path | None, failed: set[str]
 ) -> Iterator[tuple[str, str]]:
-    """Checks the schema cannot express: the time zone, the font files and the logo file."""
+    """Checks the schema cannot express: the time zone, the font files, the logo file and the settings that depend on each other."""
     timezone = data.get("timezone")
     if isinstance(timezone, str) and timezone and "timezone" not in failed and not _valid_timezone(timezone):
         yield "timezone", (
@@ -537,6 +593,8 @@ def _checks_beyond_the_schema(
         problem = _logo_problem(logo, base)
         if problem:
             yield "logo", f"logo {problem}"
+
+    yield from _cross_field_checks(data, failed)
 
 
 def profile_problems(data: Any, *, base: Path | None = None) -> list[str]:
