@@ -34,6 +34,10 @@ A new visual lands about every two seconds, the captions light up word by word i
 
 Mini me needs no filming. A pixel character of you, drawn from 3 to 5 photos or from a description, does the talking. You approve the character sheet and then each pose. In the video it stands big and cropped at the waist, takes a new pose on every page, and each spoken phrase lands as a giant keyword headline in your colours. The voice-over is your own phone recording, which is free, or an ElevenLabs voice with your key.
 
+[![Three moments from a mini me Reel: the opening headline, the character holding up a card with words on it, and the close, where the keyword is typed into a comment box.](docs/media/mini-me-example.gif)](docs/media/mini-me-example.mp4)
+
+A test Reel the kit made for a made-up creator. The loop links to the whole Reel, with its sound.
+
 ## Not included
 
 Version 1 leaves out:

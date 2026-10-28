@@ -1,6 +1,6 @@
 # Third-party software
 
-This file lists the software the kit depends on but does not own, where each piece comes from, and the terms it carries.
+This file lists the software the kit depends on but does not own, where each piece comes from, and the terms it carries. The last section covers the example video in `docs/media/`.
 
 Each piece reaches your Mac in one of three ways. Bundled means its files are in this repository. Fetched at setup means a setup command downloads it: `npm ci`, `bin/fetch_gsap.sh`, or `uv sync --group video --group research --inexact`, which installs the Python tools. Downloaded at run time means the kit fetches it the first time a job needs it, into a cache outside this folder. Only the bundled pieces are in this repository.
 
@@ -93,3 +93,7 @@ MediaPipe is the fallback, for when torch is missing or Robust Video Matting can
 ## Everything else
 
 The other Python packages in `pyproject.toml` and the Node packages behind HyperFrames come from PyPI and npm during setup, each under its own licence. Playwright downloads a Chromium browser at setup, and HyperFrames downloads its own copy of Chrome the first time it renders. ffmpeg, Node, uv and the other tools the machine check names come from Homebrew or their own installers. None of them is stored in this repo.
+
+## The mini me example
+
+`docs/media/mini-me-example.gif` and `docs/media/mini-me-example.mp4` are example output, made with the kit for a made-up creator. The voice is an ElevenLabs stock voice, made on a paid plan.
