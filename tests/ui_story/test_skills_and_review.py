@@ -111,3 +111,50 @@ def test_review_frames_takes_a_rate_and_rejects_a_missing_file(tmp_path):
                              capture_output=True, text=True)
     assert missing.returncode != 0
     assert "Traceback" not in missing.stderr and "nope.mp4" in missing.stdout + missing.stderr
+
+
+# --- what this round of fixes added ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", list(SKILLS))
+def test_feedback_removes_an_older_rule_by_its_number(name):
+    feedback = text(SKILLS[name]).split("## Feedback", 1)[1]
+    assert f"python -m kit.rules read {name} --numbered" in feedback
+    assert f"python -m kit.rules remove {name} <number>" in feedback
+    assert "kit.rules undo" not in feedback, "undo removes the newest rule, not the one it contradicts"
+
+
+def test_ui_story_states_the_rules_the_review_found_missing():
+    body = text(SKILLS["ui-story"])
+    assert "The first real footage lands early" in body
+    assert "build/hf/assets/" in body and "only loads files inside the project" in body
+    assert "mkdir -p $B/sources" in body
+    assert '"windows": [' in body and '"kind": "punch"' in body, "the layout.json format"
+    assert "follow line" in body and "cta.comment_platforms" in body
+    assert "review/review.json" in body and "final.next.mp4" in body
+
+
+def test_layout_help_prints_the_format():
+    from uistory_helpers import run_kit
+
+    done = run_kit("layout.py", "--help")
+    assert done.returncode == 0
+    assert '"windows": [' in done.stdout and "punch" in done.stdout and "slow" in done.stdout
+
+
+def test_review_says_a_new_final_clears_the_pass():
+    body = text(SKILLS["review"])
+    assert "ship.py" in body and "review.json" in body
+
+
+def test_prep_makes_the_sources_folder_first(tmp_path, monkeypatch):
+    from uistory_helpers import load
+
+    from kit import config
+
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path / "kit")
+    prep = load("prep")
+    with pytest.raises(SystemExit) as caught:
+        prep.main(["example-reel"])
+    assert "no take" in str(caught.value).lower()
+    assert (tmp_path / "kit" / "work" / "example-reel" / "build" / "sources").is_dir()

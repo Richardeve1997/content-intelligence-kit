@@ -80,7 +80,7 @@ def snap(t):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Resolve layout.json into windows, zooms and lib/layout.js.")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--layout", required=True)
     ap.add_argument("--words", required=True)
     ap.add_argument("--duration", type=float, required=True, help="base duration in seconds")

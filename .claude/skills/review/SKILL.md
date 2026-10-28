@@ -20,7 +20,7 @@ Looks at the finished file, `work/<video>/final.mp4`, the way a viewer meets it:
    `1. 4.5 s (item 1): the subject card never appears; the proof card holds to 6 s. Fix: add the subject card on "this is". Re-run: scenes, render, ship.`
 6. Send each fix to the step that owns it: a scene or a card to the composition and its render, a cut or a trim to the EDL or `blocks.json`, the bed or the level to the finish. After a rebuild the gates run again, and the review looks again only at the windows that changed.
 7. Repeat for at most 5 cycles. After the fifth, give the creator the open issues and ask whether to ship as it is.
-8. On a clean pass, write `work/<video>/review/review.json` as `{"passed": true, "date": "YYYY-MM-DD", "cycles": N}`. Write it only when the current file passed: a later rebuild deletes it.
+8. On a clean pass, write `work/<video>/review/review.json` as `{"passed": true, "date": "YYYY-MM-DD", "cycles": N}`. Write it only when the current file passed. A new final deletes it (`ship.py` does this before it replaces `final.mp4`), so the next review starts from no pass.
 
 ## The rubric
 
@@ -49,4 +49,4 @@ Times are on the finished file, after the speed-up. Items 2 to 5 are the UI stor
 
 ## Feedback
 
-When the creator disagrees with a verdict or adds something to check, fix the current review first. Then record the lasting part with `kit.rules.add("review", "<rule>")`. In a shell: `uv run python -m kit.rules add review '<rule>'`. Write one or two plain sentences, with no dates and no quotes from the creator. If it belongs to how a style builds a video rather than how it is checked, record it for that skill too (`ui-story` or `mini-me`). If it contradicts an older rule, remove that one first with `uv run python -m kit.rules undo review` or the `learnings` skill. Say in one line what you recorded.
+When the creator disagrees with a verdict or adds something to check, fix the current review first. Then record the lasting part with `kit.rules.add("review", "<rule>")`. In a shell: `uv run python -m kit.rules add review '<rule>'`. Write one or two plain sentences, with no dates and no quotes from the creator. If it belongs to how a style builds a video rather than how it is checked, record it for that skill too (`ui-story` or `mini-me`). If it contradicts an older rule for this skill, remove the older one first: `uv run python -m kit.rules read review --numbered` shows the numbers, and `uv run python -m kit.rules remove review <number>` removes one. Say in one line what you recorded.

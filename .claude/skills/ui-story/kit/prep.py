@@ -5,7 +5,7 @@
     python prep.py <video>           cut the base and make the clean voice, the words, the restart check,
                                      the matte and the PIP geometry
 
-Steps and what they write, all in work/<video>/build/:
+Steps and what they write, all in work/<video>/build/ (it also makes build/sources/, for SOURCES.md):
   --edl     raw.words.json, raw.lines.txt (the take, sentence by sentence) and edl.json (keep segments)
   base      base.mp4: 1080x1920, 60 fps, the keep segments joined, the opening push-in   (cut_base.py)
   voice     clean.wav: the light voice chain                                             (light_voice.py)
@@ -54,7 +54,7 @@ def find_take(folder: Path, name: str | None) -> Path:
     return files[0]
 
 
-def main() -> int:
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="From a raw take to the base, the voice, the words and the matte.")
     ap.add_argument("slug")
     ap.add_argument("--edl", action="store_true", help="transcribe the raw take and propose the EDL, then stop")
@@ -62,14 +62,14 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="run every step again")
     ap.add_argument("--no-matte", action="store_true", help="skip the matte and the geometry")
     ap.add_argument("--no-restarts", action="store_true", help="skip the false-start check")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     try:
         folder = config.work_dir(a.slug)
     except ValueError as problem:
         print(problem)
         return 1
     build = folder / "build"
-    build.mkdir(parents=True, exist_ok=True)
+    (build / "sources").mkdir(parents=True, exist_ok=True)  # SOURCES.md and the reading-load table go here
     raw = find_take(folder, a.take)
     py = sys.executable
 

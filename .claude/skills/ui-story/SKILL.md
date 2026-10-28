@@ -82,6 +82,8 @@ The first four seconds make the topic clear with the sound off. Three beats:
 2. About 2.5 to 3 s: one proof card. A real, sourced fact in about seven words or fewer (a loss, a number, a headline), designed rather than recorded, with its source as one small pill. It backs the first claim the creator says. If no fact makes the idea clearer, skip it and go straight to the subject card.
 3. About 4.5 s: the subject card above the creator. Its logo, its name, one plain-language line, and badges with social proof (stars, users), held long enough to read.
 
+The first real footage lands early: by the subject card at the latest, the viewer has seen the real thing (its UI, its site, footage of it in use), not only drawings of it.
+
 Test it: mute the render and look at frames 0.2, 1, 2, 3, 4 and 5 s (the review's `open.jpg`). A stranger has to be able to say what the video is about. The creator's head outranks the opener graphic: leave about 60 px of canvas above their highest crown.
 
 ### Pace and reading load
@@ -96,7 +98,7 @@ Test it: mute the render and look at frames 0.2, 1, 2, 3, 4 and 5 s (the review'
 
 ### Real things on screen
 
-- Show the real thing. For every product, tool or person named, use the highest step you can source: its own demo or launch video; a screen recording made with `record_page.py`; real screenshots; a mockup rebuilt from its real strings and layout. A named product's UI and marks are its own, never a stand-in. Save each file under `build/sources/` and list its URL, date and what it shows in `build/sources/SOURCES.md`.
+- Show the real thing. For every product, tool or person named, use the highest step you can source: its own demo or launch video; a screen recording made with `record_page.py`; real screenshots; a mockup rebuilt from its real strings and layout. A named product's UI and marks are its own, never a stand-in. Save each file under `build/sources/` and list its URL, date and what it shows in `build/sources/SOURCES.md`. Then copy the clips and images a scene uses into `build/hf/assets/` and point the scene at the copy: HyperFrames only loads files inside the project folder.
 - Screen recordings are for pictures, video and UI flows only: an image, a clip, a panel filling, a click. Never scroll or highlight running text (docs, articles, tables, config files). A text source becomes a designed card instead: a quote card (the sentence, the person's name and role, the company mark), a headline card (headline, outlet, date), a stat card, an icon list, or a logo with a three-step explainer. A recording that needs reading becomes a picture of the outcome it claims.
 - The one exception is a prompt. When the creator says "this prompt" or "paste this", show their real prompt as a tall designed card that scrolls smoothly through that sentence. Its label is the read; the body is texture.
 - Product footage plays in a `.vidcard` (a rounded app window) with accent motion graphics on top: a chip naming the action on its word, a ring on the UI element, a cursor glide and click, a zoom to the detail that lands on its word and holds. No drifting pans.
@@ -120,7 +122,7 @@ Karaoke captions, one line centred at y 1570 in every layout: white type in the 
 
 ### The closer
 
-The last beat shows the creator's call to action, built by `closer.py` from `profile.cta`. A comment CTA types the keyword into a comment box, rings it in the accent and labels it "Comment KEYWORD". A follow CTA shows their profile row and presses Follow. There is no outro card: the Reel ends on the last spoken word, or on a natural sign-off.
+The last beat shows the creator's call to action, built by `closer.py` from `profile.cta`. A comment CTA types the keyword into a comment box, rings it in the accent and labels it "Comment KEYWORD". A follow CTA shows their profile row and presses Follow. The video is one file for every platform, so a comment CTA shows its keyword everywhere; on platforms where nobody answers comments (the ones not in `cta.comment_platforms`), the post caption for that platform carries a follow line instead. There is no outro card: the Reel ends on the last spoken word, or on a natural sign-off.
 
 ### Sound
 
@@ -166,6 +168,7 @@ uv run python $K/check_scenes.py $B/hf/index.html
 uv run python $K/check_cues.py $B/hf/index.html $B/base.words.json
 uv run python $K/check_js.py $B/hf/index.html
 uv run python $K/seek_parity_gate.py $B/hf/index.html --step 0.5
+mkdir -p $B/sources                                   # prep.py makes it too
 uv run python $K/audit_dom.py $B/hf/index.html $B/blocks.json $B/base.words.json > $B/sources/reading-load.md
 
 # 6. Look before the heavy render: snapshot, then composite one frame over the real take
@@ -182,12 +185,26 @@ uv run python $K/ship.py $V                            # composite, finish at 1.
 uv run python $K/postcheck.py $V                       # format, loudness, captions, stills, safe area, sheet
 ```
 
+`build/layout.json` lists the layout windows in order. Each one starts at its cue minus `lead` (or at `t` seconds) and runs until the next one starts. Cues are phrases as the speech model heard them (copy them from `base.lines.txt`); `nth` picks a later time the phrase was said. Zooms go in face windows only: a punch eases in on its cue and cuts back at `until` (or the end of the window), and a slow push drifts from its cue (or the window start) to the end of the window. Start a window with `"t"` on a take join (from `seg_starts.json`) so no frame of the next take shows in the previous layout. `layout.py --help` prints the same format.
+
+```json
+{"lead": 0.12,
+ "windows": [
+   {"mode": "split", "t": 0},
+   {"mode": "face", "at": "one big problem", "zooms": [
+     {"kind": "punch", "at": "big problem", "z": 1.14, "until": "you're stuck"},
+     {"kind": "slow", "at": "you're stuck", "z": 1.06}]},
+   {"mode": "canvas", "at": "four things"},
+   {"mode": "split", "t": 14.13}]}
+```
+
 Notes on the recipe:
 
 - `--describe false` stops the snapshot from sending frames to an outside vision service.
 - Without face zooms, skip the zoomed base: `ship.py` uses `base.mp4` when there is no `zbase.mp4`.
 - The geometry in step 3 is measured over the split windows. Put its zone line (`:root{--zone-bottom: Npx}`) in the composition's style block.
-- `ship.py` picks a bed with `kit.music.pick()`; pass `--mood <folder>` for a mood, `--music none` for no bed. It keeps the last `final.mp4` as `build/final.previous.mp4` until the new one passes the speech gate.
+- `ship.py` keeps the bed this video already has. The first ship picks one with `kit.music.pick()` (skipping the last track used) and logs it, and the ledger keeps one row per video, so every re-ship sounds the same. Pass `--mood <folder>` to pick from another mood, or `--music none` for no bed.
+- The new render becomes `final.mp4` only after it passes the speech gate. At that moment `ship.py` deletes `review/review.json`, because the review passed the previous final and has to run again. A render that fails stays as `build/final.next.mp4` to listen to, and `final.mp4` is left as it was.
 - After the composite passes, delete `build/gfx.webm`, the snapshots and the test windows. Keep the base, the zoomed base, the matte and the words until the creator has signed off.
 
 ## The kit
@@ -269,4 +286,4 @@ Then run the `review` skill on `work/<video>/final.mp4`.
 
 ## Feedback
 
-When the creator corrects something about a plan or an edit, fix it in the video first. Then record the lasting part with `kit.rules.add("ui-story", "<rule>")`. In a shell: `uv run python -m kit.rules add ui-story '<rule>'`. Write one or two plain sentences, with no dates and no quotes from the creator. If it contradicts an older rule for this skill, remove that one first with `uv run python -m kit.rules undo ui-story` or the `learnings` skill. Say in one line what you recorded.
+When the creator corrects something about a plan or an edit, fix it in the video first. Then record the lasting part with `kit.rules.add("ui-story", "<rule>")`. In a shell: `uv run python -m kit.rules add ui-story '<rule>'`. Write one or two plain sentences, with no dates and no quotes from the creator. If it contradicts an older rule for this skill, remove the older one first: `uv run python -m kit.rules read ui-story --numbered` shows the numbers, and `uv run python -m kit.rules remove ui-story <number>` removes one. Say in one line what you recorded.
