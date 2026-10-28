@@ -10,7 +10,7 @@ HyperFrames renders the kit's HTML and GSAP animations to video. It is licensed 
 
 ## GSAP
 
-GSAP drives the animation inside the HyperFrames compositions. `bin/fetch_gsap.sh` downloads it from the npm registry into `kit/vendor/` during setup. The download is gitignored, so this repo does not redistribute GSAP. Its standard "no charge" license applies: https://gsap.com/standard-license.
+GSAP drives the animation inside the HyperFrames compositions. The kit uses GSAP 3.15.0. `bin/fetch_gsap.sh` downloads exactly that version from the npm registry into `kit/vendor/` during setup. The script holds the sha512 checksum of that package, so a download that differs by one byte is thrown away, and it checks the version number inside the package before it writes anything. Setting `GSAP_VERSION` fetches another version instead. That download can only be checked against the digest the registry itself publishes, and the script says so. The download is gitignored, so this repo does not redistribute GSAP. Its standard "no charge" license applies: https://gsap.com/standard-license.
 
 ## Fonts
 

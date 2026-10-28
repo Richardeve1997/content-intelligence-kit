@@ -428,8 +428,8 @@ def test_a_cost_cap_of_zero_is_allowed(example_me):
 
 
 def test_env_reads_dotenv_without_logging(tmp_path, monkeypatch, capsys, caplog):
-    secret = "sk-test-0123456789abcdef"
-    other = "tok-test-fedcba9876543210"
+    secret = "fake-value-for-tests"
+    other = "not-a-real-key"
     (tmp_path / ".env").write_text(
         "# keys the kit may use\n"
         "\n"
