@@ -59,7 +59,7 @@ Version 1 leaves out:
 - An internet connection during setup.
 - Optional keys for Apify, an image model, ElevenLabs and Zernio. Each tool has a free way round it, and [Costs](#costs) lists rough prices.
 
-Setup takes care of the rest and asks before each install: Homebrew, ffmpeg, uv with Python 3.11, Node 22 or newer, HyperFrames with `npm ci`, Chromium, GSAP, and the Python tools for speech to text. The matting model downloads the first time a video needs it. Run `python3 bin/doctor.py` at any time to see where your Mac stands. It changes nothing.
+Setup takes care of the rest and asks before each install: Homebrew, ffmpeg, uv with Python 3.11, Node 22 or newer, HyperFrames with `npm ci`, Chromium, GSAP, and the Python tools, which include speech to text and yt-dlp. The matting model downloads the first time a video needs it. Run `python3 bin/doctor.py` at any time to see where your Mac stands. It changes nothing.
 
 ### How the install is tested
 
