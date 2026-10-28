@@ -214,6 +214,40 @@ def test_check_trims_catches_a_cut_through_a_word(tmp_path):
     assert "SPEECH-LIKE" in check.stdout
 
 
+# --- the restart check ------------------------------------------------------------------------------------
+
+
+def restart_check(tmp_path, monkeypatch, words, heard):
+    """Run check_restarts.py on a cut heard as one piece, `heard`, with `words` as its words file."""
+    restarts = load("check_restarts")
+    monkeypatch.setattr(restarts.transcribe, "audio_samples", lambda path: np.zeros(16000 * 5, np.float32))
+    monkeypatch.setattr(restarts.transcribe, "speech_chunks", lambda samples, **options: [(0.4, 4.6)])
+    monkeypatch.setattr(restarts.transcribe, "chunk_text", lambda samples: heard)
+    cut = tmp_path / "cut.wav"
+    cut.write_bytes(b"")
+    path, _ = word_file(tmp_path, words=words)
+    monkeypatch.setattr(sys, "argv", ["check_restarts.py", str(cut), "--words", str(path)])
+    assert restarts.main() == 0
+    return path
+
+
+def test_check_restarts_flags_a_word_said_twice_in_a_row(tmp_path, monkeypatch, capsys):
+    """A restart after a pause too short to split on is heard as one clean sentence, but the words file has
+    the restarted word twice in a row."""
+    words = "booking booking forms work better when you know the steps".split()
+    path = restart_check(tmp_path, monkeypatch, words, "Booking forms work better when you know the steps.")
+    printed = capsys.readouterr().out
+    second = json.loads(path.read_text())["words"][1]
+    assert "REPEATED WORD 'booking'" in printed
+    assert f"{second['s']:.2f}s" in printed, "it says where the clean restart starts"
+    assert printed.strip().endswith("1 possible restart(s)")
+
+
+def test_check_restarts_passes_words_that_never_repeat(tmp_path, monkeypatch, capsys):
+    restart_check(tmp_path, monkeypatch, LINE, " ".join(LINE))
+    assert capsys.readouterr().out.strip().endswith("0 possible restart(s)")
+
+
 # --- authored times --------------------------------------------------------------------------------------------
 
 
