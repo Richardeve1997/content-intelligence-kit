@@ -100,6 +100,7 @@ FIX_DISK = (
 # Keychain and Chromium cannot register its Mach port, so their rows cannot be checked there. A failure in the
 # sandbox says nothing about the Mac, so those rows are warnings that say so, and the rest of the check still counts.
 SANDBOX_VARIABLE = "CODEX_SANDBOX"
+SANDBOX_REFUSAL = re.compile(r"operation not permitted|permission denied", re.IGNORECASE)  # the sandbox refusing a write
 FIX_OUTSIDE_SANDBOX = (
     "Not checked inside Codex's sandbox. Approve running python3 bin/doctor.py outside the sandbox to check it."
 )
@@ -304,12 +305,15 @@ def check_uv(probe: Probe) -> Result:
 
 def check_python(probe: Probe) -> Result:
     """Asks uv without its cache: an agent's sandbox cannot write the cache in the home folder, and uv then
-    fails as if Python 3.11 were missing."""
+    fails as if Python 3.11 were missing. A read-only sandbox refuses even the temporary folder that asks for,
+    and then the row is not checked rather than missing."""
     if not probe.which("uv"):
         return "missing", FIX_PYTHON
     result = probe.run(["uv", "python", "find", "--no-cache", "3.11"], timeout=30)
     if result and result[0] == 0 and result[1].strip():
         return "ok", ""
+    if result and in_codex_sandbox(probe) and SANDBOX_REFUSAL.search(result[1]):
+        return "warn", FIX_OUTSIDE_SANDBOX
     return "missing", FIX_PYTHON
 
 

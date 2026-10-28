@@ -542,6 +542,31 @@ def test_outside_the_sandbox_nothing_changes(doctor, fake, capsys):
     assert "sandbox" not in capsys.readouterr().out
 
 
+# A read-only sandbox refuses uv even the temporary folder that --no-cache asks for.
+REFUSED = 'error: Operation not permitted (os error 1) at path "/tmp/.tmp-example"\n'
+NO_PYTHON = "error: No interpreter found for Python 3.11 in managed installations or search path\n"
+
+
+def test_inside_a_read_only_sandbox_the_python_row_is_not_checked(doctor, fake):
+    probe = sandboxed(fake)
+    probe.outputs["uv python find --no-cache 3.11"] = (2, REFUSED)
+    row = find(rows_of(doctor, probe), "Python 3.11")
+    assert row["status"] == "warn" and row["fix"].startswith(NOT_CHECKED), row
+
+
+def test_inside_the_sandbox_a_python_that_is_not_there_is_still_missing(doctor, fake):
+    probe = sandboxed(fake)
+    probe.outputs["uv python find --no-cache 3.11"] = (2, NO_PYTHON)
+    row = find(rows_of(doctor, probe), "Python 3.11")
+    assert (row["status"], row["fix"]) == ("missing", "uv python install 3.11")
+
+
+def test_outside_the_sandbox_a_refused_python_check_is_still_missing(doctor, fake):
+    probe = fake()
+    probe.outputs["uv python find --no-cache 3.11"] = (2, REFUSED)
+    assert find(rows_of(doctor, probe), "Python 3.11")["status"] == "missing"
+
+
 def test_the_report_script_does_not_launch_chromium_inside_the_sandbox(doctor, tmp_path):
     # A stand-in playwright package that leaves a mark when a browser is launched.
     stub = tmp_path / "stub" / "playwright"
