@@ -256,3 +256,15 @@ def test_an_edit_with_no_plan_names_the_video_and_links_the_take_first():
     assert "no plan" in edit_step, "the edit step covers a take that skipped the plan"
     assert "video name" in edit_step and "work/<video>/take/" in edit_step and "ln -s" in edit_step, edit_step
     assert "never" in edit_step and "copy" in edit_step, "the raw take is linked, never copied"
+
+
+def test_the_lint_warnings_the_kit_causes_on_purpose_are_named_as_expected():
+    """Two HyperFrames lint warnings come from the kit's own design: one index.html with one timeline, and a
+    picture shown in two scenes (plain layers carry no start time). The skill names them, so a creator does not
+    chase them, and keeps every other warning worth a look."""
+    notes = text(SKILLS["ui-story"]).split("Notes on the recipe:")[1].split("## The kit")[0]
+    lint = next(line for line in notes.splitlines() if "hyperframes lint" in line)
+    assert "composition_file_too_large" in lint and "index.html" in lint, lint
+    assert "duplicate_media_discovery_risk" in lint and "<img>" in lint, lint
+    assert "expected" in lint and "error" in lint, lint
+    assert "timeline_track_too_dense" not in text(SKILLS["ui-story"]), "the caption track no longer causes it"

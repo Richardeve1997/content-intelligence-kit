@@ -6,12 +6,13 @@ list and check what it writes.
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 
 import numpy as np
 import pytest
-from uistory_helpers import ffmpeg, load, run_kit
+from uistory_helpers import ROOT, ffmpeg, load, run_kit
 
 scaffold = load("scaffold")
 
@@ -106,6 +107,30 @@ def test_captions_are_karaoke_groups_of_three_words_at_most(tmp_path, hf_with_la
     assert len(json.loads(capwords.split("=", 1)[1].rstrip(";\n"))) == len(LINE)
     transcript = json.loads((tmp_path / "captions" / "transcript.json").read_text())
     assert " ".join(c["text"] for c in transcript["captions"]).split() == LINE
+
+
+def test_caption_clips_carry_the_class_hyperframes_reads_as_captions(tmp_path, hf_with_layout):
+    """HyperFrames' lint warns about any track with more than three timed clips, except clips it can tell are
+    captions by their class. The caption track holds one clip a group, so every clip says it is a caption."""
+    words, _ = word_file(tmp_path)
+    run_kit("build_captions.py", "--words", words, "--hf", hf_with_layout, "--layout", tmp_path / "layout.resolved.json")
+    classes = re.findall(r'<div id="cap\d+" class="([^"]+)"', (hf_with_layout / "index.html").read_text())
+    assert len(classes) > 3
+    assert all({"clip", "cap", "k", "caption"} <= set(c.split()) for c in classes), classes
+
+
+def test_the_caption_track_gives_no_lint_warning(tmp_path, hf_with_layout):
+    """Every build used to print a timeline_track_too_dense warning for the caption track, a warning about the
+    kit's own design that a creator would learn to ignore."""
+    hyperframes = ROOT / "node_modules" / ".bin" / "hyperframes"
+    if not hyperframes.exists() or shutil.which("node") is None:
+        pytest.skip("needs HyperFrames: npm ci")
+    words, _ = word_file(tmp_path)
+    run_kit("build_captions.py", "--words", words, "--hf", hf_with_layout, "--layout", tmp_path / "layout.resolved.json")
+    done = subprocess.run([str(hyperframes), "lint", str(hf_with_layout)], capture_output=True, text=True, timeout=120)
+    said = done.stdout + done.stderr
+    assert "Linting" in said, said
+    assert "timeline_track_too_dense" not in said, said
 
 
 def test_touching_caption_groups_swap_on_one_frame(tmp_path, hf_with_layout):

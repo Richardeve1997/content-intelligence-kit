@@ -13,6 +13,8 @@
     font, never below 60 px), never wrapped
   * hard swaps between groups, joined end to start when the gap is under 0.28 s, so the caption never
     blinks off for a frame or two (caption_blink_check.py must report 0)
+  * every caption clip carries the class `caption`, which HyperFrames' lint reads as a caption, so the track
+    of one clip a group does not trip its warning about a crowded track
 
 It needs karaoke.css linked after uistory.css and UIS.captions(tl) called before the timeline registers.
 scaffold.py and template.html set up both.
@@ -292,7 +294,7 @@ def main():
             off = min(off, c["end"])
             capwords.append([pid, round(q(round(on * fps)), 4), round(q(round(off * fps)), 4)])
             spans.append(f'<span class="w">{esc(t)}<span class="pl" id="{pid}">{esc(t)}</span></span>')
-        cls = "clip cap k" + (" light" if c["theme"] == "light" else "")
+        cls = "clip cap k caption" + (" light" if c["theme"] == "light" else "")  # caption: what the lint reads
         n_light += c["theme"] == "light"
         style = f' style="font-size:{size}px"' if size != SIZE else ""
         lines.append(f'<div id="cap{i:03d}" class="{cls}" data-start="{c_start:.4f}" data-duration="{dur:.4f}" '
