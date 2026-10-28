@@ -68,4 +68,4 @@ After you add or change a skill, run `bash bin/check_adapters.sh`. It confirms t
 
 ## Updating
 
-"Update the kit" runs `update-kit`. It replaces the kit's files from the latest release, copies any kit file the creator edited into `me/kit-backups/` first, and leaves `me/`, `work/`, `research/` and `.env` alone.
+A kit cloned with git updates with `git pull`: the creator's folders are gitignored, so a pull leaves them alone. For a copy without git history, such as a template copy or an unzipped download, "update the kit" runs `update-kit`. It replaces the kit's files from the latest release. A file the creator edited stays as it is unless the release changed it too, and then it is copied into `me/kit-backups/` before it is replaced. `me/`, `work/`, `research/` and `.env` are never touched.

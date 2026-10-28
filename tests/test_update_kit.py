@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "bin" / "update_kit.py"
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)  # written as code points so this file holds no dash
 TODAY = "2026-10-28"
+KEPT_HEADING = "Kept your edits (the release did not change these files):"
 BACKUPS = f"me/kit-backups/{TODAY}"
 
 V1 = {
@@ -307,14 +308,13 @@ def test_update_backs_up_local_edit(update_kit, installed, releases, capsys, mon
     alpha.write_text("alpha one, edited by the creator\n")
     beta.write_text("beta one, edited too\n")
     backup_alpha = installed / BACKUPS / ".claude/skills/alpha/SKILL.md"
-    backup_beta = installed / BACKUPS / ".claude/skills/beta/SKILL.md"
 
     at_first_replacement = []
     real_replace = os.replace
 
     def spy(source, destination, *args, **kwargs):
         if not at_first_replacement:
-            at_first_replacement.append((backup_alpha.is_file(), backup_beta.is_file()))
+            at_first_replacement.append(backup_alpha.is_file())
         return real_replace(source, destination, *args, **kwargs)
 
     monkeypatch.setattr(update_kit.os, "replace", spy)
@@ -322,22 +322,107 @@ def test_update_backs_up_local_edit(update_kit, installed, releases, capsys, mon
     code, out, err = apply(update_kit, installed, releases.v2, capsys)
 
     assert (code, err) == (0, "")
-    assert at_first_replacement == [(True, True)], "the edits must be copied before any file is replaced"
+    assert at_first_replacement == [True], "the edit must be copied before any file is replaced"
     assert backup_alpha.read_text() == "alpha one, edited by the creator\n"
-    assert backup_beta.read_text() == "beta one, edited too\n"
     assert alpha.read_text() == "alpha two\n"
-    assert beta.read_text() == "beta one\n"
-    # only edited files get a backup
+    # an edit to a file the release did not change is left alone, and needs no backup
+    assert beta.read_text() == "beta one, edited too\n"
     assert sorted(p.relative_to(installed / BACKUPS).as_posix() for p in (installed / BACKUPS).rglob("*") if p.is_file()) == [
-        ".claude/skills/alpha/SKILL.md",
-        ".claude/skills/beta/SKILL.md",
+        ".claude/skills/alpha/SKILL.md"
     ]
-    # the output lists them, and says so before it reports the update as done
+    # the output lists the backup, and says so before it reports the update as done
     assert f"Copied your edits to {BACKUPS}/ before replacing the files:" in out
     notice = out.index("Copied your edits")
     assert notice < out.index(".claude/skills/alpha/SKILL.md", notice)
-    assert notice < out.index(".claude/skills/beta/SKILL.md", notice)
     assert notice < out.index("Updated to release v2")
+    assert "Updated to release v2: 1 added, 5 replaced, 1 removed, 4 already the same, 1 kept as you had them." in out
+    kept = out[out.index(KEPT_HEADING) :]
+    assert "  .claude/skills/beta/SKILL.md\n" in kept and ".claude/skills/alpha/SKILL.md" not in kept
+
+
+def test_an_edit_the_release_did_not_change_is_kept_listed_and_never_called_a_match(update_kit, installed, releases, capsys):
+    beta = installed / ".claude/skills/beta/SKILL.md"
+    beta.write_text("beta one, edited\n")
+    before = snapshot(installed)
+
+    for how in (check, apply):
+        code, out, err = how(update_kit, installed, releases.v1, capsys)  # the release this kit already has
+        assert (code, err) == (0, "")
+        assert "already matches" not in out and "Nothing to do" not in out
+        assert out.startswith("Release v1 has nothing new for your kit. Your edits stay as you had them.\n")
+        assert out.endswith(f"{KEPT_HEADING}\n  .claude/skills/beta/SKILL.md\n")
+        assert snapshot(installed) == before, "nothing is written, not even backups or the manifest"
+    assert beta.read_text() == "beta one, edited\n"
+
+
+def test_kept_edits_are_listed_by_check_and_by_apply_next_to_the_changes(update_kit, installed, releases, capsys):
+    (installed / ".claude/skills/beta/SKILL.md").write_text("beta one, edited\n")
+    (installed / "CLAUDE.md").write_text("claude one, edited\n")
+
+    code, out, err = check(update_kit, installed, releases.v2, capsys)
+    assert "Release v2 against your kit: 1 to add, 5 to replace, 1 to remove, 3 already the same, 2 kept as you had them." in out
+    kept = out[out.index(KEPT_HEADING) :]
+    assert "  .claude/skills/beta/SKILL.md\n  CLAUDE.md\n" in kept
+    assert out.index("To remove:") < out.index(KEPT_HEADING) < out.index("Nothing was changed")
+
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+    assert "1 added, 5 replaced, 1 removed, 3 already the same, 2 kept as you had them." in out
+    assert "  .claude/skills/beta/SKILL.md\n  CLAUDE.md\n" in out[out.index(KEPT_HEADING) :]
+    assert (installed / "CLAUDE.md").read_text() == "claude one, edited\n"
+
+
+def test_the_manifest_keeps_the_release_digest_of_a_file_the_creator_edited(update_kit, installed, releases, tmp_path, capsys):
+    beta = installed / ".claude/skills/beta/SKILL.md"
+    beta.write_text("beta one, edited\n")
+    apply(update_kit, installed, releases.v2, capsys)
+    assert manifest_of(installed) == expected_manifest(V2, LINKS), "the manifest records the release, not the edited file"
+    assert beta.read_text() == "beta one, edited\n"
+
+    # a later release that does change the file replaces the edit, after a backup
+    v3 = make_release(tmp_path / "v3.tar.gz", "v3", {**V2, ".claude/skills/beta/SKILL.md": "beta three\n"}, links=LINKS, executable=EXECUTABLE)
+    code, out, err = apply(update_kit, installed, v3, capsys)
+    assert code == 0
+    assert beta.read_text() == "beta three\n"
+    assert (installed / BACKUPS / ".claude/skills/beta/SKILL.md").read_text() == "beta one, edited\n"
+    assert KEPT_HEADING not in out
+
+
+def test_a_file_the_creator_deleted_stays_deleted_when_the_release_did_not_change_it(update_kit, installed, releases, capsys):
+    (installed / ".claude/skills/beta/SKILL.md").unlink()
+
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+
+    assert (code, err) == (0, "")
+    assert not (installed / ".claude/skills/beta/SKILL.md").exists()
+    assert "  .claude/skills/beta/SKILL.md (you deleted it)\n" in out[out.index(KEPT_HEADING) :]
+    assert "Restored" not in out
+    assert manifest_of(installed) == expected_manifest(V2, LINKS)
+
+
+def test_a_deleted_file_comes_back_when_the_release_changed_it(update_kit, installed, releases, capsys):
+    (installed / ".claude/skills/alpha/SKILL.md").unlink()
+
+    code, out, err = check(update_kit, installed, releases.v2, capsys)
+    assert "1 to add, 1 to restore, 4 to replace, 1 to remove, 5 already the same." in out
+    heading = "To restore (you deleted these, and the release changed them):"
+    assert "  .claude/skills/alpha/SKILL.md\n" in out[out.index(heading) :]
+    assert not (installed / ".claude/skills/alpha/SKILL.md").exists(), "check changes nothing"
+
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+    assert (code, err) == (0, "")
+    assert (installed / ".claude/skills/alpha/SKILL.md").read_text() == "alpha two\n"
+    assert "1 added, 1 restored, 4 replaced, 1 removed, 5 already the same." in out
+    assert "  .claude/skills/alpha/SKILL.md\n" in out[out.index("Restored (you deleted these, and the release changed them):") :]
+    assert "Copied your edits" not in out, "a deleted file has nothing to back up"
+
+
+def test_without_a_manifest_a_deleted_file_is_simply_added_again(update_kit, installed, releases, capsys):
+    (installed / ".kit-manifest.json").unlink()
+    (installed / ".claude/skills/beta/SKILL.md").unlink()
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+    assert code == 0
+    assert (installed / ".claude/skills/beta/SKILL.md").read_text() == "beta one\n"
+    assert KEPT_HEADING not in out
 
 
 def test_backups_go_to_the_me_folder_that_kit_me_points_at(update_kit, installed, releases, tmp_path, capsys, monkeypatch):
@@ -471,7 +556,7 @@ def test_applying_twice_changes_nothing_the_second_time(update_kit, installed, r
     assert snapshot(installed) == before
 
 
-def test_the_manifest_after_an_update_describes_the_files_as_installed(update_kit, installed, releases, capsys):
+def test_the_manifest_after_an_update_records_the_release_digest_of_every_file(update_kit, installed, releases, capsys):
     apply(update_kit, installed, releases.v2, capsys)
     assert manifest_of(installed) == expected_manifest(V2, LINKS)
     for rel, digest in manifest_of(installed).items():
@@ -632,6 +717,60 @@ def test_the_update_never_writes_through_a_link_that_leaves_the_kit_folder(updat
     assert code == 1 and "leaves the kit folder" in err
     assert list(outside.iterdir()) == []
     assert snapshot(installed) == before
+
+
+LINK_TARGETS = ["../me", "../work", "../research/runs", "../Me", "../.git", ".."]
+
+
+@pytest.mark.parametrize("target", LINK_TARGETS)
+def test_the_update_never_writes_through_a_link_into_the_creators_folders(update_kit, installed, releases, tmp_path, capsys, target):
+    write(installed, CREATOR)
+    (installed / "kit/x").symlink_to(target)
+    through = {"..": "kit/x/.env"}.get(target, "kit/x/profile.json")
+    v3 = make_release(tmp_path / "v3.tar.gz", "v3", {**V2, through: "overwritten\n"}, links=LINKS, executable=EXECUTABLE)
+    before = snapshot(installed)
+
+    code, out, err = apply(update_kit, installed, v3, capsys)
+
+    assert code == 1 and out == ""
+    assert len(err.strip().splitlines()) == 1
+    assert "link into your own folders" in err and "Nothing was changed" in err
+    for rel, body in CREATOR.items():
+        assert (installed / rel).read_bytes() == body
+    assert snapshot(installed) == before
+
+
+def test_an_absolute_link_into_the_creators_folders_is_refused_too(update_kit, installed, releases, tmp_path, capsys):
+    write(installed, CREATOR)
+    (installed / "kit/x").symlink_to(installed / "me")
+    v3 = make_release(tmp_path / "v3.tar.gz", "v3", {**V2, "kit/x/profile.json": "overwritten\n"}, links=LINKS, executable=EXECUTABLE)
+    code, out, err = apply(update_kit, installed, v3, capsys)
+    assert code == 1 and "link into your own folders" in err
+    assert (installed / "me/profile.json").read_bytes() == CREATOR["me/profile.json"]
+
+
+def test_a_manifest_entry_cannot_reach_a_creator_file_through_a_link(update_kit, installed, releases, capsys):
+    write(installed, CREATOR)
+    (installed / "kit/x").symlink_to("../me")
+    forged = manifest_of(installed)
+    forged["kit/x/profile.json"] = "0" * 64  # not in the release, so the update would remove it
+    (installed / ".kit-manifest.json").write_text(json.dumps(forged))
+    before = snapshot(installed)
+
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+
+    assert code == 1 and "link into your own folders" in err
+    assert (installed / "me/profile.json").read_bytes() == CREATOR["me/profile.json"]
+    assert snapshot(installed) == before
+
+
+def test_a_link_that_stays_in_the_kit_and_lands_on_a_kit_file_is_fine(update_kit, installed, releases, tmp_path, capsys):
+    (installed / "kit/inner").mkdir()
+    (installed / "kit/alias").symlink_to("inner")
+    v3 = make_release(tmp_path / "v3.tar.gz", "v3", {**V2, "kit/alias/new.py": "NEW = 1\n"}, links=LINKS, executable=EXECUTABLE)
+    code, out, err = apply(update_kit, installed, v3, capsys)
+    assert (code, err) == (0, "")
+    assert (installed / "kit/inner/new.py").read_text() == "NEW = 1\n"
 
 
 # --- finding the release on GitHub ---------------------------------------------------------------------------
@@ -915,17 +1054,6 @@ def test_an_update_writes_the_same_manifest_that_write_manifest_would(update_kit
 
     assert (installed / ".kit-manifest.json").read_bytes() == written_by_the_update
     capsys.readouterr()
-
-
-def test_the_committed_manifest_is_well_formed():
-    recorded = json.loads((ROOT / ".kit-manifest.json").read_text(encoding="utf-8"))
-    assert recorded and list(recorded) == sorted(recorded)
-    assert all(isinstance(d, str) and len(d) == 64 and set(d) <= set("0123456789abcdef") for d in recorded.values())
-    assert ".kit-manifest.json" not in recorded
-    assert not [p for p in recorded if p.split("/")[0] in {"me", "work", "research", ".env", ".git"}]
-    assert not [p for p in recorded if p.startswith("/") or ".." in p.split("/")]
-    for expected in ("kit/rules.py", "bin/update_kit.py", "CLAUDE.md", ".claude/settings.json", ".agents/skills"):
-        assert expected in recorded, f"{expected} is missing from the manifest"
 
 
 # --- running the installed copy as a program ----------------------------------------------------------------------

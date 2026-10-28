@@ -13,10 +13,17 @@ copies of kit files the creator had edited. Everything else in the folder that n
 (.venv, node_modules, downloaded tools, the creator's own additions) is left alone, because the update
 only looks at paths that the release or the manifest lists.
 
-.kit-manifest.json records the SHA-256 of every kit file as it was last installed. A kit file whose
-current hash differs from the manifest has been edited. Before the update replaces or removes an edited
-file, it copies the file to me/kit-backups/<date>/<path> and says so. The manifest hashes a link by its
-target. After an update, the manifest is rewritten from the files as installed.
+.kit-manifest.json records the SHA-256 of every kit file as the release that was last installed shipped
+it, with a link hashed by its target. It is written by --write-manifest right before a release is tagged
+and rewritten by every update, always with the release's hashes and never the hashes of edited files. A kit
+file whose current hash differs from the manifest has been edited, and the update treats it this way:
+
+  - edited, and the release did not change it: left alone, and listed as "Kept your edits";
+  - edited, and the release changed it: copied to me/kit-backups/<date>/<path> first, then replaced;
+  - edited, and the release deletes it: copied to the same place first, then removed;
+  - deleted by the creator: stays deleted if the release did not change it, and comes back, and is
+    reported, if the release did;
+  - no manifest at all: nothing can be told apart, so every file that differs is backed up and replaced.
 
 A release file is what GitHub serves for a tag: a .tar.gz holding one top-level folder. The whole file is
 checked before the first change, so a bad release leaves the kit as it was.
@@ -411,35 +418,60 @@ def read_release(path: Path, scratch: Path, label: str | None = None, *, downloa
 # --- working out what would change -------------------------------------------------------------------------------
 
 
+KEPT_HEADING = "Kept your edits (the release did not change these files):"
+
+
 @dataclass
 class Plan:
-    add: list[str] = field(default_factory=list)
+    add: list[str] = field(default_factory=list)  # new in the release, or missing with no manifest to say why
+    restore: list[str] = field(default_factory=list)  # the creator deleted it and the release changed it
     replace: list[str] = field(default_factory=list)
     remove: list[str] = field(default_factory=list)
     same: list[str] = field(default_factory=list)
+    kept: list[str] = field(default_factory=list)  # edited or deleted by the creator, not changed by the release
+    kept_deleted: set[str] = field(default_factory=set)  # the part of `kept` that the creator deleted
     edited: list[str] = field(default_factory=list)  # replaced or removed files the creator had changed
     permissions: list[str] = field(default_factory=list)  # same content, but the executable bit differs
 
     @property
     def empty(self) -> bool:
-        return not (self.add or self.replace or self.remove)
+        return not (self.add or self.restore or self.replace or self.remove)
+
+    def to_install(self) -> list[str]:
+        return self.add + self.restore + self.replace
 
     def changes_dependencies(self) -> bool:
-        return any(rel in DEPENDENCY_FILES for rel in self.add + self.replace)
+        return any(rel in DEPENDENCY_FILES for rel in self.to_install())
+
+
+def _outside(real: str, real_root: str) -> bool:
+    return real != real_root and not real.startswith(real_root + os.sep)
 
 
 def _check_place(root: Path, rel: str) -> None:
-    """Refuse a path whose folders are in the way: a file where a folder is needed, or a link that leaves the kit."""
+    """Refuse a path that would land where it must not: a file where a folder is needed, outside the kit
+    folder, or in the creator's own folders. A link inside the kit can lead to any of them."""
     real_root = os.path.realpath(root)
+    parts = PurePosixPath(rel).parts
     folder = root
-    for part in PurePosixPath(rel).parts[:-1]:
+    real = real_root
+    complete = True
+    for index, part in enumerate(parts[:-1]):
         folder = folder / part
         if not (folder.is_symlink() or folder.exists()):
-            return  # nothing from here down exists yet
-        resolved = os.path.realpath(folder)
-        if resolved != real_root and not resolved.startswith(real_root + os.sep):
+            real = os.path.join(real, *parts[index:])  # nothing from here down exists yet
+            complete = False
+            break
+        real = os.path.realpath(folder)
+        if _outside(real, real_root):
             raise UpdateError(
                 f"{rel} would be written through a link that leaves the kit folder, so the update stopped. "
+                "Nothing was changed."
+            )
+        inside = os.path.relpath(real, real_root)
+        if inside != "." and is_creator_path(inside):
+            raise UpdateError(
+                f"{rel} would be written through a link into your own folders ({inside}), so the update stopped. "
                 "Nothing was changed."
             )
         if not folder.is_dir():
@@ -448,6 +480,14 @@ def _check_place(root: Path, rel: str) -> None:
                 f"{shown} is a file in your kit, but the release needs a folder there. "
                 "Move it away, then run the update again. Nothing was changed."
             )
+    if complete:
+        real = os.path.join(real, parts[-1])
+    where = os.path.relpath(real, real_root)
+    if is_creator_path(where):
+        raise UpdateError(
+            f"{rel} would be written through a link into your own folders ({where}), so the update stopped. "
+            "Nothing was changed."
+        )
 
 
 def _is_executable(path: Path) -> bool:
@@ -455,6 +495,10 @@ def _is_executable(path: Path) -> bool:
 
 
 def make_plan(root: Path, release: Release, installed: dict[str, str] | None) -> Plan:
+    """Sort every file of the release, and every file the last release shipped, into what the update does.
+
+    `installed` maps each path to the digest the last release gave it, or is None when there is no usable
+    manifest. A digest that equals the release's means the release did not change that file."""
     plan = Plan()
     for rel, item in sorted(release.items.items()):
         _check_place(root, rel)
@@ -465,16 +509,27 @@ def make_plan(root: Path, release: Release, installed: dict[str, str] | None) ->
                 f"{rel} is a folder in your kit, but the release has a file with that name. "
                 "Move the folder away, then run the update again. Nothing was changed."
             )
+        before = None if installed is None else installed.get(rel)
+        release_changed_it = before != item.digest
         if here is None:
-            plan.add.append(rel)
+            if before is None:
+                plan.add.append(rel)
+            elif release_changed_it:
+                plan.restore.append(rel)
+            else:
+                plan.kept.append(rel)
+                plan.kept_deleted.add(rel)
         elif here == item.digest:
             plan.same.append(rel)
             if item.kind == "file" and _is_executable(path) != item.executable:
                 plan.permissions.append(rel)
+        elif installed is not None and here == before:
+            plan.replace.append(rel)  # the creator did not touch it, and the release changed it
+        elif installed is not None and not release_changed_it:
+            plan.kept.append(rel)  # the creator edited it, and the release did not change it
         else:
-            plan.replace.append(rel)
-            if installed is None or installed.get(rel) != here:
-                plan.edited.append(rel)
+            plan.replace.append(rel)  # edited and changed by the release, or no manifest to tell
+            plan.edited.append(rel)
     if installed is not None:
         for rel in sorted(installed):
             if rel in release.items:
@@ -582,26 +637,39 @@ def remove(root: Path, rel: str) -> None:
 # --- the report ----------------------------------------------------------------------------------------------------
 
 
+def _more(lines: list[str], names: list[str]) -> None:
+    lines.extend(f"  {name}" for name in names[:LISTED])
+    if len(names) > LISTED:
+        lines.append(f"  ...and {len(names) - LISTED} more")
+
+
 def _lists(plan: Plan, done: bool) -> list[str]:
+    restore = "Restored" if done else "To restore"
     headings = (
         ("Added:" if done else "To add:", plan.add),
+        (f"{restore} (you deleted these, and the release changed them):", plan.restore),
         ("Replaced:" if done else "To replace:", plan.replace),
         ("Removed:" if done else "To remove:", plan.remove),
     )
     lines: list[str] = []
     for heading, names in headings:
         if names:
-            lines += ["", heading, *[f"  {name}" for name in names[:LISTED]]]
-            if len(names) > LISTED:
-                lines.append(f"  ...and {len(names) - LISTED} more")
+            lines += ["", heading]
+            _more(lines, names)
+    if plan.kept:
+        lines += ["", KEPT_HEADING]
+        _more(lines, [f"{rel} (you deleted it)" if rel in plan.kept_deleted else rel for rel in plan.kept])
     return lines
 
 
-def _counts(plan: Plan, verbs: tuple[str, str, str]) -> str:
-    return (
-        f"{len(plan.add)} {verbs[0]}, {len(plan.replace)} {verbs[1]}, {len(plan.remove)} {verbs[2]}, "
-        f"{len(plan.same)} already the same"
-    )
+def _counts(plan: Plan, verbs: tuple[str, str, str, str]) -> str:
+    parts = [f"{len(plan.add)} {verbs[0]}"]
+    if plan.restore:
+        parts.append(f"{len(plan.restore)} {verbs[1]}")
+    parts += [f"{len(plan.replace)} {verbs[2]}", f"{len(plan.remove)} {verbs[3]}", f"{len(plan.same)} already the same"]
+    if plan.kept:
+        parts.append(f"{len(plan.kept)} kept as you had them")
+    return ", ".join(parts)
 
 
 def _notes(release: Release, problem: str | None) -> list[str]:
@@ -617,13 +685,22 @@ def _notes(release: Release, problem: str | None) -> list[str]:
     return notes
 
 
+def _nothing_to_change(plan: Plan, release: Release) -> str:
+    """What to say when the release changes no file. An edit that differs from it is never called a match."""
+    if not plan.kept:
+        return f"Your kit already matches release {release.label}. Nothing to do."
+    head = f"Release {release.label} has nothing new for your kit. Your edits stay as you had them."
+    return "\n".join([head, *_lists(plan, done=False)])
+
+
 def report_check(plan: Plan, release: Release, shown: str, notes: list[str]) -> None:
     if notes:
         print("\n".join(notes))
     if plan.empty:
-        print(f"Your kit already matches release {release.label}. Nothing to do.")
+        print(_nothing_to_change(plan, release))
         return
-    lines = [f"Release {release.label} against your kit: {_counts(plan, ('to add', 'to replace', 'to remove'))}."]
+    verbs = ("to add", "to restore", "to replace", "to remove")
+    lines = [f"Release {release.label} against your kit: {_counts(plan, verbs)}."]
     lines += _lists(plan, done=False)
     if plan.edited:
         lines += [
@@ -650,15 +727,17 @@ def apply_update(root: Path, release: Release, plan: Plan, shown: str, notes: li
         print("\n".join(f"  {name}" for name in plan.edited))
     for rel in plan.remove:
         remove(root, rel)
-    for rel in plan.add + plan.replace:
+    for rel in plan.to_install():
         install(root, rel, release.items[rel])
     for rel in plan.permissions:
         os.chmod(root / rel, 0o755 if release.items[rel].executable else 0o644)
+    # The manifest records the release's digest of every file, including the ones whose edits were kept.
     write_manifest_file(root, {rel: item.digest for rel, item in release.items.items()})
     if plan.empty:
-        print(f"Your kit already matches release {release.label}. Nothing to do.")
+        print(_nothing_to_change(plan, release))
         return
-    lines = [f"Updated to release {release.label}: {_counts(plan, ('added', 'replaced', 'removed'))}."]
+    verbs = ("added", "restored", "replaced", "removed")
+    lines = [f"Updated to release {release.label}: {_counts(plan, verbs)}."]
     lines += _lists(plan, done=True)
     lines += ["", "Your me, work and research folders and your .env were not touched."]
     if plan.changes_dependencies():

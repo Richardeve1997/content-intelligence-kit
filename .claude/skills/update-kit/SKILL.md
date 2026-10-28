@@ -5,34 +5,35 @@ description: Update the kit's own files to the latest release without touching t
 
 # update-kit
 
-Replaces the kit's files (skills, code, scripts, docs) with the latest release. Everything of the creator's stays where it is: `me/`, `work/`, `research/`, `.env`, and anything that is not a kit file, such as `.venv` and `node_modules`. If the creator edited a kit file, the update copies it to `me/kit-backups/<date>/` before replacing it.
+Replaces the kit's files (skills, code, scripts, docs) with the latest release. Everything of the creator's stays where it is: `me/`, `work/`, `research/`, `.env`, and anything that is not a kit file, such as `.venv` and `node_modules`. A kit file the creator edited is left as they edited it, unless the release changed that file too. Then the update copies the edited file to `me/kit-backups/<date>/` before replacing it.
 
 ## Steps
 
 1. Read the creator's rules for this skill with `kit.rules.read("update-kit")`. In a shell: `uv run python -m kit.rules read update-kit`. Follow them.
-2. Look first. This changes nothing:
+2. Check how the kit was installed. If the folder has a `.git` folder, it is a git clone, and `git pull` updates it. The creator's folders are gitignored, so a pull leaves them alone. Run `git pull` instead of the steps below, once the creator says yes. Everything below is for copies without git history, such as a copy made from the template or an unzipped download.
+3. Look first. This changes nothing:
 
    ```bash
    uv run python bin/update_kit.py
    ```
 
-   It downloads the latest release and lists what would be added, replaced and removed, and which of those files the creator edited. If it prints a network problem, pass it on in the same words. Someone with no internet access can download the release file elsewhere and pass it with `--from <file>`. To try a particular release, use `--ref <tag>`.
-3. Tell the creator in plain words how many files change, which of their edits would be replaced (each is backed up first), and whether the dependencies changed.
-4. Decide whether to go ahead. "Update the kit" is the go-ahead, so apply right after the check. Pause first when the check lists edits to kit files, because those are about to be replaced. Name them and ask. "Is there a new version" and "check for updates" only ask for the check, so stop after step 3.
-5. Apply it:
+   It downloads the latest release and lists what would be added, restored, replaced and removed. It also lists the files the creator edited that the release did not change ("Kept your edits"), and the edited files it would replace. If it prints a network problem, pass it on in the same words. Someone with no internet access can download the release file elsewhere and pass it with `--from <file>`. To try a particular release, use `--ref <tag>`.
+4. Tell the creator in plain words how many files change, which of their edits stay as they are, which edits would be replaced (each is backed up first), and whether the dependencies changed.
+5. Decide whether to go ahead. "Update the kit" is the go-ahead, so apply right after the check. Pause first when the check lists edits that would be replaced, because the release changed those files too. Name them and ask. Files under "Kept your edits" need no pause, since they stay as they are. "Is there a new version" and "check for updates" only ask for the check, so stop after step 4.
+6. Apply it:
 
    ```bash
    uv run python bin/update_kit.py --apply
    ```
 
-6. Report what the output says: the counts, the files that were backed up and where, and the dependency line. When it says the dependencies changed, run `uv sync` and then `npm install`. Run `bash bin/check_adapters.sh` and report any problem it lists.
+7. Report what the output says: the counts, the files that were backed up and where, the kept edits, and the dependency line. When it says the dependencies changed, run `uv sync` and then `npm install`. Run `bash bin/check_adapters.sh` and report any problem it lists.
 
 ## Notes
 
-- A kit file the creator edited is replaced even when the release did not change it, so the kit always matches the release. Preferences belong in rules, not in kit files: a "going forward" correction goes to `me/rules/`, which updates never touch.
-- If the kit was cloned with git, the update still works on the files directly. Git shows the updated files as modified, which is expected.
+- A file the creator edited and the release did not change stays as it is, and the update says so every time. A file the creator deleted stays deleted unless the release changed it, and then it comes back and is reported. Preferences belong in rules, not in kit files: a "going forward" correction goes to `me/rules/`, which updates never touch.
+- With no `.kit-manifest.json` the update cannot tell edits from changes, so it backs up and replaces every file that differs from the release.
 - After an interruption, run it again. It picks up where it stopped.
 
 ## Feedback
 
-When the creator corrects how this skill updates the kit, fix it now and record the rule with `kit.rules.add("update-kit", "<rule>")`. In a shell: `uv run python -m kit.rules add update-kit "<rule>"`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.
+When the creator corrects how this skill updates the kit, fix it now and record the rule with `kit.rules.add("update-kit", "<rule>")`. In a shell: `uv run python -m kit.rules add update-kit '<rule>'`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.

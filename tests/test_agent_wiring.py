@@ -458,6 +458,18 @@ def test_update_kit_skill_runs_the_script_in_check_then_apply_order():
         assert words in body
 
 
+def test_update_kit_skill_sends_git_clones_to_git_pull_and_explains_what_is_kept():
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    assert "`git pull`" in body and "gitignored" in body
+    assert "copies without git history, such as a copy made from the template or an unzipped download" in body
+    assert body.index("git pull") < body.index("uv run python bin/update_kit.py\n"), "the clone check comes first"
+    for words in ("Kept your edits", "stays as it is", "stays deleted", "unless the release changed"):
+        assert words in body, words
+    assert "replaced even when the release did not change it" not in body, "the old policy is gone"
+    claude = text(ROOT / "CLAUDE.md")
+    assert "`git pull`" in claude and "me/kit-backups/" in claude and "unless the release changed it too" in claude
+
+
 def test_learnings_skill_covers_show_undo_and_prune():
     body = text(SKILLS / "learnings" / "SKILL.md")
     for words in ("read <skill> --numbered", "recent 10", "undo <skill>", "remove <skill> <number>",
