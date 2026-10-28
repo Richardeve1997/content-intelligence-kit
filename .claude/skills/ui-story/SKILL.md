@@ -91,7 +91,7 @@ Test it: mute the render and look at frames 0.2, 1, 2, 3, 4 and 5 s (the review'
 
 - One idea per visual, and about six words per visual at most, on screen at least 0.35 s per word plus 0.6 s. `audit_dom.py` measures it; keep its table with the sources. A short row is fine only when the speech binds it (two cards on one sentence). Fix a short row by timing first: start the card on the sentence that already names the idea.
 - A new visual about every two seconds of the finished Reel, and a build (a row, a tick, a chip, typed text, a cursor click) about every 0.8 s between them. A face window counts as a new visual.
-- Nothing in split or canvas holds still for more than 3 s. A card that waits for a later word gets a build meanwhile: a count, a ring walking the rows, a tile filling. `check_static.py` fails a still zone.
+- Nothing in split or canvas holds still for more than 3 s. A card that waits for a later word gets a build meanwhile: a ring walking the rows, a tile filling, a mark popping in. A count is not a waiting build: it climbs in under a second and lands on its word, so its passing values never read as numbers. `check_static.py` fails a still zone.
 - A list populates above the creator in split: an icon and one to three words per row, each on its spoken word, held through the sentence. Then cut to face with a punch-in on the payoff phrase.
 - When the words promise a few things to wait for ("two things you need to know"), show the list with the names blurred until each one is said. Never blur a source, a number or the call to action.
 - Several videos or resources show as a carousel, held through the sentence, cutting to face on the payoff.
@@ -105,6 +105,7 @@ Test it: mute the render and look at frames 0.2, 1, 2, 3, 4 and 5 s (the review'
 - Product footage plays in a `.vidcard` (a rounded app window) with accent motion graphics on top: a chip naming the action on its word, a ring on the UI element, a cursor glide and click, a zoom to the detail that lands on its word and holds. No drifting pans.
 - Plain language on screen: "Free and open source" with a star count, not a licence name or a technical metric.
 - Every number on screen matches the number the creator says, or is the stronger sourced version of it (their number big, the sourced range under it). Never invent a number, a rank or a quote. A small spoken slip is not corrected on screen.
+- One fact shows one number. When the creator says a number, every card that shows that fact uses it, the subject card's badges included, since they come first. A fuller live figure from the source goes in `SOURCES.md`, not on another card.
 - No grey credit lines and no "illustrative" tags on screen. Credits and notes go in `SOURCES.md`; a stat may keep one readable source pill.
 - When the creator cites their own experience, show it: the real marks of the places they name, with their titles.
 - When the creator quotes someone and a recording of that person exists, play the clip above them in split with its voice about 2 dB under theirs, in step word for word. Show what the recording shows, with a name chip that gives the person's real title.
@@ -278,7 +279,7 @@ HyperFrames rules for the composition: one `index.html`, a transparent root, `da
 - [ ] Karaoke captions at y 1570 in every layout, light over the canvas, `caption_blink_check.py` reports 0
 - [ ] Tight cuts, `check_trims.py` passes, no pause over about 0.45 s between sentences
 - [ ] `check_static.py` passes; no bare face run over about 5 s
-- [ ] Every number on screen matches the spoken one and traces to `build/sources/SOURCES.md`
+- [ ] Every number on screen matches the spoken one, one fact shows one number on every card, and each traces to `build/sources/SOURCES.md`
 - [ ] The closer shows the creator's call to action from their profile
 - [ ] Nothing meaningful within 90 px of either side (`ig_safe_check.py` frames in `review/safe/`)
 - [ ] `ship.py` passed the speech gate; `postcheck.py` passes (1080x1920, 60 fps, -13 LUFS within 1 LU, true peak at or below -1.5 dBTP)

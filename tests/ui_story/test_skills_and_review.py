@@ -79,6 +79,20 @@ def test_review_carries_the_rubric_and_the_loop_limit():
         assert value in body, value
 
 
+def test_one_fact_shows_one_number_on_every_card():
+    """A subject card's star badge, a later stat card and a slow count once showed three numbers for one fact."""
+    ui, review = text(SKILLS["ui-story"]), text(SKILLS["review"])
+    real_things = ui.split("### Real things on screen")[1].split("###")[0]
+    assert "One fact shows one number" in real_things
+    assert "badge" in real_things, "the subject card's badges are named, since they come first"
+    pace = ui.split("### Pace and reading load")[1].split("###")[0]
+    assert "in under a second" in pace, "a count's passing values must not read as numbers"
+    rubric = review.split("## The rubric")[1].split("## Common mistakes")[0]
+    assert "one fact shows one number" in rubric.lower()
+    handover = ui.split("## Before handing over")[1]
+    assert "one number" in handover
+
+
 def test_both_skills_are_routed_in_claude_md():
     claude = text(ROOT / "CLAUDE.md")
     assert "`ui-story`" in claude and "`review`" in claude
