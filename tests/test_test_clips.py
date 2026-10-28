@@ -428,6 +428,17 @@ def test_the_clip_script_prints_a_sentence_and_not_a_traceback(clip, tmp_path, m
     assert "set me up" in printed and "Traceback" not in printed
 
 
+def test_an_error_nobody_expected_is_still_a_sentence(clip, tmp_path, monkeypatch, capsys, example_me):
+    def broken(*args, **kwargs):
+        raise RuntimeError("the model could not be fetched")
+
+    monkeypatch.setattr(clip, "clip", broken)
+    assert clip.main(["--out", str(tmp_path / "o.mp4")]) == 1
+    printed = capsys.readouterr().out
+    assert "RuntimeError: the model could not be fetched" in printed and "doctor.py" in printed
+    assert "Traceback" not in printed
+
+
 def test_a_step_that_fails_stops_the_clip_with_what_it_said(clip, tmp_path):
     with pytest.raises(KitError) as caught:
         clip.run("testing a failure", [sys.executable, "-c", "import sys; print('one'); print('two', file=sys.stderr); sys.exit(3)"])

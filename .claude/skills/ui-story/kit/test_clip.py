@@ -410,6 +410,10 @@ def main(argv: list[str] | None = None) -> int:
     except (KitError, ValueError) as problem:
         print(problem)
         return 1
+    except Exception as problem:  # the creator never sees a stack: say what stopped the clip and what to try
+        print(f"The test clip stopped with an error it did not explain ({type(problem).__name__}: {problem}). "
+              "Run python3 bin/doctor.py, then try again.")
+        return 1
     return 0
 
 
