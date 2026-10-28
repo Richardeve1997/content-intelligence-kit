@@ -28,6 +28,11 @@ file whose current hash differs from the manifest has been edited, and the updat
 A release file is what GitHub serves for a tag: a .tar.gz holding one top-level folder. The whole file is
 checked before the first change, so a bad release leaves the kit as it was.
 
+A git clone whose origin is the kit's own repository updates with git pull, so the script stops there and
+says so. Every other folder updates here: a copy made with GitHub's "Use this template" (a git repository
+whose origin is the creator's own, so a pull would never bring a release), a clone pointed at another
+repository, and a folder with no git history at all.
+
 This script uses only the Python standard library, so it runs before the kit's packages are installed.
 """
 
@@ -79,6 +84,14 @@ LISTED = 50  # files named per section of the report
 
 _TAG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _JUNK = (".DS_Store", "__pycache__")  # left behind in a folder the release emptied; safe to sweep
+# A remote address on GitHub in any form git takes: https, http, git or ssh with an optional user and port, or the
+# short form ssh remotes use, with a colon between the host and owner/name. The owner/name part is compared with
+# REPO, ignoring case as GitHub does.
+_GITHUB_REMOTE = re.compile(
+    r"(?:(?:https?|git|ssh)://(?:[^@/\s]+@)?(?:www\.)?github\.com(?::\d+)?/|[^@/\s:]+@github\.com:)"
+    r"(?P<repo>[^/\s]+/[^/\s]+?)(?:\.git)?/?",
+    re.IGNORECASE,
+)
 
 
 class UpdateError(Exception):
@@ -144,6 +157,35 @@ def local_digest(path: Path) -> str | None:
 def me_dir(root: Path) -> Path:
     override = os.environ.get("KIT_ME", "").strip()
     return Path(override).expanduser().absolute() if override else root / "me"
+
+
+# --- how the kit was installed -------------------------------------------------------------------------------
+
+
+def points_at_the_kit(address: str) -> bool:
+    """True when a git remote address names the kit's own repository on GitHub."""
+    found = _GITHUB_REMOTE.fullmatch(address.strip()) if isinstance(address, str) else None
+    return bool(found) and found.group("repo").casefold() == REPO.casefold()
+
+
+def clone_of_the_kit(root: Path) -> bool:
+    """True when the kit folder has its own .git and its origin is the kit's repository.
+
+    Only the folder's own .git counts, because git asked from a folder without one answers for whatever
+    repository holds it. When git is missing or cannot answer, the folder counts as a copy."""
+    if not (root / ".git").exists():
+        return False
+    try:
+        answer = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return answer.returncode == 0 and points_at_the_kit(answer.stdout)
 
 
 # --- the manifest -------------------------------------------------------------------------------------------
@@ -718,7 +760,7 @@ def report_check(plan: Plan, release: Release, shown: str, notes: list[str]) -> 
     if plan.changes_dependencies():
         lines.append(
             "This release changes the kit's dependencies, so after you apply it, "
-            f"run: {SYNC}, then npm install. {SYNC_NOTE}"
+            f"run: {SYNC}, then npm ci. {SYNC_NOTE}"
         )
     lines.append("Nothing was changed. Run this again with --apply to update.")
     print("\n".join(lines))
@@ -747,7 +789,7 @@ def apply_update(root: Path, release: Release, plan: Plan, shown: str, notes: li
     lines += _lists(plan, done=True)
     lines += ["", "Your me, work and research folders and your .env were not touched."]
     if plan.changes_dependencies():
-        lines.append(f"The kit's dependencies changed. Run: {SYNC}, then npm install. {SYNC_NOTE}")
+        lines.append(f"The kit's dependencies changed. Run: {SYNC}, then npm ci. {SYNC_NOTE}")
     print("\n".join(lines))
 
 
@@ -755,6 +797,10 @@ def apply_update(root: Path, release: Release, plan: Plan, shown: str, notes: li
 
 
 def update(root: Path, apply_it: bool, ref: str | None, source: str | None) -> int:
+    if clone_of_the_kit(root):
+        raise UpdateError(
+            "This folder is a git clone of the kit, so it updates with git pull, not with this script. Nothing was changed."
+        )
     with tempfile.TemporaryDirectory(prefix="kit-update-") as folder:
         scratch = Path(folder)
         label = None

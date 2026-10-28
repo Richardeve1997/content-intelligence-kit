@@ -21,7 +21,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "bin" / "feedback_check.py"
-REASON = "The creator just gave a correction. Record it with the kit's rules command for the skill it applies to, then finish."
+REASON = (
+    "The creator just gave a correction. If it is a lasting preference, record it with the kit's rules command "
+    "for the skill it applies to, then finish."
+)
 CORRECTION = "From now on keep every caption under 12 words."
 ADD = "uv run python -m kit.rules add post 'Keep every caption under 12 words.'"
 
@@ -51,7 +54,8 @@ def result(text):
 
 
 def feedback(reason):
-    return user(f"Stop hook feedback: {reason}", isMeta=True)
+    """The entry Claude Code writes when a Stop hook blocks: meta, with a plain string that starts on its own line."""
+    return user(f"Stop hook feedback:\n{reason}", isMeta=True)
 
 
 NOISE = [
@@ -174,6 +178,47 @@ def test_a_rule_recorded_in_an_earlier_turn_does_not_cover_a_new_correction(tmp_
     ]  # fmt: skip
     assert blocks(hook(tmp_path, turn))
     assert not blocks(hook(tmp_path, [*turn, ran(ADD), result("Recorded"), said("Recorded.")]))
+
+
+def test_once_the_hooks_own_feedback_follows_the_correction_the_next_stop_goes_through(tmp_path):
+    """A second guard beside stop_hook_active: the hook asks at most once after each message from the creator."""
+    turn = [user(CORRECTION), said("Done."), feedback(REASON), said("That was a one-off, so no rule.")]
+    assert not blocks(hook(tmp_path, turn))
+    assert not blocks(hook(tmp_path, [*turn, ran("ls"), result("a.txt"), said("Done.")]))
+
+
+def test_a_new_correction_after_the_hooks_feedback_is_asked_about_again(tmp_path):
+    earlier = [user(CORRECTION), said("Done."), feedback(REASON), said("Noted.")]
+    assert blocks(hook(tmp_path, [*earlier, user("Never put hashtags in the first line."), said("Ok.")]))
+
+
+def test_the_feedback_entry_exactly_as_claude_code_writes_it_stops_the_search(tmp_path):
+    """Checked against a live session: a blocked stop leaves a "user" entry with isMeta true, whose content is a
+    plain string that starts "Stop hook feedback:" and a line break, then the reason."""
+    entry = {
+        "type": "user",
+        "isMeta": True,
+        "isSidechain": False,
+        "userType": "external",
+        "message": {"role": "user", "content": "Stop hook feedback:\n" + REASON},
+    }
+    assert not blocks(hook(tmp_path, [user(CORRECTION), said("Done."), entry, said("Nothing lasting to record.")]))
+
+
+def test_the_feedback_entry_also_counts_as_a_list_of_text_blocks(tmp_path):
+    as_blocks = {
+        "type": "user",
+        "isSidechain": False,
+        "isMeta": True,
+        "message": {"role": "user", "content": [{"type": "text", "text": f"Stop hook feedback:\n{REASON}"}]},
+    }
+    assert not blocks(hook(tmp_path, [user(CORRECTION), said("Done."), as_blocks, said("Noted.")]))
+
+
+def test_only_the_hooks_feedback_stops_the_search(tmp_path):
+    # another meta entry, or feedback text without the meta flag, is passed over as before
+    for entry in (user("Some other note.", isMeta=True), user(f"Stop hook feedback:\n{REASON}")):
+        assert blocks(hook(tmp_path, [user(CORRECTION), said("Done."), entry, said("Ok.")]))
 
 
 def test_stop_hook_active_never_blocks_and_does_not_even_open_the_transcript(tmp_path):

@@ -36,7 +36,7 @@ def test_the_skill_follows_the_shared_contract():
     assert 'kit.rules.read("character")' in first_step
     assert re.findall(r"^## (.+)$", body, re.M)[-1] == "Feedback"
     feedback = body[body.index("## Feedback") :]
-    assert 'kit.rules.add("character"' in feedback and "python -m kit.rules add character '" in feedback
+    assert 'kit.rules.add("character"' in feedback and "python -m kit.rules add character - <<'RULE'" in feedback
 
 
 def test_the_skill_walks_every_approval_and_names_its_commands():

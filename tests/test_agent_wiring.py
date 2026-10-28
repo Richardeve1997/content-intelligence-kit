@@ -478,7 +478,6 @@ def test_update_kit_skill_keeps_the_groups_that_are_installed_when_it_syncs():
 def test_update_kit_skill_sends_git_clones_to_git_pull_and_explains_what_is_kept():
     body = text(SKILLS / "update-kit" / "SKILL.md")
     assert "`git pull`" in body and "gitignored" in body
-    assert "copies without git history, such as a copy made from the template or an unzipped download" in body
     assert body.index("git pull") < body.index("uv run python bin/update_kit.py\n"), "the clone check comes first"
     for words in ("Kept your edits", "stays as it is", "stays deleted", "unless the release changed"):
         assert words in body, words
@@ -487,14 +486,56 @@ def test_update_kit_skill_sends_git_clones_to_git_pull_and_explains_what_is_kept
     assert "`git pull`" in claude and "me/kit-backups/" in claude and "unless the release changed it too" in claude
 
 
-def test_shell_examples_that_add_a_rule_use_single_quotes_so_dollar_signs_and_backticks_survive():
+def test_only_a_clone_whose_origin_is_the_kit_updates_with_git_pull():
+    """A copy made with "Use this template" has git history, but its origin is the creator's own repository,
+    so a pull there never brings a release. The origin decides, not the .git folder."""
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    step = re.search(r"^2\. (.+?)(?=^3\. )", body, re.M | re.S).group(1)
+    assert "`git remote get-url origin`" in step
+    assert "https://github.com/" in step and "/content-intelligence-kit" in step, "the kit's address to compare with"
+    assert "Use this template" in step and "origin" in step
+    assert "If the folder has a `.git` folder, it is a git clone" not in body, "a .git folder alone is not the test"
+    assert body.index("git remote get-url origin") < body.index("uv run python bin/update_kit.py\n")
+    claude = text(ROOT / "CLAUDE.md")
+    updating = claude[claude.index("## Updating") :]
+    assert "`git remote get-url origin`" in updating and "Use this template" in updating
+    assert "A kit cloned with git updates with `git pull`" not in claude
+
+
+def test_update_kit_skill_says_what_to_do_when_a_pull_refuses():
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    step = re.search(r"^2\. (.+?)(?=^3\. )", body, re.M | re.S).group(1)
+    assert "If `git pull` refuses" in step
+    for words in ("me/kit-backups/", "git checkout --", "again", "rules"):
+        assert words in step, words
+    assert "untracked file" in step and "move that file into the same backup folder" in step, (
+        "a file of the creator's where the release adds one has no kit version to check out"
+    )
+    assert "git pull --ff-only" in step, "a pull never makes a merge on its own"
+    assert "uv sync --group video --group research --inexact" in step and "npm ci" in step, "a pull can change the dependencies"
+
+
+def test_shell_examples_that_add_a_rule_never_use_double_quotes_and_claude_md_uses_standard_input():
     sources = [ROOT / "CLAUDE.md", ROOT / "AGENTS.md", *[f / "SKILL.md" for f in skill_folders() if f.name != "humanizer"]]
     for source in sources:
         doubled = re.findall(r"python -m kit\.rules add \S+ \"", text(source))
         assert doubled == [], f"{source.name} quotes a rule with double quotes in a shell example"
     claude = text(ROOT / "CLAUDE.md")
-    assert "python -m kit.rules add <skill> '<rule>'" in claude
+    assert "python -m kit.rules add <skill> - <<'RULE'" in claude and "\n   RULE\n" in claude
+    assert "python -m kit.rules add <skill> '<rule>'" not in claude, "an apostrophe in the rule would end the quote"
     assert "300 characters" in claude
+
+
+def test_every_feedback_section_sends_the_rule_on_standard_input():
+    """A rule often has an apostrophe in it ("don't", "the creator's"), which ends a single-quoted shell word early.
+    On standard input, behind a quoted end marker, every character of the rule stays as typed."""
+    for folder in skill_folders():
+        if folder.name == "humanizer":
+            continue
+        body = text(folder / "SKILL.md")
+        feedback = body[body.index("## Feedback") :]
+        assert f"python -m kit.rules add {folder.name} - <<'RULE'\n<rule>\nRULE\n" in feedback, folder.name
+        assert f"python -m kit.rules add {folder.name} '" not in feedback, f"{folder.name} still quotes the rule"
 
 
 def test_learnings_skill_documents_adding_by_hand_with_its_limits():
@@ -817,3 +858,10 @@ def test_authored_files_have_no_internal_process_words(path):
     content = text(ROOT / path).lower()
     for word in INTERNAL_WORDS:
         assert word not in content, f"{path} contains {word!r}"
+
+
+def test_claude_md_says_the_kit_sets_up_no_hooks_for_codex():
+    """Codex can run hooks. The kit gives it none, so its Feedback sections are what record corrections."""
+    claude = text(ROOT / "CLAUDE.md")
+    assert "The kit sets up no hooks for Codex" in claude
+    assert "Codex has no hooks" not in claude

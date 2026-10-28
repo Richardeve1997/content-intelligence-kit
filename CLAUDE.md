@@ -52,14 +52,22 @@ Every skill starts by reading the creator's rules for it with `kit.rules.read("<
 Every skill ends with a Feedback section. When the creator corrects something, or says "going forward", "always" or "never":
 
 1. Fix what is in front of them first.
-2. Record the lasting part with `kit.rules.add("<skill>", "<rule>")`. In a shell: `uv run python -m kit.rules add <skill> '<rule>'`, with single quotes so `$` and backticks stay as typed. Write one or two plain sentences, 300 characters at most, with no dates and no quotes from the creator. The skill must be a folder in `.claude/skills/`, and a rule the skill already has is skipped. If the rule touches several skills, add it once for each.
+2. Record the lasting part with `kit.rules.add("<skill>", "<rule>")`. In a shell, send the rule on standard input, so an apostrophe, `$` or a backtick in it stays as typed:
+
+   ```bash
+   uv run python -m kit.rules add <skill> - <<'RULE'
+   <rule>
+   RULE
+   ```
+
+   Write one or two plain sentences, 300 characters at most, with no dates and no quotes from the creator. The skill must be a folder in `.claude/skills/`, and a rule the skill already has is skipped. If the rule touches several skills, add it once for each.
 3. If it contradicts an older rule, take the old one out first. `uv run python -m kit.rules undo <skill>` removes the newest, and `learnings` handles the rest.
 4. Say in one line what you recorded.
 
-Rules and lessons live in `me/rules/<skill>.md` and `me/lessons.md`, so they survive updates. Never write a preference into a `SKILL.md`, because an update replaces it. In Claude Code, a Stop hook (`bin/feedback_check.py`, set up in `.claude/settings.json`) backs this up. When the creator's last message read like a correction and the turn recorded no rule, it asks once for one, with a fixed reason, and writes nothing itself. Codex has no hooks, so the Feedback section is the only recorder there.
+Rules and lessons live in `me/rules/<skill>.md` and `me/lessons.md`, so they survive updates. Never write a preference into a `SKILL.md`, because an update replaces it. In Claude Code, a Stop hook (`bin/feedback_check.py`, set up in `.claude/settings.json`) backs this up. When the creator's last message read like a correction and the turn recorded no rule, it asks once for one, with a fixed reason, and writes nothing itself. The kit sets up no hooks for Codex, so the Feedback section is the only recorder there.
 
 After you add or change a skill, run `bash bin/check_adapters.sh`. It confirms the Codex link, and that every skill reads its rules first and ends with a Feedback section.
 
 ## Updating
 
-A kit cloned with git updates with `git pull`: the creator's folders are gitignored, so a pull leaves them alone. For a copy without git history, such as a template copy or an unzipped download, "update the kit" runs `update-kit`. It replaces the kit's files from the latest release. A file the creator edited stays as it is unless the release changed it too, and then it is copied into `me/kit-backups/` before it is replaced. `me/`, `work/`, `research/` and `.env` are never touched.
+"Update the kit" runs `update-kit`, which first checks how the kit was installed with `git remote get-url origin`. A clone whose origin is the kit's own repository updates with `git pull`: the creator's folders are gitignored, so a pull leaves them alone. Every other folder updates from the latest release. That covers a copy made with GitHub's "Use this template" (its origin is the creator's own repository, so a pull would never bring a release), a clone pointed at another repository, and an unzipped download. The release update replaces the kit's files. A file the creator edited stays as it is unless the release changed it too, and then it is copied into `me/kit-backups/` before it is replaced. `me/`, `work/`, `research/` and `.env` are never touched.

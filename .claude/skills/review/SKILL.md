@@ -49,4 +49,12 @@ Times are on the finished file, after the speed-up. Items 2 to 5 are the UI stor
 
 ## Feedback
 
-When the creator disagrees with a verdict or adds something to check, fix the current review first. Then record the lasting part with `kit.rules.add("review", "<rule>")`. In a shell: `uv run python -m kit.rules add review '<rule>'`. Write one or two plain sentences, with no dates and no quotes from the creator. If it belongs to how a style builds a video rather than how it is checked, record it for that skill too (`ui-story` or `mini-me`). If it contradicts an older rule for this skill, remove the older one first: `uv run python -m kit.rules read review --numbered` shows the numbers, and `uv run python -m kit.rules remove review <number>` removes one. Say in one line what you recorded.
+When the creator disagrees with a verdict or adds something to check, fix the current review first. Then record the lasting part with `kit.rules.add("review", "<rule>")`. In a shell, send the rule on standard input, so an apostrophe, `$` or a backtick in it stays as typed:
+
+```bash
+uv run python -m kit.rules add review - <<'RULE'
+<rule>
+RULE
+```
+
+Write one or two plain sentences, with no dates and no quotes from the creator. If it belongs to how a style builds a video rather than how it is checked, record it for that skill too (`ui-story` or `mini-me`). If it contradicts an older rule for this skill, remove the older one first: `uv run python -m kit.rules read review --numbered` shows the numbers, and `uv run python -m kit.rules remove review <number>` removes one. Say in one line what you recorded.

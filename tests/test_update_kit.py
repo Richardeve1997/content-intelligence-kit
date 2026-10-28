@@ -589,12 +589,12 @@ def test_the_report_lists_what_changed(update_kit, installed, releases, capsys):
 
 def test_changed_dependencies_are_pointed_out(update_kit, installed, releases, tmp_path, capsys):
     code, out, err = check(update_kit, installed, releases.v2, capsys)
-    assert "run: uv sync --group video --group research --inexact, then npm install" in out
+    assert "run: uv sync --group video --group research --inexact, then npm ci." in out
     assert "If you built a mini me character, add --group character to that command." in out
     assert out.index("uv sync") < out.index("Nothing was changed")
 
     code, out, err = apply(update_kit, installed, releases.v2, capsys)
-    assert "Run: uv sync --group video --group research --inexact, then npm install." in out
+    assert "Run: uv sync --group video --group research --inexact, then npm ci." in out
     assert "add --group character to that command" in out
     same_dependencies = make_release(
         tmp_path / "v3.tar.gz", "v3", {**V2, "kit/core.py": "VALUE = 3\n"}, links=LINKS, executable=EXECUTABLE
@@ -1056,6 +1056,127 @@ def test_an_update_writes_the_same_manifest_that_write_manifest_would(update_kit
 
     assert (installed / ".kit-manifest.json").read_bytes() == written_by_the_update
     capsys.readouterr()
+
+
+# --- a git clone of the kit updates with git pull ----------------------------------------------------------------
+# A clone whose origin is the kit's own repository gets new releases with git pull. A copy made with GitHub's
+# "Use this template" is a git repository too, but its origin is the creator's own repository, so a pull there
+# never brings a release. That copy, and any folder without git, update with this script.
+
+
+def kit_addresses(update_kit) -> list[str]:
+    """Every way git can write the kit's own repository as a clone's origin. Built from REPO at run time."""
+    repo = update_kit.REPO
+    return [
+        f"https://github.com/{repo}",
+        f"https://github.com/{repo}.git",
+        f"https://github.com/{repo}/",
+        f"http://github.com/{repo}.git",
+        f"https://www.github.com/{repo}.git",
+        f"git@github.com:{repo}.git",
+        f"git@github.com:{repo}",
+        f"ssh://git@github.com/{repo}.git",
+        f"ssh://git@github.com:22/{repo}.git",
+        f"git://github.com/{repo}.git",
+        f"https://github.com/{repo.upper()}.git",  # GitHub ignores case in owner and repository names
+        f"  https://github.com/{repo}.git\n",  # as git prints it
+    ]
+
+
+def other_addresses(update_kit) -> list[str]:
+    """Origins that are not the kit: a template copy keeps the kit's name under the creator's own account."""
+    repo = update_kit.REPO
+    name = repo.split("/")[1]
+    return [
+        f"https://github.com/someone/{name}.git",
+        f"git@github.com:someone/{name}.git",
+        "https://github.com/someone/my-reels",
+        f"https://github.com/{repo}-copy.git",
+        f"https://github.com/{repo}/extra.git",
+        f"https://gitlab.com/{repo}.git",
+        f"https://github.com.example.com/{repo}.git",
+        f"https://example.com/github.com/{repo}.git",
+        "../kit-mirror",
+        f"/srv/git/{name}.git",
+        "",
+    ]
+
+
+def test_the_kits_own_address_is_recognised_in_every_form(update_kit):
+    for address in kit_addresses(update_kit):
+        assert update_kit.points_at_the_kit(address) is True, address
+
+
+def test_any_other_address_is_not_the_kit(update_kit):
+    for address in other_addresses(update_kit):
+        assert update_kit.points_at_the_kit(address) is False, address
+
+
+def clone(root: Path, origin: str | None) -> None:
+    """Make `root` a git repository, with `origin` as its origin when one is given."""
+    git(root, "init", "-q")
+    if origin is not None:
+        git(root, "remote", "add", "origin", origin)
+
+
+@needs_git
+@pytest.mark.parametrize("flags", [[], ["--apply"], ["--ref", "v2", "--apply"], ["--from", "RELEASE", "--apply"]])
+def test_a_clone_of_the_kit_is_sent_to_git_pull_and_nothing_changes(update_kit, installed, releases, capsys, monkeypatch, flags):
+    clone(installed, f"https://github.com/{update_kit.REPO}.git")
+    served = Served({})
+    monkeypatch.setattr(update_kit, "_open", served)
+    before = snapshot(installed)
+
+    code = update_kit.main([str(releases.v2) if flag == "RELEASE" else flag for flag in flags], root=installed)
+    out = capsys.readouterr()
+
+    assert code == 1 and out.out == ""
+    assert len(plain(out.err).strip().splitlines()) == 1
+    assert "git clone of the kit" in out.err and "git pull" in out.err and "Nothing was changed" in out.err
+    assert served.asked == [], "nothing was looked up or downloaded"
+    assert snapshot(installed) == before
+
+
+@needs_git
+@pytest.mark.parametrize("origin", ["the creator's own repository", "no origin"])
+def test_a_template_copy_or_a_repository_without_the_kit_as_origin_updates_with_the_script(
+    update_kit, installed, releases, capsys, origin
+):
+    clone(installed, "https://github.com/someone/my-reels.git" if origin != "no origin" else None)
+
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+
+    assert (code, err) == (0, "")
+    assert "Updated to release v2" in out
+    assert (installed / "kit/core.py").read_text() == "VALUE = 2\n"
+    assert (installed / ".git").is_dir(), "the creator's git history is never touched"
+
+
+@needs_git
+def test_only_the_kit_folders_own_git_counts(update_kit, releases, tmp_path, capsys):
+    # A kit unzipped inside a clone of the kit is still a plain copy: git there answers for the outer folder.
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    clone(outer, f"https://github.com/{update_kit.REPO}.git")
+    root = outer / "kit"
+    root.mkdir()
+    code, out, err = apply(update_kit, root, releases.v1, capsys)
+    assert (code, err) == (0, "")
+    assert (root / "kit/core.py").read_text() == "VALUE = 1\n"
+
+
+def test_without_git_installed_a_folder_with_git_history_updates_with_the_script(
+    update_kit, installed, releases, capsys, monkeypatch, tmp_path
+):
+    (installed / ".git").mkdir()  # git itself cannot be asked, so nothing says this is a clone of the kit
+    empty = tmp_path / "no-programs"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+    code, out, err = apply(update_kit, installed, releases.v2, capsys)
+
+    assert (code, err) == (0, "")
+    assert (installed / "kit/core.py").read_text() == "VALUE = 2\n"
 
 
 # --- running the installed copy as a program ----------------------------------------------------------------------

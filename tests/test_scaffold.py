@@ -204,6 +204,74 @@ def test_readme_has_the_planned_headings():
     assert found == README_HEADINGS
 
 
+def test_every_relative_link_in_the_readme_leads_to_a_file():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    targets = [t for t in re.findall(r"\]\(([^)\s]+)\)", text) if not t.startswith(("http://", "https://", "#"))]
+    assert "docs/media/ui-story-layouts.svg" in targets, "the README shows the UI story layouts"
+    for target in targets:
+        assert (ROOT / target).is_file(), f"README.md links to {target}, which is not in the repo"
+
+
+def test_readme_says_how_to_start_and_carries_the_credit_line_once():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    sub_headings = re.findall(r"^### (.+)$", text, re.M)
+    assert "Clone it, don't fork it" in sub_headings and "This repo takes no pull requests" in sub_headings
+    assert "git clone https://github.com/" in text and 'say "set me up"' in text
+    assert "Use this template" in text and "npm ci" in text
+    # The holder and handle are written backwards so they appear in plain text only in README.md and LICENSE.
+    holder, handle = "evE drahciR"[::-1], "ia.elbissopehtfotra"[::-1]
+    credit = f"Built by {holder} ([@{handle}](https://www.instagram.com/{handle}/))."
+    assert text.splitlines().count(credit) == 1
+
+
+def _readme_section(heading: str) -> str:
+    """The README text from `heading` up to the next heading of the same or a higher level."""
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    level = heading.split(" ", 1)[0]
+    start = text.index(heading + "\n")
+    rest = text[start + len(heading) :]
+    found = re.search(rf"^#{{1,{len(level)}}} ", rest, re.M)
+    return heading + (rest[: found.start()] if found else rest)
+
+
+def test_readme_says_pull_requests_are_off_for_this_repo_and_why():
+    section = _readme_section("### This repo takes no pull requests")
+    assert "Pull requests are turned off for this repository" in section
+    assert "Clone it and make it yours" in section
+    assert "cannot turn pull requests off" not in (ROOT / "README.md").read_text(encoding="utf-8")
+
+
+def test_readme_not_included_names_no_other_creator_and_says_where_setup_stops():
+    section = _readme_section("## Not included")
+    assert "- other edit styles and script methods, clips, plain motion graphics, carousels and thumbnails\n" in section
+    assert "'s edit style" not in section, "no style is named after a creator"
+    assert "- Windows, Linux and Intel Macs: setup stops on them\n" in section
+    assert "best effort" not in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "setup stops on any other computer" in _readme_section("## What you need")
+
+
+def test_readme_says_what_a_creator_gets_without_zernio_and_where_yt_dlp_comes_from():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "the MP4 and one file with each platform's caption" in text, "the kit writes one manual.md per video"
+    assert "yt-dlp with Homebrew" not in text, "setup installs yt-dlp with the Python tools"
+
+
+def test_readme_quick_start_covers_a_new_mac_and_opening_the_folder():
+    section = _readme_section("## Quick start")
+    assert "command line developer tools" in section and "Say yes" in section, "git on a new Mac asks for them first"
+    assert "`claude`" in section and "`codex`" in section, "how to open the folder in each agent"
+
+
+def test_readme_codex_section_explains_hooks_and_the_sandbox_in_plain_words():
+    section = _readme_section("## Codex")
+    assert "The kit sets up no hooks for Codex" in section
+    assert "runs no hooks" not in section
+    assert "sandbox" in section and "internet" in section and "Say yes when it asks" in section
+    lowered = section.lower()
+    for words in ("full access", "full-access", "danger", "bypass", "yolo"):
+        assert words not in lowered, f"the README never steers creators to {words!r}"
+
+
 def test_fetch_gsap_targets_kit_vendor(tmp_path):
     script = ROOT / "bin" / "fetch_gsap.sh"
     assert script.stat().st_mode & 0o111, "bin/fetch_gsap.sh must be executable"

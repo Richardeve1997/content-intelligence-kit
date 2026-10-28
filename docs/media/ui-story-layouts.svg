@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="656" viewBox="0 0 960 656" role="img" aria-labelledby="title desc" font-family="sans-serif">
+  <title id="title">UI story layouts</title>
+  <desc id="desc">Three vertical 9:16 frames. Split: real footage and graphics on a light grid at the top, and a rounded box marked "you" in a rounded frame at the bottom, its top breaking out above the frame's edge. Canvas: the grid alone with a three-step diagram. Face: the box marked "you" fills the frame, with a dashed outline for a punch-in. Captions sit low in all three.</desc>
+  <defs>
+    <pattern id="grid" width="21" height="21" patternUnits="userSpaceOnUse">
+      <path d="M 21 0 L 0 0 0 21" fill="none" stroke="#e6e6e6" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9e9e9e"/>
+    </marker>
+    <clipPath id="clip-split"><rect x="48" y="88" width="252" height="448" rx="20"/></clipPath>
+    <clipPath id="clip-canvas"><rect x="354" y="88" width="252" height="448" rx="20"/></clipPath>
+    <clipPath id="clip-face"><rect x="660" y="88" width="252" height="448" rx="20"/></clipPath>
+  </defs>
+
+  <rect width="960" height="656" rx="24" fill="#f6f6f6"/>
+  <text x="48" y="44" font-size="22" font-weight="700" fill="#222222">UI story layouts</text>
+  <text x="48" y="68" font-size="14" fill="#555555">The edit switches between them with a hard cut on the start of a phrase. Captions sit low in all three.</text>
+
+  <!-- Split: graphics on the grid above, the creator in a rounded frame below with their head breaking out -->
+  <g clip-path="url(#clip-split)">
+    <rect x="48" y="88" width="252" height="448" fill="#ffffff"/>
+    <rect x="48" y="88" width="252" height="448" fill="url(#grid)"/>
+    <rect x="69" y="139" width="210" height="112" rx="10" fill="#ffffff" stroke="#9e9e9e" stroke-width="1.5"/>
+    <circle cx="81" cy="151" r="3" fill="#bdbdbd"/>
+    <circle cx="91" cy="151" r="3" fill="#bdbdbd"/>
+    <circle cx="101" cy="151" r="3" fill="#bdbdbd"/>
+    <rect x="81" y="166" width="118" height="9" rx="4.5" fill="#9e9e9e"/>
+    <rect x="81" y="183" width="186" height="7" rx="3.5" fill="#d6d6d6"/>
+    <rect x="81" y="197" width="150" height="7" rx="3.5" fill="#d6d6d6"/>
+    <text x="174" y="236" font-size="11.5" fill="#666666" text-anchor="middle">real footage and graphics</text>
+    <path d="M 69 536 L 69 369 Q 69 356 82 356 L 266 356 Q 279 356 279 369 L 279 536 Z" fill="#dddddd" stroke="#c4c4c4" stroke-width="1"/>
+    <rect x="116" y="281" width="116" height="310" rx="46" fill="#7a7a7a"/>
+    <text x="174" y="330" font-size="20" font-weight="700" fill="#ffffff" text-anchor="middle">you</text>
+    <rect x="114" y="442" width="120" height="24" rx="12" fill="#333333"/>
+    <text x="174" y="458.5" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">captions</text>
+  </g>
+  <rect x="48" y="88" width="252" height="448" rx="20" fill="none" stroke="#bdbdbd" stroke-width="2"/>
+
+  <!-- Canvas: the grid alone, here with a three-step diagram -->
+  <g clip-path="url(#clip-canvas)">
+    <rect x="354" y="88" width="252" height="448" fill="#ffffff"/>
+    <rect x="354" y="88" width="252" height="448" fill="url(#grid)"/>
+    <rect x="405" y="150" width="150" height="56" rx="12" fill="#ffffff" stroke="#9e9e9e" stroke-width="1.5"/>
+    <circle cx="429" cy="178" r="12" fill="#7a7a7a"/>
+    <text x="429" y="182.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <rect x="451" y="169" width="88" height="9" rx="4.5" fill="#bdbdbd"/>
+    <rect x="451" y="184" width="60" height="7" rx="3.5" fill="#d6d6d6"/>
+    <line x1="480" y1="208" x2="480" y2="238" stroke="#9e9e9e" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="405" y="246" width="150" height="56" rx="12" fill="#ffffff" stroke="#9e9e9e" stroke-width="1.5"/>
+    <circle cx="429" cy="274" r="12" fill="#7a7a7a"/>
+    <text x="429" y="278.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <rect x="451" y="265" width="88" height="9" rx="4.5" fill="#bdbdbd"/>
+    <rect x="451" y="280" width="60" height="7" rx="3.5" fill="#d6d6d6"/>
+    <line x1="480" y1="304" x2="480" y2="334" stroke="#9e9e9e" stroke-width="2" marker-end="url(#arrow)"/>
+    <rect x="405" y="342" width="150" height="56" rx="12" fill="#ffffff" stroke="#9e9e9e" stroke-width="1.5"/>
+    <circle cx="429" cy="370" r="12" fill="#7a7a7a"/>
+    <text x="429" y="374.5" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <rect x="451" y="361" width="88" height="9" rx="4.5" fill="#bdbdbd"/>
+    <rect x="451" y="376" width="60" height="7" rx="3.5" fill="#d6d6d6"/>
+    <rect x="420" y="442" width="120" height="24" rx="12" fill="#333333"/>
+    <text x="480" y="458.5" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">captions</text>
+  </g>
+  <rect x="354" y="88" width="252" height="448" rx="20" fill="none" stroke="#bdbdbd" stroke-width="2"/>
+
+  <!-- Face: the creator full screen, with a punch-in on a big line -->
+  <g clip-path="url(#clip-face)">
+    <rect x="660" y="88" width="252" height="448" fill="#dddddd"/>
+    <rect x="706" y="158" width="160" height="430" rx="70" fill="#7a7a7a"/>
+    <text x="786" y="252" font-size="28" font-weight="700" fill="#ffffff" text-anchor="middle">you</text>
+    <rect x="676.5" y="106" width="219" height="390" rx="14" fill="none" stroke="#444444" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="688" y="128" font-size="12" font-weight="600" fill="#333333">punch-in</text>
+    <rect x="726" y="442" width="120" height="24" rx="12" fill="#333333"/>
+    <text x="786" y="458.5" font-size="12.5" font-weight="600" fill="#ffffff" text-anchor="middle">captions</text>
+  </g>
+  <rect x="660" y="88" width="252" height="448" rx="20" fill="none" stroke="#bdbdbd" stroke-width="2"/>
+
+  <g text-anchor="middle">
+    <text x="174" y="570" font-size="20" font-weight="700" fill="#222222">Split</text>
+    <text x="174" y="594" font-size="13" fill="#555555">Real footage and graphics</text>
+    <text x="174" y="612" font-size="13" fill="#555555">build up above you, and your head</text>
+    <text x="174" y="630" font-size="13" fill="#555555">breaks out of the rounded frame.</text>
+
+    <text x="480" y="570" font-size="20" font-weight="700" fill="#222222">Canvas</text>
+    <text x="480" y="594" font-size="13" fill="#555555">The grid alone, for a diagram,</text>
+    <text x="480" y="612" font-size="13" fill="#555555">a list or a three-step explainer,</text>
+    <text x="480" y="630" font-size="13" fill="#555555">while your voice carries on.</text>
+
+    <text x="786" y="570" font-size="20" font-weight="700" fill="#222222">Face</text>
+    <text x="786" y="594" font-size="13" fill="#555555">You, full screen, for opinions</text>
+    <text x="786" y="612" font-size="13" fill="#555555">and the lines that land hardest,</text>
+    <text x="786" y="630" font-size="13" fill="#555555">with punch-ins and slow pushes.</text>
+  </g>
+</svg>
