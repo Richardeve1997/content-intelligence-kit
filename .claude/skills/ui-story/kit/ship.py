@@ -8,14 +8,17 @@
 It reads from build/: zbase.mp4 (or base.mp4 when there are no face zooms), matte.mp4, layout.resolved.json,
 geometry.json, gfx.webm (the rendered graphics), clean.wav and blocks.json (the gap trims). Then:
   1. composite_v2.py -> build/composite.mov (picture plus PCM sound, the gap trims applied)
-  2. kit.finish -> final.mp4 at 1.15x, the bed at -24 LUFS under the voice, peaks held at 0.74, -13 LUFS.
-     --music auto picks a bed from me/music (skipping the last one used) and logs it, or ships with none.
-  3. kit.qa_captions on final.mp4 against build/captions/transcript.json, slowed back to normal speed,
-     with the composite as the double-check. A lost word fails the ship.
-The previous final.mp4, if there was one, is kept as build/final.previous.mp4 until the new one passes.
+  2. kit.finish -> build/final.next.mp4 at 1.15x, the bed at -24 LUFS under the voice, peaks held at 0.74,
+     -13 LUFS. --music auto keeps the bed this video already has (kit.music.for_video), or picks one from
+     me/music and logs it; the ledger keeps one row per video, so every re-ship sounds the same.
+  3. kit.qa_captions on that file against build/captions/transcript.json, slowed back to normal speed,
+     with the composite as the double-check. A lost word stops the ship.
+  4. Only a render that passed becomes final.mp4. The review's pass marker (review/review.json) is deleted
+     first, because it described the previous final. A failed render stays as build/final.next.mp4 to
+     listen to, and the previous final.mp4 is left as it was.
 """
 import argparse
-import shutil
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,15 +34,27 @@ def need(path: Path, made_by: str) -> Path:
     return path
 
 
-def main() -> int:
+def choose_bed(slug: str, choice: str, mood: str | None) -> Path | None:
+    """The bed for this video: none, a named file, or (auto) the bed it already has or a fresh pick."""
+    if choice == "none":
+        return None
+    if choice != "auto":
+        return Path(choice)
+    bed = music.for_video(slug, mood)
+    if bed is None:
+        print("No track in me/music, so this Reel ships with no bed. Add tracks to a mood folder to give it one.")
+    return bed
+
+
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Composite, finish and check one UI story Reel.")
     ap.add_argument("slug")
     ap.add_argument("--test", type=float, nargs=2, metavar=("FROM", "TO"), help="composite a short window only")
-    ap.add_argument("--music", default="auto", help="auto (pick from me/music), none, or a file")
+    ap.add_argument("--music", default="auto", help="auto (the video's bed, or a pick from me/music), none, or a file")
     ap.add_argument("--mood", help="the me/music folder to pick from")
     for flag, value in finish.HOUSE.items():
         ap.add_argument("--" + flag.replace("_", "-"), type=float, default=value)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     try:
         folder = config.work_dir(a.slug)
     except ValueError as problem:
@@ -61,48 +76,33 @@ def main() -> int:
             print(f"test window -> {out}")
         return done.returncode
 
+    transcript = need(build / "captions" / "transcript.json", "build_captions.py --captions-dir build/captions")
     composite = build / "composite.mov"
     done = subprocess.run([py, str(KIT / "composite_v2.py"), *map(str, common),
                            "--blocks", str(need(build / "blocks.json", "make_blocks.py")), "--out", str(composite)])
     if done.returncode:
         return done.returncode
 
-    if a.music == "none":
-        bed = None
-    elif a.music == "auto":
-        bed = music.pick(a.mood)
-        if bed is None:
-            print("No track in me/music, so this Reel ships with no bed. Add tracks to a mood folder to give it one.")
-    else:
-        bed = Path(a.music)
-    final = folder / "final.mp4"
-    previous = build / "final.previous.mp4"
-    if final.is_file():
-        shutil.move(str(final), str(previous))
+    candidate, final = build / "final.next.mp4", folder / "final.mp4"
     try:
-        finish.finish(composite, final, speed=a.speed, music=bed, music_lufs=a.music_lufs, mix_peak=a.mix_peak,
+        bed = choose_bed(a.slug, a.music, a.mood)
+        finish.finish(composite, candidate, speed=a.speed, music=bed, music_lufs=a.music_lufs, mix_peak=a.mix_peak,
                       fade_in=a.fade_in, fade_out=a.fade_out)
+        if bed is not None:
+            music.log(bed, a.slug)  # one row per video: a re-ship with the same bed adds nothing
+        problems = qa_captions.check(candidate, transcribe.load(transcript), speed=a.speed, fallback=composite)
     except config.KitError as problem:
         print(problem)
-        if previous.is_file() and not final.is_file():
-            shutil.move(str(previous), str(final))
         return 1
-    if bed is not None and a.music == "auto":
-        music.log(bed, a.slug)
-
-    transcript = build / "captions" / "transcript.json"
-    if not transcript.is_file():
-        print("build/captions/transcript.json is missing, so the speech gate could not run. Run build_captions.py "
-              "with --captions-dir build/captions.")
-        return 1
-    problems = qa_captions.check(final, transcribe.load(transcript), speed=a.speed, fallback=composite)
     if problems:
         print(f"FAIL: the speech gate found {len(problems)} lost word run(s):")
         for line in problems:
             print(f"- {line}")
+        print(f"The failed render is {candidate}; final.mp4 was left as it was.")
         return 1
     print("PASS: the speech gate heard every caption word.")
-    previous.unlink(missing_ok=True)
+    (folder / "review" / "review.json").unlink(missing_ok=True)  # it passed the previous final, not this one
+    os.replace(candidate, final)
     print(f"shipped {final}")
     return 0
 

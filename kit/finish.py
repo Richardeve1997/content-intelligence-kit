@@ -13,9 +13,10 @@
    The gain is solved again after the limiter until the level sits within 0.05 LU of the target. Only
    gain and peak limiting are used, so the voice keeps its own dynamics and the bed keeps its place
    under it. Its loudness range is measured and reported against the 11 LU target, not forced.
-4. Delivery. One AAC encode at 192 kb/s, 48 kHz, muxed with the picture. The delivered file is
-   measured, and if the encode pushed the true peak above -1.5 dBTP the ceiling is lowered and the
-   sound alone is made again.
+4. Delivery. One AAC encode at 192 kb/s, 48 kHz, muxed with the picture, under a temporary name beside
+   `out`. That file is measured. If the encode pushed the true peak above -1.5 dBTP, the ceiling is lowered
+   and the sound alone is made again. Only a file that meets both targets is moved onto `out`, so a failed
+   finish leaves `out` as it was.
 
 Command line:
 
@@ -23,8 +24,9 @@ Command line:
         [--music-lufs -24] [--mix-peak 0.74] [--fade-in 0.3] [--fade-out 1.2]
     python -m kit.finish measure <file>
 
-`--music auto` takes a bed from the creator's library with kit.music.pick (skipping the last one used)
-and logs it, or finishes with no bed when the library is empty.
+`--music auto` keeps the bed this video already has in the ledger, or picks one from the creator's library
+(kit.music.for_video, which skips the last track used), and logs it once: the ledger holds one row per
+video. With an empty library the Reel finishes with no bed.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from __future__ import annotations
 import argparse
 import functools
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -40,7 +43,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from kit import media, music
+from kit import config, media, music
 from kit.config import KitError
 
 __all__ = ["HOUSE", "TARGET", "KitError", "Loudness", "finish", "main", "measure", "mix_level"]
@@ -213,13 +216,16 @@ def finish(
                       str(picture)], "speed up the picture")
             mix = _mix(src, work / "mix.wav", speed=speed, music_file=music, music_lufs=music_lufs, fade_in=fade_in,
                        fade_out=fade_out, has_voice=info.has_audio, length=length)
+            # The delivery is written beside `out` under a temporary name and moved onto it only once it has
+            # passed both checks, so a failed finish never leaves a file that misses the targets.
+            candidate = work / f"finished{out.suffix or '.mp4'}"
             ceiling = mix_peak
             for _ in range(3):
                 levelled = _solve(mix, work, ceiling)
                 _run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(picture), "-i", str(levelled),
                       "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", *_aac(), "-movflags", "+faststart",
-                      str(out)], "write the finished file")
-                reading = measure(out)
+                      str(candidate)], "write the finished file")
+                reading = measure(candidate)
                 if reading.true_peak <= TARGET["TP"]:
                     break
                 ceiling *= 10 ** ((TARGET["TP"] - reading.true_peak - 0.3) / 20)  # the encode overshot: go lower
@@ -228,12 +234,13 @@ def finish(
                     f"The finished sound still peaks at {reading.true_peak:.1f} dBTP, above the "
                     f"{TARGET['TP']} dBTP limit. Try a lower --mix-peak, such as 0.6."
                 )
+            if abs(reading.integrated - TARGET["I"]) > 0.5:
+                raise KitError(
+                    f"The finished file measures {reading.integrated:.1f} LUFS, more than 0.5 LU from {TARGET['I']:g}."
+                )
+            os.replace(candidate, out)
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    if abs(reading.integrated - TARGET["I"]) > 0.5:
-        raise KitError(
-            f"The finished file measures {reading.integrated:.1f} LUFS, more than 0.5 LU from {TARGET['I']:g}."
-        )
     note = f", loudness range {reading.lra:.1f} LU" + (" (wider than 11)" if reading.lra > TARGET["LRA"] else "")
     print(f"finished {out} at {speed:g}x: {reading.integrated:.1f} LUFS, true peak {reading.true_peak:.1f} dBTP{note}"
           + (f", bed {Path(music).name}" if music else ", no music bed"))
@@ -259,30 +266,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("src", type=Path)
     parser.add_argument("out", type=Path)
     parser.add_argument("--speed", type=float, default=HOUSE["speed"])
-    parser.add_argument("--music", default="auto", help="auto (pick from the library), none, or a file")
+    parser.add_argument("--music", default="auto", help="auto (the video's bed, or a pick from the library), none, or a file")
     parser.add_argument("--mood", help="the music folder to pick from with --music auto")
-    parser.add_argument("--slug", help="the video name to log the bed under (default: the output's folder name)")
+    parser.add_argument("--slug", help="the video name the bed belongs to (default: the output's folder name)")
     parser.add_argument("--music-lufs", type=float, default=HOUSE["music_lufs"])
     parser.add_argument("--mix-peak", type=float, default=HOUSE["mix_peak"])
     parser.add_argument("--fade-in", type=float, default=HOUSE["fade_in"])
     parser.add_argument("--fade-out", type=float, default=HOUSE["fade_out"])
     args = parser.parse_args(args_in)
 
-    bed: Path | None
-    if args.music == "none":
-        bed = None
-    elif args.music == "auto":
-        bed = music.pick(args.mood)
-        if bed is None:
-            where = f"me/music/{args.mood}/" if args.mood else "me/music/"
-            print(f"No track in {where}, so this Reel has no music bed. Add tracks there to give it one.")
-    else:
-        bed = Path(args.music)
     try:
+        bed: Path | None = None
+        slug = None
+        if args.music == "auto":
+            slug = args.slug or args.out.resolve().parent.name
+            bed = music.for_video(slug, args.mood)
+            if bed is None:
+                where = f"me/music/{args.mood}/" if args.mood else "me/music/"
+                print(f"No track in {where}, so this Reel has no music bed. Add tracks there to give it one.")
+        elif args.music != "none":
+            bed = Path(args.music)
+            slug = args.slug or args.out.resolve().parent.name
+            config.work_dir(slug)  # check the name before the long finish, not after it
         finish(args.src, args.out, speed=args.speed, music=bed, music_lufs=args.music_lufs, mix_peak=args.mix_peak,
                fade_in=args.fade_in, fade_out=args.fade_out)
-        if bed is not None and args.music == "auto":
-            music.log(bed, args.slug or args.out.resolve().parent.name)
+        if bed is not None:
+            music.log(bed, slug)  # one row per video: a second finish of the same video adds nothing
     except KitError as problem:
         print(problem)
         return 1

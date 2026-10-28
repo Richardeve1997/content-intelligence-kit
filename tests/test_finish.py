@@ -227,3 +227,97 @@ def test_log_starts_a_ledger_when_there_is_none(example_me):
     music.log(track, "example-reel")
     text = (example_me / "music" / "MUSIC.md").read_text()
     assert "| date | slug | track |" in text and "calm/a.mp3" in text
+
+
+# --- one bed per video ----------------------------------------------------------------------------------------
+
+
+def _ledger_rows(me, slug):
+    return [line for line in (me / "music" / "MUSIC.md").read_text().splitlines() if f"| {slug} |" in line]
+
+
+def test_a_video_keeps_its_bed_across_finishes_and_logs_one_row(example_me):
+    calm = example_me / "music" / "calm"
+    first, second = _track(calm, "a-morning.mp3"), _track(calm, "b-evening.mp3")
+    music.log(first, "older-reel")  # the last bed used, so a new video gets the other one
+    for _ in range(3):
+        bed = music.for_video("example-reel")
+        assert bed == second
+        music.log(bed, "example-reel")
+    assert len(_ledger_rows(example_me, "example-reel")) == 1
+    assert len(_ledger_rows(example_me, "older-reel")) == 1
+
+
+def test_a_new_bed_for_a_video_replaces_its_row(example_me):
+    calm = example_me / "music" / "calm"
+    first, second = _track(calm, "a.mp3"), _track(calm, "b.mp3")
+    music.log(first, "example-reel")
+    music.log(second, "example-reel")
+    rows = _ledger_rows(example_me, "example-reel")
+    assert len(rows) == 1 and rows[0].endswith("| calm/b.mp3 |")
+    assert music.for_video("example-reel") == second
+
+
+def test_a_mood_the_video_bed_is_not_in_picks_again(example_me):
+    calm = _track(example_me / "music" / "calm", "a.mp3")
+    upbeat = _track(example_me / "music" / "upbeat", "b.mp3")
+    music.log(calm, "example-reel")
+    assert music.for_video("example-reel") == calm
+    assert music.for_video("example-reel", "calm") == calm
+    assert music.for_video("example-reel", "upbeat") == upbeat
+
+
+def test_a_bed_that_was_deleted_is_replaced(example_me):
+    gone = _track(example_me / "music" / "calm", "a.mp3")
+    other = _track(example_me / "music" / "calm", "b.mp3")
+    music.log(gone, "example-reel")
+    gone.unlink()
+    assert music.for_video("example-reel") == other
+
+
+def test_three_finishes_from_the_command_line_use_one_bed_and_one_row(example_me, tmp_path, monkeypatch):
+    calm = example_me / "music" / "calm"
+    _track(calm, "a.mp3")
+    _track(calm, "b.mp3")
+    used = []
+
+    def fake_finish(src, out, **kwargs):
+        used.append(kwargs["music"])
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_bytes(b"finished")
+        return Path(out)
+
+    monkeypatch.setattr(finish, "finish", fake_finish)
+    src, out = tmp_path / "edit.mp4", tmp_path / "example-reel" / "final.mp4"
+    src.write_bytes(b"edit")
+    for _ in range(3):
+        assert finish.main([str(src), str(out), "--music", "auto"]) == 0
+    assert len(set(used)) == 1 and used[0] is not None
+    assert len(_ledger_rows(example_me, "example-reel")) == 1
+
+
+# --- a failed finish leaves the old file alone ------------------------------------------------------------------
+
+
+def test_a_finish_that_misses_the_peak_target_leaves_out_untouched(tmp_path, monkeypatch):
+    src = speechlike(tmp_path / "edit.mp4", seconds=2)
+    out = tmp_path / "final.mp4"
+    out.write_bytes(b"the previous final")
+    # every reading is on the loudness target but peaks at 0 dBTP, above the -1.5 limit
+    monkeypatch.setattr(finish, "measure", lambda path: finish.Loudness(-13.0, 0.0, 3.0))
+    with pytest.raises(finish.KitError) as caught:
+        finish.finish(src, out, speed=1.15, music=None, music_lufs=-24, mix_peak=0.74, fade_in=0.3, fade_out=1.2)
+    assert "peaks" in str(caught.value)
+    assert out.read_bytes() == b"the previous final"
+    assert not list(tmp_path.glob(".finish-*")), "the temporary files are cleaned up"
+
+
+def test_a_finish_that_misses_the_loudness_target_leaves_no_new_file(tmp_path, monkeypatch):
+    src = speechlike(tmp_path / "edit.mp4", seconds=2)
+    out = tmp_path / "final.mp4"
+    monkeypatch.setattr(finish, "_solve", lambda mix, work, ceiling: mix)
+    monkeypatch.setattr(finish, "measure", lambda path: finish.Loudness(-20.0, -6.0, 3.0))
+    with pytest.raises(finish.KitError) as caught:
+        finish.finish(src, out, speed=1.0, music=None, music_lufs=-24, mix_peak=0.74, fade_in=0.3, fade_out=1.2)
+    assert "LUFS" in str(caught.value)
+    assert not out.exists()

@@ -4,6 +4,10 @@ The kit ships no music. The creator drops tracks they have the right to use into
 me/music/calm/ or me/music/upbeat/, and the folder name is how a bed is chosen. Every bed used is logged
 in me/music/MUSIC.md, newest last, so `pick` never hands back the track the last Reel used while
 another one is there.
+
+The ledger holds one row per video. A video that is finished again (after a review fix, say) keeps the bed
+it was given: `for_video` returns that track, and `log` leaves the row alone, or updates it in place when
+the video's bed really changed.
 """
 
 from __future__ import annotations
@@ -13,7 +17,7 @@ from pathlib import Path
 
 from kit import config
 
-__all__ = ["AUDIO", "log", "music_dir", "pick", "tracks", "used"]
+__all__ = ["AUDIO", "chosen", "for_video", "log", "music_dir", "pick", "tracks", "used"]
 
 AUDIO = {".mp3", ".m4a", ".aac", ".wav", ".aif", ".aiff", ".flac", ".ogg", ".opus"}
 _LEDGER = (
@@ -50,17 +54,22 @@ def tracks(mood: str | None = None) -> list[Path]:
     return sorted(found, key=lambda p: _name(p))
 
 
-def used() -> list[str]:
-    """The tracks in the ledger, oldest first, as written in its track column."""
+def _rows() -> list[tuple[str, str, str]]:
+    """The ledger's rows, oldest first, as (date, slug, track)."""
     ledger = music_dir() / "MUSIC.md"
     if not ledger.is_file():
         return []
-    names = []
+    rows = []
     for line in ledger.read_text(encoding="utf-8").splitlines():
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         if len(cells) == 3 and cells[0][:4].isdigit() and cells[2]:
-            names.append(cells[2])
-    return names
+            rows.append((cells[0], cells[1], cells[2]))
+    return rows
+
+
+def used() -> list[str]:
+    """The tracks in the ledger, oldest first, as written in its track column."""
+    return [track for _, _, track in _rows()]
 
 
 def pick(mood: str | None = None) -> Path | None:
@@ -83,8 +92,34 @@ def pick(mood: str | None = None) -> Path | None:
     return sorted(fresh, key=lambda t: (when(t), _name(t)))[0]
 
 
+def chosen(slug: str) -> Path | None:
+    """The bed the ledger gives this video, when that track is still in me/music. Otherwise None."""
+    names = [track for _, row_slug, track in _rows() if row_slug == slug]
+    if not names:
+        return None
+    path = music_dir() / names[-1]
+    return path if path.is_file() and path.suffix.lower() in AUDIO else None
+
+
+def for_video(slug: str, mood: str | None = None) -> Path | None:
+    """The bed for one video: the one it already has, or a fresh pick.
+
+    A video that already has a bed in the ledger keeps it, so every finish of that video sounds the same.
+    When `mood` names a folder and the video's bed is not in it, a new bed is picked from that folder.
+    """
+    config.work_dir(slug)  # refuses a name that is not a video name, with a plain sentence
+    current = chosen(slug)
+    if current is not None and (not mood or current.parent.name == mood):
+        return current
+    return pick(mood)
+
+
 def log(track: Path, slug: str) -> None:
-    """Add a row for this bed to me/music/MUSIC.md (the ledger is started if it is not there)."""
+    """Record this video's bed in me/music/MUSIC.md, one row per video (the ledger is started if missing).
+
+    Logging the same bed for the same video again changes nothing. A different bed for a video already
+    in the ledger replaces that video's row, so the ledger keeps one row per video.
+    """
     config.work_dir(slug)  # the same rule as a video name: refuses anything that would break the table
     ledger = music_dir() / "MUSIC.md"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -93,5 +128,15 @@ def log(track: Path, slug: str) -> None:
         text = text.rstrip("\n") + "\n\n| date | slug | track |\n| --- | --- | --- |\n"
     if not text.endswith("\n"):
         text += "\n"
-    text += f"| {date.today().isoformat()} | {slug} | {_name(track)} |\n"
-    ledger.write_text(text, encoding="utf-8")
+    name = _name(track)
+    row = f"| {date.today().isoformat()} | {slug} | {name} |"
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) == 3 and cells[0][:4].isdigit() and cells[1] == slug:
+            if cells[2] == name:
+                return
+            lines[index] = row
+            ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
+    ledger.write_text(text + row + "\n", encoding="utf-8")
