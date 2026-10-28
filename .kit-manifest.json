@@ -226,7 +226,7 @@
   "tests/ui_story/test_composite.py": "abb60c12a87e7a3f6e6d16f823d8a96328e46c55e09fdf7ad3e46f0ada8c736e",
   "tests/ui_story/test_cut_base_hdr.py": "9e3970fcf69b91d775c7b99cc835628bdd417b42a29591c9dc841ce81cc551a1",
   "tests/ui_story/test_matte.py": "1b08a45b45d73441280d961fe9a5710a72172fbfeaf7fedb3ef3348819b949f2",
-  "tests/ui_story/test_scaffold_and_gates.py": "3f4c7aecb95339eee5101729dc5085046142dbd991eb1bdbbe539d969bcb59c2",
+  "tests/ui_story/test_scaffold_and_gates.py": "851a39b2805f969ec2afe4b1b94cf85b81b7a56f967d9baee8ff3472128b1991",
   "tests/ui_story/test_ship.py": "3f7e613346893ad8aea889222e4c2a01c037e495568f1382570afd7d60bd0ed2",
   "tests/ui_story/test_skills_and_review.py": "a1dae5b56d1b9096721d0a7effc0776b02657dc21476da53df0f7bb0e2573c91",
   "tests/ui_story/test_transcribe_and_qa.py": "928cd41a75325881191ff586ea7681587734246d66c26f90d584cf074dd81e1c",
