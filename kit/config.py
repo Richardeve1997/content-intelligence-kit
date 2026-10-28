@@ -13,7 +13,7 @@ import json
 import math
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping
@@ -194,6 +194,10 @@ def _default_cost_cap() -> dict[str, float]:
     return {platform: float(rule["default"]) for platform, rule in caps.items()}
 
 
+def _default_scrape_seconds() -> float:
+    return float(_schema()["properties"]["research"]["properties"]["scrape_seconds"]["default"])
+
+
 @lru_cache(maxsize=1)
 def _font_registry() -> dict[str, Any]:
     return json.loads((FONTS_DIR / "fonts.json").read_text(encoding="utf-8"))
@@ -322,6 +326,7 @@ class Hashtags:
 @dataclass(frozen=True)
 class Research:
     cost_cap: dict[str, float]
+    scrape_seconds: float = field(default_factory=_default_scrape_seconds)
 
 
 @dataclass(frozen=True)
@@ -376,9 +381,10 @@ def _build(data: Mapping[str, Any]) -> Profile:
     handles = data["handles"]
     audience = data["audience"]
     cta = data["cta"]
+    research = data.get("research") or {}
     caps = _default_cost_cap()
-    given = (data.get("research") or {}).get("cost_cap", {})
-    caps.update({platform: float(value) for platform, value in given.items()})
+    caps.update({platform: float(value) for platform, value in research.get("cost_cap", {}).items()})
+    seconds = float(research.get("scrape_seconds", _default_scrape_seconds()))
     return Profile(
         version=data["version"],
         onboarded=data["onboarded"],
@@ -403,7 +409,7 @@ def _build(data: Mapping[str, Any]) -> Profile:
         voice_over=data["voice_over"],
         image_provider=data["image_provider"],
         hashtags=Hashtags(base=tuple(data["hashtags"]["base"])),
-        research=Research(cost_cap=caps),
+        research=Research(cost_cap=caps, scrape_seconds=seconds),
     )
 
 
@@ -506,6 +512,10 @@ def _error_sentences(error) -> Iterator[tuple[str, str]]:
         low = error.validator_value
         shown = _show(error.instance)
         yield where, f"{where} is {shown}, which is below the lowest allowed value of {low}.{_should(parts, rule)}"
+    elif kind == "maximum":
+        high = error.validator_value
+        shown = _show(error.instance)
+        yield where, f"{where} is {shown}, which is above the highest allowed value of {high}.{_should(parts, rule)}"
     elif kind == "uniqueItems":
         yield where, f"{where} lists the same entry more than once."
     else:
@@ -521,7 +531,7 @@ def _usable_amount(value: Any) -> bool:
 
 
 def _cross_field_checks(data: Mapping[str, Any], failed: set[str]) -> Iterator[tuple[str, str]]:
-    """Checks that read two settings together: handles and comment platforms against platforms, and the cost caps.
+    """Checks that read two settings together: handles and comment platforms against platforms, and the numbers in the research group.
 
     A setting the schema already rejected is left alone here, so each mistake is reported once.
     """
@@ -565,6 +575,18 @@ def _cross_field_checks(data: Mapping[str, Any], failed: set[str]) -> Iterator[t
                     f"{path} is {_show(value)}, which is not a usable amount."
                     f"{_should(('research', 'cost_cap', str(platform)))}"
                 )
+
+    seconds = research.get("scrape_seconds") if isinstance(research, Mapping) else None
+    if (
+        isinstance(seconds, (int, float))
+        and not isinstance(seconds, bool)
+        and "research.scrape_seconds" not in failed
+        and not _usable_amount(seconds)
+    ):
+        yield "research.scrape_seconds", (
+            f"research.scrape_seconds is {_show(seconds)}, which is not a usable number of seconds."
+            f"{_should(('research', 'scrape_seconds'))}"
+        )
 
 
 def _checks_beyond_the_schema(

@@ -286,6 +286,13 @@
               "description": "an amount in US dollars: the most one research run may spend on TikTok"
             }
           }
+        },
+        "scrape_seconds": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 1800,
+          "default": 120,
+          "description": "a number of seconds from 10 to 1800: the longest one research run waits for Instagram, TikTok and YouTube"
         }
       }
     }
