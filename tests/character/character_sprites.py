@@ -148,7 +148,11 @@ def draw_figure(
     beard_cheeks: bool = True,
     beard_length: int = 0,
     beard_end: int = 36,
+    beard_start: int = 26,
+    beard_edge: tuple[int, int, int] | None = None,
     mouth_wide: bool = False,
+    mouth_size: tuple[int, int] | None = None,
+    nose: tuple[int, int] | None = None,
     scarf: tuple[int, int, int] | None = None,
     scarf_rows: int = 3,
     top_rows: int | None = None,
@@ -161,14 +165,18 @@ def draw_figure(
 
     Options draw other looks:
     - `skin`, `hair` and `mouth` colours (the cheeks are a shade of the skin) and `shirt`, the colour of the top;
-      `mouth_wide` draws a mouth 14 cells wide instead of 8;
+      `mouth_wide` draws a mouth 14 cells wide instead of 8, and `mouth_size` one of (width, height) cells,
+      centred on the face from row 29 down; `nose`, an outline-coloured block of (width, height) cells between
+      the eyes, from row 22 down;
     - `glasses`, dark frames round both eyes joined by a bridge and running out to the hair, so the eyes are not
       closed in by skin;
     - `beard`, a beard in that colour over the jaw and chin with a moustache and the mouth showing through. With
       `beard_cheeks` False it starts across the whole face in one row, with no skin cheeks above the moustache,
       and `beard_length` rows of it hang below the chin, in front of the neck and the top. `beard_end` is the
       last face row it covers (36, the chin; a smaller row leaves the skin bare below it, like a moustache with
-      mutton chops);
+      mutton chops) and `beard_start` the first (26, the cheeks; a larger row leaves the skin bare above it, so a
+      beard can start on the mouth's rows or under them). `beard_edge` paints the beard's first full row, the
+      one the measurement meets first, in that colour (a lighter edge, a row blending into the skin);
     - `hat`, a hat that many rows tall on top of the hair, with a brim, in `hat_colour`;
     - `neck`, how many rows of neck show between the chin and the top (5, or fewer for a short neck, 0 for none:
       the body moves up to meet the head), and `collar`, a high collar in that colour over the neck, wider than
@@ -187,6 +195,8 @@ def draw_figure(
     sleeve = SHIRT_SHADE if shirt is None else tuple(int(c * 0.85) for c in shirt)
     shirt = SHIRT if shirt is None else shirt
     mouth_box = (21, 29, 34, 30) if mouth_wide else MOUTH_BODY
+    if mouth_size is not None:
+        mouth_box = (28 - mouth_size[0] // 2, 29, 27 + mouth_size[0] - mouth_size[0] // 2, 28 + mouth_size[1])
     # head
     _box(body, 8, 0, 47, 8, hair)
     _box(body, 8, 9, 10, 26, hair)
@@ -213,14 +223,21 @@ def draw_figure(
             _box(body, 11, 18, 14, 18, OUTLINE)  # the arms, out to the hair
             _box(body, 41, 18, 44, 18, OUTLINE)
         if beard is not None:
-            for y in range(26, beard_end + 1):
+            for y in range(beard_start, beard_end + 1):
                 for x in range(11, 45):
                     if beard_cheeks and y <= 27 and 17 < x < 38:
                         continue  # the cheeks above the moustache stay skin
                     body[(x, y)] = beard
-            if beard_end >= 28:
+            if beard_start <= 28 <= beard_end:
                 _box(body, 22, 28, 33, 28, beard)  # the moustache
+            if beard_edge is not None:  # the first full row of the beard, in another colour
+                first = max(beard_start, 28) if beard_cheeks else beard_start
+                for x in range(11, 45):
+                    if body.get((x, first)) == beard:
+                        body[(x, first)] = beard_edge
             _box(body, *mouth_box, mouth)  # the mouth shows through the beard
+        if nose is not None:
+            _box(body, 28 - nose[0] // 2, 22, 27 + nose[0] - nose[0] // 2, 21 + nose[1], OUTLINE)
     else:
         _box(body, *FACE_BODY, hair)
     if hat:

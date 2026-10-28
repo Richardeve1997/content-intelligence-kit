@@ -418,6 +418,107 @@ def test_a_short_top_right_under_the_chin_is_not_a_beard(shirt, rows, scale):
     assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
 
 
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("cheeks", [True, False], ids=["skin cheeks", "flat top"])
+@pytest.mark.parametrize("start", [29, 30], ids=["on the mouth's first row", "on its second row"])
+def test_a_beard_that_starts_on_the_mouths_rows_keeps_the_mouth(start, cheeks, scale):
+    """Skin down to the mouth and the beard from there (no moustache): the mouth sits in the beard's first row, so
+    it must not be taken for one of the beard's colours."""
+    rgba, drawn = _scaled(*draw_figure("idle", hair=BEARD, beard=BEARD, beard_cheeks=cheeks, beard_start=start), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("cheeks", [True, False], ids=["skin cheeks", "flat top"])
+@pytest.mark.parametrize("edge", [(92, 66, 52), (150, 110, 90)], ids=["a lighter edge row", "a row blending into the skin"])
+def test_a_beards_first_row_in_another_colour_does_not_end_it(edge, cheeks, scale):
+    """The first full row of a beard may be a lighter edge or a colour between the skin and the beard. The beard
+    goes on from the next row in its own colour, and the mouth inside it is found."""
+    rgba, drawn = _scaled(*draw_figure("idle", hair=BEARD, beard=BEARD, beard_cheeks=cheeks, beard_edge=edge), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("cheeks", [True, False], ids=["skin cheeks", "flat top"])
+def test_a_beard_in_the_outline_colour_is_a_beard(cheeks, scale):
+    """A black beard can snap onto the very colour of the outline. The outline is thin, so rows of it as wide as
+    the face under the skin are a beard, with the mouth inside it and the head ending under it."""
+    from character_sprites import OUTLINE
+
+    details = {}
+    rgba, drawn = _scaled(*draw_figure("idle", hair=OUTLINE, beard=OUTLINE, beard_cheeks=cheeks), scale)
+
+    face = faces.locate(rgba, details)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+    assert details["beard"] == "found"
+
+
+def test_a_beard_in_the_outline_colour_stays_a_beard_when_the_mouth_opens():
+    from character_sprites import OUTLINE
+
+    rgba, _ = draw_figure("idle", hair=OUTLINE, beard=OUTLINE)
+    face = faces.locate(rgba)
+    states = faces.face_states(rgba, face)
+    skin = faces.skin_colours(rgba, face.skin)
+    for name in ("mouth_mid", "mouth_open"):
+        rect = states.rects[name]
+        before = rgba[rect.y : rect.y1, rect.x : rect.x1]
+        after = states.patches[name]
+        was_beard = (before[..., :3] == OUTLINE).all(2)
+        now_skin = np.array([[tuple(int(v) for v in c) in skin for c in row] for row in after[..., :3]])
+        assert not (was_beard & now_skin).any(), f"{name} paints skin into the beard"
+        assert (after != before).any()
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("neck", [0, 1, 2], ids=["no neck", "a one-row neck", "a two-row neck"])
+@pytest.mark.parametrize("size", [(12, 4), (14, 5), (16, 6)], ids=["12 x 4", "14 x 5", "16 x 6"])
+def test_a_big_mouth_over_a_top_right_under_the_chin_is_not_an_eye(size, neck, scale):
+    """With a top right under the chin the rows searched for a beard reach into the body, which lowers the row the
+    eyes are looked for above. A mouth as big as an eye must still be the mouth, not an eye."""
+    rgba, drawn = _scaled(*draw_figure("idle", neck=neck, mouth_size=size), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("cheeks", [True, False], ids=["skin cheeks", "flat top"])
+@pytest.mark.parametrize("length", [0, 2, 4], ids=["no hang", "2 rows hanging", "4 rows hanging"])
+def test_a_thin_mouth_under_a_big_nose_is_still_the_mouth(length, cheeks, scale):
+    """A nose drawn bigger than a thin mouth is still the nose: the mouth is the widest mark, and the lowest. The
+    beard that holds it stays a beard, so the head ends under it."""
+    details = {}
+    figure = draw_figure("idle", hair=BEARD, beard=BEARD, beard_cheeks=cheeks, beard_length=length, nose=(4, 4), mouth_size=(6, 1))
+    rgba, drawn = _scaled(*figure, scale)
+
+    face = faces.locate(rgba, details)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    bottom = drawn["face"][3] + length * scale  # the beard's last row
+    assert bottom < face.neck <= bottom + 1 + 2 * scale, (face.neck, bottom)
+    assert details["beard"] == "found"
+
+
 def test_the_board_mentions_a_beard_only_when_one_was_found_or_dropped():
     """A beardless character gets no beard advice. The note shows when a beard was measured, and says what to mark
     when one was found but its end was not."""

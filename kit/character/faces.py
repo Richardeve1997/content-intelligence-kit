@@ -15,13 +15,14 @@ locate() reads the face from the picture rather than from fixed rectangles, so i
    brows, glasses, the mouth. The eye on each side is the biggest solid patch of features in the upper
    face, once lines two cells thick or thinner (brows, frames, lashes) are opened away; light cells right
    beside it (the white, highlights) join it.
-5. The mouth is the biggest mark below the eyes and between them, keeping to the lowest when there are a
+5. The mouth is the widest mark below the eyes and between them, keeping to the lowest when there are a
    nose and a mouth. The search reaches down into a beard; a colour that fills a large area there (the skin,
-   the beard) is not the mouth. A beard can be any colour: its first row sets its colours, and it ends where
-   the figure narrows to the neck, at the chin line, or where a row holds none of its colours (a top or a
-   collar, however close in colour). When the mouth is drawn in the skin, whatever sits under the chin is
-   clothing, not a beard. A beard still going at the end of the search has no known end: the mouth inside it
-   is still measured, the head ends at the skin, and the board asks for the neck to be marked.
+   the beard) is not the mouth. A beard can be any colour, the outline's included: the sides of its first row
+   set its colours, and it ends where the figure narrows to the neck, at the chin line, or where a row holds
+   none of its colours (a top or a collar, however close in colour). When the mouth is drawn in the skin,
+   whatever sits under the chin is clothing, not a beard. A beard still going at the end of the search has no
+   known end: the mouth inside it is still measured, the head ends at the skin, and the board asks for the
+   neck to be marked.
 6. The neck is the narrowest row below the face. Everything above it is the head that the pose step copies
    onto other drawings, so the face stays the same in every pose.
 
@@ -331,45 +332,76 @@ def _beard_window(s: _Sprite, skin_end: int) -> int:
     return min(s.bottom, skin_end + max(4, int(0.15 * s.height)))
 
 
+def _ink_beard(s: _Sprite, x0: int, x1: int, skin_end: int, ink: int) -> bool:
+    """Whether the outline colour is a beard here: rows under the skin that are mostly ink across the face, for
+    more rows running than a line is thick (a chin line is one row, or two on a finer sprite). A black beard
+    can snap onto the very colour of the outline, and the outline itself is never this wide for this long."""
+    if ink < 0:
+        return False
+    width = x1 - x0
+    need = max(3, int(round(s.height / 40)))
+    run = 0
+    for y in range(skin_end, _beard_window(s, skin_end)):
+        run = run + 1 if int((s.grid[y, x0:x1] == ink).sum()) >= 0.4 * width else 0
+        if run >= need:
+            return True
+    return False
+
+
 def _beard(s: _Sprite, family_idx: list[int], x0: int, x1: int, skin_end: int, face_cx: float) -> tuple[int, set[int]]:
     """(the row below a beard, the beard's colours). With no beard that is (`skin_end`, no colours). With a beard
     whose end was not found it is (`skin_end`, its colours): the head then ends at the skin, the mouth is still
     looked for inside the beard, and the creator marks the neck.
 
     A beard row is mostly a colour that is neither skin nor the outline, across the face and in the middle of the
-    chin. The beard can be any colour: its first row sets its colours, and later rows count only cells in exactly
-    those colours. The snap merges colours closer than 4 Lab, so a colour the palette kept apart is something else
-    however close it looks, and a top or a collar near the beard's colour ends it as surely as one in another
-    colour. A few rows with skin in the middle but the beard at the sides (the cheeks above a moustache, the
-    lower lip) do not end it. The beard also ends where the figure narrows to the neck, at a row that is mostly
-    outline inside the face (the chin line, with the neck under it), and at a row holding almost none of its
-    colours (clothing right under the chin, whatever its colour). A beard still going on the last row searched is
-    one whose end was not found: a beard hanging well below the chin, or a top in exactly its colour with no
-    neck and no chin line between."""
+    chin. The beard can be any colour: its first row sets its colours, read off the sides of that row (a mouth
+    sits in the middle, so a mouth on the beard's first row is never one of its colours), and later rows count
+    only cells in exactly those colours. The snap merges colours closer than 4 Lab, so a colour the palette kept
+    apart is something else however close it looks, and a top or a collar near the beard's colour ends it as
+    surely as one in another colour. A beard one or two rows old whose next row is mostly something else takes
+    that row's colours as well: its first row was a lighter edge, or a row blending into the skin. The outline
+    colour counts as a beard colour when rows of it as wide as the face run deeper than a line (_ink_beard). A
+    few rows with skin in the middle but the beard at the sides (the cheeks above a moustache, the lower lip)
+    do not end it. The beard also ends where the figure narrows to the neck, at a row that is mostly outline
+    inside the face (the chin line, with the neck under it; not when the beard itself is ink), and at a row
+    holding almost none of its colours (clothing right under the chin, whatever its colour). A beard still going
+    on the last row searched is one whose end was not found: a beard hanging well below the chin, or a top in
+    exactly its colour with no neck and no chin line between."""
     width = x1 - x0
     half = max(1, int(0.15 * width))
-    plain = _plain(s, family_idx)
+    quarter = width / 4  # the beard's colours are read outside the middle half of a row, where a mouth sits
     ink = s.colours.index(s.ink) if s.ink in s.colours else -1
-    own = np.zeros(len(s.colours), bool)  # for every colour: whether the beard's first row holds it
+    inked = _ink_beard(s, x0, x1, skin_end, ink)
+    plain = list(family_idx) if inked else _plain(s, family_idx)
+    columns = np.arange(x0, x1)
+    own = np.zeros(len(s.colours), bool)  # for every colour: whether it is one of the beard's
     painted = np.zeros(len(s.colours), int)  # how many cells of each colour the beard rows hold
-    last, misses = None, 0
+    first, last, misses = None, None, 0
     for y in range(skin_end, _beard_window(s, skin_end)):
         if s.solid[y, x0:x1].sum() < CHIN_NARROWING * width:
             break  # the figure narrows to the neck: the head, and any beard on it, ends here
-        row = s.grid[y, x0:x1]
-        row = row[row >= 0]
-        if last is not None and int((row != ink).sum()) < CHIN_LINE * width:
+        cells_in_row = s.grid[y, x0:x1]
+        solid = cells_in_row >= 0
+        row, at = cells_in_row[solid], columns[solid]
+        if last is not None and not inked and int((row != ink).sum()) < CHIN_LINE * width:
             break  # the row is mostly outline: the chin line, with the neck's skin showing under it
         middle = s.grid[y, max(0, int(face_cx) - half) : int(face_cx) + half + 1]
         middle = middle[middle >= 0]
-        other = row[np.isin(row, plain, invert=True)]
+        foreign = np.isin(row, plain, invert=True)
+        other = row[foreign]
+        sides = row[foreign & ((at < face_cx - quarter) | (at > face_cx + quarter))]
         across = len(middle) > 0 and np.isin(middle, plain, invert=True).mean() >= 0.5 and len(other) >= 0.4 * width
         if across and last is None:
-            own[np.unique(other)] = True  # the first beard row sets the beard's colours
+            own[np.unique(sides)] = True  # the first beard row sets the beard's colours
         cells = int(own[other].sum())
+        if across and last is not None and last - first < 2 and cells < 0.4 * width:
+            own[np.unique(sides)] = True  # a young beard going on in other colours: its first row was an edge
+            cells = int(own[other].sum())
         if last is not None and cells < BEARD_TRACE * width:
             break  # almost nothing of the beard in this row: clothing under the chin, in any colour
         if across and cells >= 0.4 * width:
+            if first is None:
+                first = y
             last, misses = y, 0
             painted += np.bincount(other, minlength=len(s.colours))
         else:
@@ -381,15 +413,15 @@ def _beard(s: _Sprite, family_idx: list[int], x0: int, x1: int, skin_end: int, f
             return skin_end, {int(i) for i in np.nonzero(own & (painted > 0))[0]}
     if last is None:
         return skin_end, set()
-    # the colours the beard is drawn in: those its first row set, so a mouth inside it is never one of them
+    # the colours the beard is drawn in: those read off the sides of its rows, so a mouth inside it is never one
     return last + 1, {int(i) for i in np.nonzero(own & (painted > 0))[0]}
 
 
 def _mouth(s: _Sprite, family_idx: list[int], x0: int, x1: int, eyes_bottom: int, limit: int, left: Box, right: Box,
            beard: set[int]) -> Box | None:  # fmt: skip
-    """The mouth: the biggest mark from below the eyes down to `limit` (the chin, or the bottom of a beard) that sits
-    between the eyes, keeping to the lowest when a nose and a mouth are both there. The beard's own colours are
-    never the mouth."""
+    """The mouth: the widest mark from below the eyes down to `limit` (the chin, or the bottom of a beard) that sits
+    between the eyes, keeping to the lowest of the marks near that width when a nose and a mouth are both there
+    (a nose can be drawn bigger than a thin mouth, but not wider). The beard's own colours are never the mouth."""
     region = np.zeros_like(s.solid)
     region[eyes_bottom:limit, x0:x1] = True
     region &= s.solid & ndimage.binary_erosion(s.solid)  # the edge of the figure (a chin outline) is not a mouth
@@ -406,11 +438,11 @@ def _mouth(s: _Sprite, family_idx: list[int], x0: int, x1: int, eyes_bottom: int
             continue
         box = _box(where[1].start, where[0].start, where[1].stop, where[0].stop)
         if between[0] <= box.x + box.w / 2 <= between[1]:
-            found.append((int((labels[where] == k).sum()), box))
+            found.append(box)
     if not found:
         return None
-    biggest = max(size for size, _ in found)
-    return max((item for item in found if item[0] >= 0.4 * biggest), key=lambda item: item[1].y)[1]
+    widest = max(box.w for box in found)
+    return max((box for box in found if box.w >= 0.4 * widest), key=lambda box: box.y)
 
 
 def _measure(s: _Sprite, skin: tuple[int, int, int], seed_row: int) -> tuple[FaceBox, str | None]:
@@ -467,24 +499,39 @@ def _measure(s: _Sprite, skin: tuple[int, int, int], seed_row: int) -> tuple[Fac
     # the eyes sit in the upper part of the face and beard, and the mouth is looked for down through the beard. A
     # beard whose end was not found still holds the mouth: the search goes as far as the beard search did
     searched = _beard_window(s, y1) if state == "dropped" else max(y1, beard_end)
-    split_y = y0 + int(0.62 * (searched - y0))
     columns = np.arange(features.shape[1])[None, :]
     lightness = art.lab_of(np.array(s.colours, dtype=np.float64))[:, 0]
     light = np.where(s.grid >= 0, lightness[np.maximum(s.grid, 0)], 0.0) >= 80
-    upper = features.copy()
-    upper[split_y:] = False
     solid_only = s.height >= 150  # on a full-size sprite an eye is always a solid patch, never a strand of hair
-    left_eye = _eye(upper & (columns < face_cx), light, solid_only=solid_only)
-    right_eye = _eye(upper & (columns >= face_cx), light, solid_only=solid_only)
+
+    def eyes_above(split_y: int) -> tuple[Box | None, Box | None]:
+        upper = features.copy()
+        upper[split_y:] = False
+        return (_eye(upper & (columns < face_cx), light, solid_only=solid_only),
+                _eye(upper & (columns >= face_cx), light, solid_only=solid_only))  # fmt: skip
+
+    def doubtful(left: Box | None, right: Box | None) -> bool:
+        """Missing, touching, or not level: what a mouth taken for an eye looks like."""
+        if left is None or right is None or right.x - left.x1 < 1:
+            return True
+        return abs((left.y + left.h / 2) - (right.y + right.h / 2)) > max(2.0, 0.25 * (y1 - y0))
+
+    split_skin = y0 + int(0.62 * (y1 - y0))
+    left_eye, right_eye = eyes_above(y0 + int(0.62 * (searched - y0)))
+    if searched > y1 and doubtful(left_eye, right_eye):
+        # what was followed under the chin lowered the split, and a mouth as big as an eye was taken for one:
+        # the eyes are then looked for above the skin alone
+        left_eye, right_eye = eyes_above(split_skin)
     if left_eye is None or right_eye is None:
         raise FaceNotFound("two eyes could not be told apart in the face")
 
     eyes_bottom = max(left_eye.y1, right_eye.y1)
     if state == "dropped":
-        # what was followed past the search may be a top in the beard's colour: a mouth drawn in the skin says so,
-        # and only when there is none is the mouth looked for down through the rows the beard search covered
+        # what was followed past the search may be a top in the beard's colour: a mouth drawn in the skin says so
+        # (a mark narrower than a mouth is a nose), and only when there is none is the mouth looked for down
+        # through the rows the beard search covered
         mouth = _mouth(s, family_idx, x0, x1, eyes_bottom, y1, left_eye, right_eye, set())
-        if mouth is None:
+        if mouth is None or mouth.w < 0.15 * (x1 - x0):
             mouth = _mouth(s, family_idx, x0, x1, eyes_bottom, searched, left_eye, right_eye, beard)
     else:
         mouth = _mouth(s, family_idx, x0, x1, eyes_bottom, searched, left_eye, right_eye, beard)
@@ -717,7 +764,10 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     ring[max(0, m.y - 1) : m.y1 + 1, max(0, m.x - 1) : m.x1 + 1] = True
     ring[max(0, m.y) : m.y1, max(0, m.x) : m.x1] = False
     around = [tuple(int(v) for v in c) for c in rgba[..., :3][ring & (rgba[..., 3] > 0)]]
-    around = [c for c in around if c != darkest] or [face.skin]
+    # the mouth's own dark edge is not what surrounds it, unless the darkest colour is most of the ring (a beard
+    # drawn in the outline colour)
+    if around.count(darkest) < 0.6 * len(around):
+        around = [c for c in around if c != darkest] or [face.skin]
     surround = max(set(around), key=around.count)
 
     open_rows = int(np.clip(open_rows, 1, 4))
