@@ -545,6 +545,36 @@ def test_ordinary_video_names_are_accepted(slug):
     assert config.work_dir(slug).name == slug
 
 
+@pytest.mark.parametrize(
+    "title,name",
+    [
+        ("Ask the AI to draw your app as a map before you fix it", "ask-the-ai-to-draw-your-app"),
+        ("Build a little tool that writes your shop's Facebook ads", "build-a-little-tool"),
+        ("Why windowsill basil dies in week three", "why-windowsill-basil-dies"),
+        ("3 of my 5 plants made it", "3-of-my-5-plants-made-it"),
+        ("Supercalifragilisticexpialidociousnessisms everywhere", "supercalifragilisticexpialidoc"),
+        ("¿¡!?", "video"),
+    ],
+)
+def test_a_video_name_is_short_and_readable(title, name):
+    """A folder name from an idea's title: its first words, under 30 characters, cut between words, with no small
+    word left dangling at the end. Every name is one work_dir accepts."""
+    assert config.video_name(title) == name
+    assert len(name) <= 30 and config.work_dir(name).name == name
+
+
+def test_a_new_video_never_takes_over_another_ideas_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
+    title = "Why windowsill basil dies in week three"
+    assert config.free_video_name(title) == "why-windowsill-basil-dies"
+    folder = tmp_path / "work" / "why-windowsill-basil-dies"
+    folder.mkdir(parents=True)
+    (folder / "idea.json").write_text(json.dumps({"title": title}))
+    assert config.free_video_name(title) == "why-windowsill-basil-dies", "the same idea keeps its folder"
+    other = "Why windowsill basil dies in week four"
+    assert config.free_video_name(other) == "why-windowsill-basil-dies-2"
+
+
 # --- the example creator's files ----------------------------------------------------------
 
 

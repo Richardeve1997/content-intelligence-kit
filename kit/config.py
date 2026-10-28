@@ -43,6 +43,8 @@ __all__ = [
     "kit_root",
     "me_dir",
     "work_dir",
+    "video_name",
+    "free_video_name",
     "research_dir",
     "load_profile",
     "profile_problems",
@@ -120,6 +122,45 @@ def work_dir(slug: str) -> Path:
             "and then uses only letters, numbers, dots, dashes and underscores, up to 100 characters."
         )
     return kit_root() / "work" / slug
+
+
+VIDEO_NAME_MAX = 30  # a folder name a creator can read in a path and type in a command
+_SMALL_WORDS = frozenset("a an the and or but of to in on at for with from by as is are your my our its it that this so".split())
+
+
+def video_name(title: str) -> str:
+    """A short, readable folder name from a video's title: its first words in lower case, joined by dashes, cut
+    between words under VIDEO_NAME_MAX characters. Where the title is cut, no small word is left dangling."""
+    words = re.findall(r"[a-z0-9]+", str(title).lower().replace("'", "").replace("’", ""))
+    kept: list[str] = []
+    for word in words:
+        if len("-".join(kept + [word])) > VIDEO_NAME_MAX:
+            break
+        kept.append(word)
+    if not kept and words:  # one word longer than the limit on its own
+        kept = [words[0][:VIDEO_NAME_MAX]]
+    if len(kept) < len(words):  # the title was cut, so a small word may be left dangling
+        while len(kept) > 1 and kept[-1] in _SMALL_WORDS:
+            kept.pop()
+    return "-".join(kept) or "video"
+
+
+def free_video_name(title: str) -> str:
+    """video_name(title), unless work/ already holds another video under that name: then the first of name-2,
+    name-3 and so on that is free. A folder saved for the same idea (its idea.json has this title) is kept."""
+    base = name = video_name(title)
+    number = 1
+    while True:
+        folder = work_dir(name)
+        if not folder.exists():
+            return name
+        try:
+            if json.loads((folder / "idea.json").read_text(encoding="utf-8")).get("title") == title:
+                return name
+        except (OSError, ValueError, AttributeError):
+            pass
+        number += 1
+        name = f"{base}-{number}"
 
 
 def research_dir() -> Path:

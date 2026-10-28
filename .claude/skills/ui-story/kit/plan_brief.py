@@ -11,7 +11,6 @@ plan.md. The plan itself is written fresh from these, in the creator's voice, th
 """
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -37,11 +36,6 @@ N. Close: <the closing line, from the call to action>
 """
 
 
-def slug_from(title: str) -> str:
-    words = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    return words[:60].rstrip("-") or "video"
-
-
 def latest_ideas() -> Path | None:
     runs = sorted((config.research_dir() / "runs").glob("*/ideas.json"))
     return runs[-1] if runs else None
@@ -55,7 +49,7 @@ def save_idea(number: int, slug: str | None) -> str:
     match = next((idea for idea in ideas if idea.get("n") == number), None)
     if match is None:
         raise SystemExit(f"The latest run ({source.parent.name}) has no idea number {number}.")
-    slug = slug or slug_from(match.get("title", f"idea-{number}"))
+    slug = slug or config.free_video_name(match.get("title") or f"idea {number}")
     folder = config.work_dir(slug)
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "idea.json").write_text(json.dumps(match, indent=2) + "\n", encoding="utf-8")

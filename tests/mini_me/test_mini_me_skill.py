@@ -105,7 +105,7 @@ def test_the_brief_saves_the_idea_and_names_the_closing_line(kit_home, capsys):
     brief = load("brief")
     assert brief.main(["--number", "3"]) == 0
     out = capsys.readouterr().out
-    slug = "why-windowsill-basil-dies-in-week-three"
+    slug = "why-windowsill-basil-dies"  # short and readable, not the whole title
     idea = json.loads((config.work_dir(slug) / "idea.json").read_text())
     assert idea["n"] == 3 and (config.work_dir(slug) / "take").is_dir()
     assert "Comment GROW and I'll send you the balcony planting checklist." in out
