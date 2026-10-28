@@ -8,7 +8,8 @@
     post.cancel(slug, "instagram")             # take one post down before it goes out
 
 Each platform's post is made from work/<slug>/final.mp4 and work/<slug>/captions.json, and the records
-are kept in work/<slug>/post/.
+are kept in work/<slug>/post/. `post.schedule` sends nothing until the creator has read these exact
+captions and said yes, which is recorded with `post.captions.approve(slug)`.
 
 `post.schedule` is the function. The module that holds it is kit.post.schedule: import from it with
 `from kit.post.schedule import ...`, or fetch it as sys.modules["kit.post.schedule"], because the name

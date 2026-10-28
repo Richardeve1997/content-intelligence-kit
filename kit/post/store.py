@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -61,10 +62,18 @@ def write_text(path: Path, text: str) -> None:
 
 
 @contextlib.contextmanager
-def locked(lock_file: Path):
-    """Hold a lock on `lock_file`. Two runs for the same video wait for each other instead of posting twice."""
+def locked(lock_file: Path, waiting: str | None = None):
+    """Hold a lock on `lock_file`. Two runs for the same video take turns instead of posting twice.
+
+    When another run holds the lock, `waiting` is printed once on standard error and this run waits its turn.
+    """
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     with lock_file.open("a") as handle:
         if fcntl is not None:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:  # somebody else has it
+                if waiting:
+                    print(waiting, file=sys.stderr, flush=True)
+                fcntl.flock(handle, fcntl.LOCK_EX)
         yield

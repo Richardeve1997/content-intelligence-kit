@@ -13,13 +13,16 @@ The rules:
 
 * The call to action. The comment keyword appears only on the platforms where the creator answers
   comments (cta.comment_platforms, when cta.type is "comment"). Every other platform ends on a follow
-  line. LinkedIn always ends on a follow line, because a request for a comment keyword cuts its reach.
+  line. LinkedIn always ends on a follow line, because a request for a comment keyword cuts its reach,
+  so listing it in cta.comment_platforms is reported as a problem.
 * Hashtags. At most 5 on Instagram, TikTok and Facebook, 8 on YouTube, 2 on X and none on LinkedIn.
   #shorts, #fyp and #foryou are never used. The tags come from the profile's base tags plus two or
-  three for the video.
-* LinkedIn. No hashtags, no links, none of the phrases that ask for comments, likes or tags, and the
-  claim inside the first 150 characters, which is all that shows before See more.
-* X. The text and the tags together fit in 280 characters.
+  three for the video. They go in the hashtags list, not in the text or in a YouTube title.
+* LinkedIn. No hashtags, no links (anything shaped like a web address, with or without https://), none
+  of the phrases that ask for comments, likes or tags, and the claim inside the first 150 characters,
+  which is all that shows before See more.
+* X. The text and the tags together fit in 280 characters as X counts them: each link counts 23, each
+  emoji counts 2 and every other character counts 1.
 * YouTube. A title of at most 100 characters.
 * No em or en dashes, and no placeholder left in the text.
 """
@@ -43,6 +46,8 @@ __all__ = [
     "NEVER_TAGS",
     "X_LIMIT",
     "LINKEDIN_VISIBLE",
+    "x_length",
+    "links_in",
     "display_name",
     "answers_comments",
     "cta_line",
@@ -75,12 +80,88 @@ _INLINE_TAG = re.compile(r"(?<![\w&/#])#(?=\w*[^\W\d_])\w+")
 _PLACEHOLDER = re.compile(r"<[A-Za-z][^<>\n]{0,39}>|\{[A-Za-z][^{}\n]{0,39}\}|\b(?:TODO|TBD|FIXME)\b|(?i:lorem ipsum)")
 _FOLLOW = re.compile(r"\bfollow\b", re.IGNORECASE)
 
-# LinkedIn: a link is a web address, with or without the https:// in front.
+# A link is anything shaped like a web address: a scheme (https://, ftp://), www., or a name with dots that
+# ends in two or more letters, such as linktr.ee, youtu.be or example.me. The ending has to be all
+# lower case or all capitals, which keeps a missing space after a full stop ("week three.Then") from
+# looking like an address. File names such as README.md and Node.js end the same way, so the common file
+# endings are not taken for links.
 _LINK = re.compile(
-    r"(?:https?://|www\.)\S+"
-    r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|ai|co|app|dev|ly|gg|tv|xyz|info|biz|us|uk|au|ca|de|fr)\b(?:/\S*)?",
-    re.IGNORECASE,
+    r"\b[A-Za-z][A-Za-z0-9+.-]*://\S+"
+    r"|\bwww\.\S+"
+    r"|\b(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+(?P<ending>[a-z]{2,24}|[A-Z]{2,24})\b(?:/\S*)?"
 )
+_FILE_ENDINGS = frozenset(
+    "js jsx ts tsx mjs cjs py rb md json html htm css scss txt pdf png jpg jpeg gif svg csv yml yaml toml xml sql "
+    "sh zip mov doc docx xls xlsx ppt pptx".split()
+)
+_LINK_TRAILING = ".,;:!?)]}'\""
+
+X_LINK_WEIGHT = 23  # X counts every link as 23 characters, however long it is
+X_EMOJI_WEIGHT = 2  # and every emoji as 2
+
+
+def _span(*spans: tuple[int, int]) -> str:
+    """A regex character class for spans of code points. They are written with chr() so this file holds no emoji."""
+    return "[" + "".join(re.escape(chr(a)) + (f"-{re.escape(chr(b))}" if b != a else "") for a, b in spans) + "]"
+
+
+_VS16, _ZWJ, _KEYCAP = chr(0xFE0F), chr(0x200D), chr(0x20E3)
+_SKIN_TONE = _span((0x1F3FB, 0x1F3FF))
+_FLAG = _span((0x1F1E6, 0x1F1FF)) + "{2}"
+_TAG_CHARACTERS = _span((0xE0020, 0xE007F))
+# Pictographs from U+1F000 up are emoji. Below that, a character is an emoji either because it shows as
+# one by default or because the variation selector U+FE0F follows it.
+_PICTOGRAPH = _span((0x1F000, 0x1FAFF))
+_EMOJI_BY_DEFAULT = _span(
+    (0x231A, 0x231B), (0x23E9, 0x23EC), (0x23F0, 0x23F0), (0x23F3, 0x23F3), (0x25FD, 0x25FE), (0x2614, 0x2615),
+    (0x2648, 0x2653), (0x267F, 0x267F), (0x2693, 0x2693), (0x26A1, 0x26A1), (0x26AA, 0x26AB), (0x26BD, 0x26BE),
+    (0x26C4, 0x26C5), (0x26CE, 0x26CE), (0x26D4, 0x26D4), (0x26EA, 0x26EA), (0x26F2, 0x26F3), (0x26F5, 0x26F5),
+    (0x26FA, 0x26FA), (0x26FD, 0x26FD), (0x2705, 0x2705), (0x270A, 0x270B), (0x2728, 0x2728), (0x274C, 0x274C),
+    (0x274E, 0x274E), (0x2753, 0x2755), (0x2757, 0x2757), (0x2795, 0x2797), (0x27B0, 0x27B0), (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C), (0x2B50, 0x2B50), (0x2B55, 0x2B55),
+)
+_EMOJI_WITH_SELECTOR = _span(
+    (0xA9, 0xA9), (0xAE, 0xAE), (0x203C, 0x203C), (0x2049, 0x2049), (0x2122, 0x2122), (0x2139, 0x2139),
+    (0x2194, 0x21AA), (0x2328, 0x2328), (0x23CF, 0x23CF), (0x23E9, 0x23FA), (0x24C2, 0x24C2), (0x25AA, 0x25FE),
+    (0x2600, 0x27BF), (0x2934, 0x2935), (0x2B05, 0x2B55), (0x3030, 0x3030), (0x303D, 0x303D), (0x3297, 0x3297),
+    (0x3299, 0x3299),
+)
+_ONE_EMOJI = f"(?:{_PICTOGRAPH}|{_EMOJI_BY_DEFAULT}|{_EMOJI_WITH_SELECTOR}{_VS16})"
+# One emoji is a flag, a keycap, or a pictograph with an optional skin tone and selector, joined to more
+# of the same by zero width joiners (a family, a couple), and X counts the whole of it once.
+_EMOJI = re.compile(
+    f"{_FLAG}"
+    f"|[0-9#*]{_VS16}?{_KEYCAP}"
+    f"|{_ONE_EMOJI}{_SKIN_TONE}?{_VS16}?(?:{_ZWJ}{_ONE_EMOJI}{_SKIN_TONE}?{_VS16}?)*{_TAG_CHARACTERS}*"
+)
+
+
+def links_in(text: str) -> list[tuple[int, int, str]]:
+    """The links in a text as (start, end, the link), without a full stop or bracket that ends the sentence."""
+    found = []
+    for match in _LINK.finditer(text):
+        ending = match.group("ending")
+        if ending is not None and "/" not in match.group(0) and ending.lower() in _FILE_ENDINGS:
+            continue
+        link = match.group(0).rstrip(_LINK_TRAILING)
+        if link:
+            found.append((match.start(), match.start() + len(link), link))
+    return found
+
+
+def _weigh(text: str) -> int:
+    return len(_EMOJI.sub("", text)) + X_EMOJI_WEIGHT * len(_EMOJI.findall(text))
+
+
+def x_length(text: str) -> int:
+    """How long X counts a post: each link 23, each emoji 2 and every other character 1."""
+    total, last = 0, 0
+    for start, end, _ in links_in(text):
+        total += _weigh(text[last:start]) + X_LINK_WEIGHT
+        last = end
+    return total + _weigh(text[last:])
+
+
 # LinkedIn: asks for comments, likes, tags or a visit to the bio are held back by its filter. A keyword
 # in such an ask is quoted or in capitals ("GROW", GROW), which keeps ordinary sentences such as "the
 # comment section and the DMs" from matching.
@@ -192,7 +273,15 @@ def _check_platform(entry, platform: str, profile) -> list[str]:
     found: list[str] = []
     title, body, tags = entry.get("title"), entry.get("body"), entry.get("hashtags")
     body = body.strip() if isinstance(body, str) else ""
+    if platform == "linkedin" and profile.cta.type == "comment" and "linkedin" in profile.cta.comment_platforms:
+        found.append(
+            "LinkedIn always gets a follow line, because comment prompts cut its reach. "
+            "Take linkedin out of cta.comment_platforms in me/profile.json."
+        )
     shown_tags = _check_tags(tags, platform, name, found)
+    in_title = _INLINE_TAG.search(title) if isinstance(title, str) else None
+    if in_title:
+        found.append(f"{name}: the title has a hashtag ({in_title.group(0)}). Put hashtags in the hashtags list, not in the title.")
 
     if not body:
         found.append(f"{name}: the body is empty.")
@@ -219,9 +308,12 @@ def _check_platform(entry, platform: str, profile) -> list[str]:
                 f"YouTube: the title is {len(headline)} characters, and YouTube allows {payloads.YOUTUBE_TITLE_MAX}."
             )
     elif platform == "twitter":
-        length = len(payloads.content_for({"body": body, "hashtags": shown_tags}, "twitter"))
+        length = x_length(payloads.content_for({"body": body, "hashtags": shown_tags}, "twitter"))
         if length > X_LIMIT:
-            found.append(f"X: the post is {length} characters with its hashtags, and X allows {X_LIMIT}.")
+            found.append(
+                f"X: the post counts {length} characters with its hashtags, and X allows {X_LIMIT}. "
+                f"X counts each link as {X_LINK_WEIGHT} and each emoji as {X_EMOJI_WEIGHT}."
+            )
     elif platform == "linkedin":
         _check_linkedin(body, name, found)
     return found
@@ -273,10 +365,9 @@ def _check_call_to_action(body: str, platform: str, name: str, profile, found: l
 
 
 def _check_linkedin(body: str, name: str, found: list[str]) -> None:
-    link = _LINK.search(body)
-    if link:
-        shown = link.group(0).rstrip(".,;:)")
-        found.append(f"{name}: the caption has a link ({shown}). Links cut LinkedIn's reach, so leave them out.")
+    links = links_in(body)
+    if links:
+        found.append(f"{name}: the caption has a link ({links[0][2]}). Links cut LinkedIn's reach, so leave them out.")
     for pattern in _BAIT:
         phrase = pattern.search(body)
         if phrase:

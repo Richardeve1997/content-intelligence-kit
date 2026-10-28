@@ -72,6 +72,55 @@ def test_429_gives_up_after_six_tries(stub, monkeypatch):
     assert "Rate limit exceeded" in str(caught.value)
 
 
+class Clock:
+    """A clock the tests move: sleeping in it just moves it on."""
+
+    def __init__(self, start: datetime):
+        self.now = start
+
+    def sleep(self, seconds: float) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
+def with_clock(monkeypatch) -> Clock:
+    clock = Clock(datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr(zernio, "_now", lambda: clock.now)
+    monkeypatch.setattr(zernio, "time", SimpleNamespace(sleep=clock.sleep))
+    return clock
+
+
+def test_a_retry_is_not_sent_once_the_posts_own_time_is_close(stub, monkeypatch):
+    clock = with_clock(monkeypatch)
+    body = {**new_post(), "scheduledFor": (clock.now + timedelta(seconds=90)).isoformat()}
+    stub.reply("POST", r"/api/v1/posts", 429, {"error": "Slow down"}, {"Retry-After": "45"})
+    with pytest.raises(ZernioError) as caught:
+        stub.client().create_post(body, "00000000-0000-4000-8000-000000000005")
+    assert "Pick a later time" in str(caught.value) and "Nothing was sent" in str(caught.value)
+    assert caught.value.uncertain is False
+    assert len(stub.creates()) == 1  # only the request that was turned away
+    assert stub.posts == {}
+
+
+def test_a_retry_goes_ahead_when_the_posts_time_is_still_far_off(stub, monkeypatch):
+    clock = with_clock(monkeypatch)
+    body = {**new_post(), "scheduledFor": (clock.now + timedelta(minutes=10)).isoformat()}
+    stub.reply("POST", r"/api/v1/posts", 429, {"error": "Slow down"}, {"Retry-After": "45"})
+    answer = stub.client().create_post(body, "00000000-0000-4000-8000-000000000006")
+    assert answer["post"]["status"] == "scheduled" and len(stub.creates()) == 2
+
+
+def test_the_same_guard_covers_a_move_and_ignores_requests_with_no_time(stub, monkeypatch):
+    clock = with_clock(monkeypatch)
+    post_id = stub.client().create_post(new_post(), "00000000-0000-4000-8000-000000000007")["post"]["_id"]
+    stub.reply("PUT", r"/api/v1/posts/.*", 429, {"error": "Slow down"}, {"Retry-After": "45"})
+    soon = {"scheduledFor": (clock.now + timedelta(seconds=90)).isoformat(), "timezone": "UTC"}
+    with pytest.raises(ZernioError, match="Pick a later time"):
+        stub.client().update_post(post_id, soon)
+
+    stub.reply("GET", r"/api/v1/accounts", 429, {"error": "Slow down"}, {"Retry-After": "45"})
+    assert stub.client().call("GET", "/accounts")["accounts"]  # nothing to check, so it is retried as usual
+
+
 # --- what goes wrong, in plain sentences ------------------------------------------------------------
 
 

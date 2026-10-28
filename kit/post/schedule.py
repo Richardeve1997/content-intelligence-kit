@@ -61,6 +61,7 @@ TOLERANCE = timedelta(seconds=1)  # how far Zernio's time may differ from the on
 # is not enough to trust that, so after 23 hours an attempt that left no post behind is not sent again.
 IDEMPOTENCY_WINDOW = timedelta(hours=23)
 EARLIER_TEXT = "Zernio still holds the earlier text of this post. To use the new text, cancel it and schedule it again."
+WAITING = "Another run is posting this video. Waiting for it to finish."
 LOCK = ".post.lock"  # in the video's folder, so work/<slug>/post/ appears only once something is recorded in it
 AGAIN = "Run the same command again: it looks for the post in Zernio before it sends anything."
 CANCEL_FIRST = "To try again, cancel it first and then schedule it again."
@@ -561,7 +562,7 @@ def schedule(
                 f"The captions and the video are in work/{slug}/post/manual.md, ready to post by hand."
             ) from None
 
-    with store.locked(folder / LOCK):
+    with store.locked(folder / LOCK, WAITING):
         found = client.accounts()
         run = _Run(slug=slug, profile=profile, folder=folder, video=video, captions_data=data, when=when, client=client)
         return [run.platform(name, found[name]) for name in names]
@@ -644,7 +645,7 @@ def reschedule(slug: str, platform: str, when: datetime, *, client: zernio.Clien
     if not receipt.get("post_id") and not receipt.get("create_attempted"):
         return Result(name, "skipped", reason=f"Nothing is scheduled on {captions.display_name(name)} for {slug}.")
     client = client or zernio.Client.from_env()
-    with store.locked(folder / LOCK):
+    with store.locked(folder / LOCK, WAITING):
         receipt = store.read(path)
         if not receipt.get("post_id"):
             outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "moved")
@@ -685,7 +686,7 @@ def cancel(slug: str, platform: str, *, client: zernio.Client | None = None) -> 
     if not receipt.get("post_id") and not receipt.get("create_attempted"):
         return Result(name, "skipped", reason=f"Nothing is scheduled on {captions.display_name(name)} for {slug}.")
     client = client or zernio.Client.from_env()
-    with store.locked(folder / LOCK):
+    with store.locked(folder / LOCK, WAITING):
         receipt = store.read(path)
         if not receipt.get("post_id"):
             outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "cancelled")

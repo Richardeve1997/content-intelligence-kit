@@ -6,6 +6,7 @@ it alone so there is no key at all.
 
 from __future__ import annotations
 
+import errno
 import json
 import subprocess
 import sys
@@ -18,7 +19,7 @@ from fake_zernio import default_accounts, make_account
 
 from kit import zernio
 from kit.config import PLATFORMS
-from kit.post import cli
+from kit.post import cli, store
 from kit.zernio import Client
 
 KEY = "fake-value-for-tests"
@@ -289,6 +290,31 @@ def test_reschedule_uses_the_platforms_usual_time_when_only_a_day_is_given(keyed
     say(capsys, "schedule", reel.slug, "--platforms", "linkedin", "--on", tomorrow(), "--time", "10:00")
     status, out, _ = say(capsys, "reschedule", reel.slug, "linkedin", "--on", "2099-07-01")
     assert status == 0 and "08:30" in out
+
+
+# --- a full disk or a folder it may not write to ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "error, words, where",
+    [
+        (OSError(errno.ENOSPC, "No space left on device", "/anywhere/post/instagram.json"), "No space left on device", "instagram.json"),
+        (PermissionError(errno.EACCES, "Permission denied", "/anywhere/post/media.json"), "Permission denied", "media.json"),
+        (OSError(errno.EIO, "Input/output error"), "Input/output error", "a file"),
+    ],
+)
+def test_a_file_problem_is_one_plain_sentence_not_a_traceback(keyed, reel, capsys, monkeypatch, error, words, where):
+    say(capsys, "approve", reel.slug)
+
+    def broken(path, data):
+        raise error
+
+    monkeypatch.setattr(store, "write", broken)
+    status, out, err = say(capsys, "schedule", reel.slug, "--platforms", "instagram", "--at", "2099-07-01T18:00")
+    assert status == 1 and out == "" and err.count("\n") == 1
+    assert words in err and f"could not read or write {where}" in err and "disk space" in err
+    assert "Traceback" not in err and "/anywhere" not in err
+    assert keyed.creates() == []  # it stopped before anything could be sent twice
 
 
 # --- running it as a module ------------------------------------------------------------------------------------------------

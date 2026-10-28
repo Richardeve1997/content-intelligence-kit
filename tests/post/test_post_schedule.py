@@ -10,6 +10,8 @@ import dataclasses
 import json
 import stat
 import sys
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -18,7 +20,7 @@ from fake_zernio import default_accounts, make_account
 
 from kit import config, post, zernio
 from kit.config import PLATFORMS
-from kit.post import captions, payloads
+from kit.post import captions, payloads, store
 from kit.post.errors import CaptionProblems, PostError
 from kit.zernio import Client, NoZernio, ZernioError
 
@@ -452,6 +454,102 @@ def test_a_look_alike_post_that_is_not_ours_is_left_alone(reel, stub, when):
     assert not (reel.folder / "post" / "instagram.json").exists()
 
 
+# --- two runs at once ------------------------------------------------------------------------------------------------
+
+
+def test_the_lock_says_so_only_when_it_has_to_wait(tmp_path, capsys):
+    lock = tmp_path / ".post.lock"
+    with store.locked(lock, "Waiting for another run."):
+        pass
+    assert capsys.readouterr().err == ""  # nobody held it, so nothing is said
+
+    said = []
+    inside, release = threading.Event(), threading.Event()
+
+    def holder():
+        with store.locked(lock):
+            inside.set()
+            release.wait(10)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    try:
+        assert inside.wait(10)
+
+        def waiter():
+            with store.locked(lock, "Waiting for another run."):
+                said.append("got it")
+
+        second = threading.Thread(target=waiter)
+        second.start()
+        err = ""
+        for _ in range(500):
+            err += capsys.readouterr().err
+            if "Waiting for another run." in err:
+                break
+            time.sleep(0.01)
+        assert said == [] and err.count("Waiting for another run.") == 1  # one line, and still waiting
+    finally:
+        release.set()
+    thread.join(10)
+    second.join(10)
+    assert said == ["got it"]
+
+
+def test_two_runs_for_one_video_take_turns_and_the_second_says_it_is_waiting(reel, stub, when, capsys):
+    inside, release = threading.Event(), threading.Event()
+
+    def hold(request):  # the first run's create is held at the stand-in, with the video's lock still on
+        inside.set()
+        assert release.wait(10)
+
+    stub.before_create = hold
+    outcome = {}
+    first = threading.Thread(target=lambda: outcome.update(first=run(reel, stub, ["instagram"], when)))
+    first.start()
+    try:
+        assert inside.wait(10)
+        stub.before_create = None  # a second create, if it ever got that far, would not be held
+
+        second = threading.Thread(target=lambda: outcome.update(second=run(reel, stub, ["instagram"], when)))
+        second.start()
+        err = ""
+        for _ in range(500):
+            err += capsys.readouterr().err
+            if "Waiting for it to finish" in err:
+                break
+            time.sleep(0.01)
+        assert err.count("Another run is posting this video. Waiting for it to finish.") == 1
+        assert len(stub.creates()) == 1 and "second" not in outcome  # the second run has sent nothing and is still waiting
+    finally:
+        release.set()
+    first.join(10)
+    second.join(10)
+    assert [r.status for r in outcome["first"]] == ["scheduled"]
+    (after,) = outcome["second"]
+    assert after.status == "scheduled" and after.post_id == outcome["first"][0].post_id
+    assert after.reason == "Already scheduled from an earlier run."
+    assert len(stub.creates()) == 1 and len(stub.posts) == 1  # one post, made once
+
+
+def test_cancel_waits_its_turn_too(reel, stub, when, capsys):
+    run(reel, stub, ["instagram"], when)
+    capsys.readouterr()
+    done = {}
+    with store.locked(reel.folder / ".post.lock"):
+        thread = threading.Thread(target=lambda: done.update(result=post.cancel(reel.slug, "instagram", client=stub.client())))
+        thread.start()
+        err = ""
+        for _ in range(500):
+            err += capsys.readouterr().err
+            if "Waiting for it to finish" in err:
+                break
+            time.sleep(0.01)
+        assert "Another run is posting this video." in err and "result" not in done
+    thread.join(10)
+    assert done["result"].status == "cancelled"
+
+
 # --- the time ------------------------------------------------------------------------------------------------------
 
 
@@ -480,6 +578,18 @@ def test_a_time_that_has_passed_is_refused_because_zernio_would_post_at_once(ree
         with pytest.raises(PostError, match="passed"):
             run(reel, stub, ["instagram"], moment)
     assert stub.calls() == []
+
+
+def test_a_create_held_up_by_rate_limiting_is_not_sent_once_the_posts_time_is_close(reel, stub, when, monkeypatch):
+    now = {"at": when.astimezone(timezone.utc) - timedelta(seconds=100)}  # zernio's clock: 100 seconds before the post
+    monkeypatch.setattr(zernio, "_now", lambda: now["at"])
+    monkeypatch.setattr(zernio, "time", type("Clock", (), {"sleep": staticmethod(lambda s: now.update(at=now["at"] + timedelta(seconds=s)))}))
+    stub.reply("POST", r"/api/v1/posts", 429, {"error": "Slow down"}, {"Retry-After": "50"})
+
+    (result,) = run(reel, stub, ["instagram"], when)
+    assert result.status == "failed" and "Pick a later time" in result.reason
+    assert len(stub.creates()) == 1 and stub.posts == {}  # the one request that was turned away, and nothing after it
+    assert not (reel.folder / "post" / "instagram.json").exists()  # nothing was made, so nothing is remembered
 
 
 def test_the_time_is_checked_again_after_the_upload(reel, stub, when, monkeypatch):

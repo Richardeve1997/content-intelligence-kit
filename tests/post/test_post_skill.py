@@ -140,6 +140,14 @@ def test_the_skill_claims_no_more_than_the_code_guarantees():
     assert "reach a post whose create was interrupted" in body
 
 
+def test_the_skill_describes_the_caption_rules_the_check_enforces():
+    body = text()
+    assert "no hashtag in it" in body  # the YouTube title
+    assert f"counts each link as {captions.X_LINK_WEIGHT} characters and each emoji as {captions.X_EMOJI_WEIGHT}" in body
+    assert "with or without https://" in body
+    assert "LinkedIn always ends on a follow line" in body and "cta.comment_platforms" in body
+
+
 def test_the_numbers_in_the_skill_match_the_rules_in_the_code():
     body = text()
     assert captions.HASHTAG_CAPS == {"instagram": 5, "tiktok": 5, "youtube": 8, "facebook": 5, "twitter": 2, "linkedin": 0}

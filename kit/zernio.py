@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import mimetypes
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote, urlsplit
@@ -42,6 +43,7 @@ CREATE_TIMEOUT = 300  # a create can wait while Zernio checks the video it is gi
 UPLOAD_TIMEOUT = (3600, 900)
 MAX_ATTEMPTS = 6  # tries in all, when Zernio keeps answering 429
 MAX_WAIT = 60.0  # the longest wait between two tries, in seconds
+RETRY_MARGIN = timedelta(seconds=60)  # a retry is not sent when the post's own time is closer than this
 LIST_PAGE_SIZE = 100
 LIST_MAX_PAGES = 5  # pages read when looking for a post by its title
 
@@ -116,10 +118,19 @@ class Client:
         """Send one request and return Zernio's answer as a dict. Keyword arguments go to requests.
 
         `headers` are added to the bearer header, and `timeout` replaces the default of 60 seconds.
+        When a body carries a scheduledFor time, a retry after a 429 is not sent once that time is less than
+        a minute away.
         """
         headers = {"Authorization": f"Bearer {self.key}", **kw.pop("headers", {})}
         timeout = kw.pop("timeout", REQUEST_TIMEOUT)
+        due = _due(kw)
         for attempt in range(MAX_ATTEMPTS):
+            if attempt and due is not None and due - _now() < RETRY_MARGIN:
+                # Zernio publishes at once when a post's time has passed, and the waits between tries add up.
+                raise ZernioError(
+                    "Zernio kept turning requests away, and the time for this post is now too close to send it. "
+                    "Nothing was sent. Pick a later time and ask again."
+                )
             try:
                 response = requests.request(method, self.base + path, headers=headers, timeout=timeout, **kw)
             except requests.Timeout:
@@ -280,6 +291,23 @@ def post_of(answer: Mapping) -> dict:
 
 
 # --- helpers ----------------------------------------------------------------------------------------
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _due(kw: dict) -> datetime | None:
+    """The time a request asks Zernio to post at, when its JSON body carries one with a zone on it."""
+    body = kw.get("json")
+    value = body.get("scheduledFor") if isinstance(body, dict) else None
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else None
 
 
 def _segment(value: str) -> str:

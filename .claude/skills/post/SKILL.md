@@ -37,9 +37,10 @@ You drive the kit with `uv run python -m kit.post <command>`. A command prints p
 - Write in the creator's voice and keep it short: the claim, one line of substance, then the closing line. Use only what the video says. Do not add numbers, results or claims it does not make.
 - The closing line is the last line of the body. Use the one `lines` printed, or the creator's own wording of it. It asks for the comment keyword only on platforms where the creator answers comments, and it is a follow line everywhere else. Never ask for the keyword where nothing answers it.
 - Hashtags go in the `hashtags` list, not in the text. Instagram, TikTok and Facebook take at most 5, YouTube 8, X 2 and LinkedIn none. Never use #shorts, #fyp or #foryou.
-- YouTube needs a title of at most 100 characters. Its body is the description.
-- X takes at most 280 characters for the text and the hashtags together.
-- LinkedIn gets its own copy, never the Instagram caption pasted across, because what Instagram rewards cuts LinkedIn's reach. Leave out hashtags, links and any phrase that asks for comments, likes or tags, such as "comment below", "like for part 2", "tag someone" or "link in bio". Put the claim in the first 150 characters, since only those show before "See more". A real question is welcome. Use plain first person and short paragraphs.
+- YouTube needs a title of at most 100 characters, with no hashtag in it. Its body is the description.
+- X takes at most 280 characters for the text and the hashtags together. X counts each link as 23 characters and each emoji as 2, so a few emoji use up more room than they look.
+- LinkedIn gets its own copy, never the Instagram caption pasted across, because what Instagram rewards cuts LinkedIn's reach. Leave out hashtags, links of any kind (anything shaped like a web address, with or without https://) and any phrase that asks for comments, likes or tags, such as "comment below", "like for part 2", "tag someone" or "link in bio". Put the claim in the first 150 characters, since only those show before "See more". A real question is welcome. Use plain first person and short paragraphs.
+- LinkedIn always ends on a follow line, even when the profile lists it among the platforms where the creator answers comments, because comment prompts cut its reach. The caption check reports that setting as a problem until `linkedin` is taken out of `cta.comment_platforms` in `me/profile.json`.
 - Leave no placeholder in the text, such as `<keyword>`.
 
 ## When something fails

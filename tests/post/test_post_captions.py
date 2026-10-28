@@ -93,6 +93,14 @@ def test_a_number_sign_that_is_not_a_tag_is_left_alone(captions_set, profile):
     assert problems_for("tiktok", captions_set, profile) == []
 
 
+def test_a_youtube_title_may_not_carry_a_hashtag_either(captions_set, profile):
+    captions_set["youtube"]["title"] = "Basil in week three #windowsill"
+    (found,) = problems_for("youtube", captions_set, profile)
+    assert "title has a hashtag (#windowsill)" in found and "hashtags list" in found
+    captions_set["youtube"]["title"] = "The #1 reason basil dies in week three"  # a number sign before a number is not a tag
+    assert problems_for("youtube", captions_set, profile) == []
+
+
 def test_hashtags_must_be_a_list(captions_set, profile):
     captions_set["instagram"]["hashtags"] = "#basil #mint"
     (found,) = problems_for("instagram", captions_set, profile)
@@ -206,12 +214,19 @@ def test_a_comment_cta_without_a_payload_still_reads_sensibly(profile):
     assert captions.cta_line(bare, "instagram") == 'Comment "GROW" and I will send it to you.'
 
 
-def test_linkedin_never_gets_a_keyword_line_even_if_the_creator_lists_it(captions_set, profile):
+def test_linkedin_never_gets_a_keyword_line_and_a_profile_that_lists_it_is_reported_once(captions_set, profile):
     odd = dataclasses.replace(
         profile, cta=dataclasses.replace(profile.cta, comment_platforms=("instagram", "facebook", "linkedin"))
     )
     assert captions.cta_line(odd, "linkedin") == "Follow Example Studio for more."
-    assert captions.check(captions_set, odd) == []
+    found = captions.check(captions_set, odd)
+    assert found == [
+        "LinkedIn always gets a follow line, because comment prompts cut its reach. "
+        "Take linkedin out of cta.comment_platforms in me/profile.json."
+    ]
+    # it is a problem with the profile, so it shows only when LinkedIn is among the platforms being checked
+    assert captions.check(captions_set, odd, platforms=["instagram", "facebook", "tiktok"]) == []
+    assert captions.check(captions_set, profile) == []  # and not for a profile that does not list it
 
 
 # --- LinkedIn --------------------------------------------------------------------------------------------------------
@@ -267,6 +282,31 @@ def test_linkedin_rules(captions_set, profile):
     # a real question is welcome, and so is the follow line
     asking = "Basil dies in week three because the leaves stay wet.\n\nWhat is the first herb you lose each year?" + FOLLOW
     assert linkedin_problems(asking, captions_set, profile) == []
+
+
+@pytest.mark.parametrize(
+    "link",
+    [
+        "https://example.com/guide", "http://example.org", "ftp://files.example.net/a", "www.example.com",
+        "example.com/guide", "example.ai", "linktr.ee/mine", "youtu.be/abc123", "example.me", "bit.ly/3xyz",
+        "t.co/abc", "Example.COM", "my.site.co.uk/page", "claude.ai/new", "docs.example.dev", "example.xyz",
+    ],
+)
+def test_anything_shaped_like_a_web_address_is_a_link_on_linkedin(captions_set, profile, link):
+    found = linkedin_problems(f"Basil dies in week three. Read more at {link}." + FOLLOW, captions_set, profile)
+    assert len(found) == 1 and "has a link" in found[0] and link in found[0], found
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Node.js", "Next.js and Vue.js", "README.md", "install.sh", "e.g. when kept wet", "i.e. like this",
+        "at 9 a.m. and 5 p.m.", "version 2.5 and 3.10.1", "the U.S. and the U.K.", "a Ph.D", "week three.Then it dies",
+        "St.Louis", "final.mp4", "and so on...", "No.1 tip", "vs. the rest", "gpt-4.1", "a 3.5mm jack", "script.py",
+    ],
+)
+def test_words_that_only_look_a_little_like_an_address_are_not_links(captions_set, profile, text):
+    assert linkedin_problems(f"Basil dies in week three. Notes: {text}." + FOLLOW, captions_set, profile) == []
 
 
 @pytest.mark.parametrize(
@@ -334,6 +374,66 @@ def test_x_length(captions_set, profile):
 
     # the tags count, so dropping them brings the post back under
     captions_set["twitter"]["hashtags"] = []
+    assert problems_for("twitter", captions_set, profile) == []
+
+
+FIRE = chr(0x1F525)
+ZWJ, VS16 = chr(0x200D), chr(0xFE0F)
+EMOJI_THAT_COUNT_AS_ONE = {
+    "a face or object": FIRE,
+    "with a skin tone": chr(0x1F44D) + chr(0x1F3FD),
+    "a family joined by zero width joiners": chr(0x1F468) + ZWJ + chr(0x1F469) + ZWJ + chr(0x1F467),
+    "a flag": chr(0x1F1EC) + chr(0x1F1E7),
+    "a heart with the selector": chr(0x2764) + VS16,
+    "a check mark with the selector": chr(0x2714) + VS16,
+    "a green check box": chr(0x2705),
+    "a keycap": "1" + VS16 + chr(0x20E3),
+}
+
+
+@pytest.mark.parametrize("emoji", EMOJI_THAT_COUNT_AS_ONE.values(), ids=EMOJI_THAT_COUNT_AS_ONE.keys())
+def test_x_counts_each_emoji_once_as_two(emoji):
+    assert captions.x_length(emoji) == 2
+    assert captions.x_length("a" + emoji + "b") == 4
+    assert captions.x_length(emoji * 3) == 6
+
+
+def test_x_counts_a_symbol_that_is_not_an_emoji_as_one():
+    for plain in (chr(0x2764), chr(0x2605), chr(0x2192), "(c)", "1"):
+        assert captions.x_length(plain) == len(plain)
+
+
+def test_x_counts_a_link_as_23_however_long_it_is():
+    long_link = "https://example.com/" + "a" * 250
+    assert captions.x_length(long_link) == 23
+    assert captions.x_length(f"See {long_link}.") == 4 + 23 + 1  # the full stop that ends the sentence is not the link's
+    assert captions.x_length("two: example.com and linktr.ee/mine") == 5 + 23 + 5 + 23
+    assert captions.x_length("Node.js is not a link") == len("Node.js is not a link")
+
+
+def test_x_length_uses_xs_weights_not_the_raw_count(captions_set, profile):
+    follow = "\n\nFollow @examplestudio for more."
+    tag_line = "\n\n#balconygarden #basil"
+    room = 280 - len(follow) - len(tag_line)
+    fits = room // 2  # each emoji takes two of the characters left
+
+    captions_set["twitter"]["body"] = FIRE * fits + follow
+    text = payloads.content_for(captions_set["twitter"], "twitter")
+    assert captions.x_length(text) == 2 * fits + len(follow) + len(tag_line) == 280
+    assert problems_for("twitter", captions_set, profile) == []
+
+    captions_set["twitter"]["body"] = FIRE * (fits + 1) + follow
+    text = payloads.content_for(captions_set["twitter"], "twitter")
+    assert len(text) < 280 < captions.x_length(text)  # few enough characters, too heavy for X
+    (found,) = problems_for("twitter", captions_set, profile)
+    assert "X" in found and str(captions.x_length(text)) in found and "280" in found and "emoji as 2" in found
+
+
+def test_a_long_link_does_not_use_up_the_room_on_x(captions_set, profile):
+    long_link = "https://example.com/" + "a" * 250
+    captions_set["twitter"]["body"] = long_link + "\n\nFollow @examplestudio for more."
+    text = payloads.content_for(captions_set["twitter"], "twitter")
+    assert len(text) > 280 and captions.x_length(text) < 280
     assert problems_for("twitter", captions_set, profile) == []
 
 

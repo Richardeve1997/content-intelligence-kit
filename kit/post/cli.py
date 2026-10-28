@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from kit import config, post
@@ -293,4 +295,13 @@ def main(argv: list[str] | None = None) -> int:
         return _COMMANDS[args.command](args)
     except (KitError, ValueError) as exc:
         print(exc, file=sys.stderr)
+        return 1
+    except OSError as exc:  # a full disk, a folder the kit may not write to
+        named = isinstance(exc.filename, (str, bytes, os.PathLike)) and exc.filename
+        where = Path(os.fsdecode(named)).name if named else "a file"
+        print(
+            f"The kit could not read or write {where} ({exc.strerror or type(exc).__name__}). "
+            "Check the free disk space and the folder's permissions, then run the command again.",
+            file=sys.stderr,
+        )
         return 1
