@@ -1555,6 +1555,27 @@ def test_posting_times_are_asked_whether_or_not_the_kit_posts():
     assert "hashtags for your posts" in before_zernio, "LinkedIn gets no hashtags, so they are not for every post"
 
 
+def test_the_who_step_asks_linkedin_for_the_name_in_its_address_not_an_at_handle():
+    # LinkedIn has no @ handle. A profile or page is known by the last part of its address.
+    who = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[3][1]
+    question = next(line for line in who.splitlines() if line.startswith("3. "))
+    assert "LinkedIn" in question and "no @ handle" in question
+    assert "linkedin.com/in/" in question and "linkedin.com/company/" in question
+
+
+def test_the_look_step_makes_each_folder_before_the_creator_copies_a_file_into_it():
+    look = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[4][1]
+    for folder in ("me/brand/fonts", "me/brand/logo"):
+        made = look.find(f"mkdir -p {folder}")
+        assert made != -1, f"the step never makes {folder}"
+        assert made < look.find(f"into `{folder}/`"), f"{folder} is made before the creator is told to copy into it"
+
+
+def test_the_watch_list_step_says_what_a_list_of_fewer_than_five_means():
+    watchlist = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[6][1]
+    assert "Fewer than 5" in watchlist and "research still runs" in watchlist
+
+
 def test_the_styles_step_hands_mini_me_to_the_character_skill_and_keeps_its_gates():
     styles = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[8][1]
     assert "hand over to the `character` skill" in styles and "its own approval gates" in styles

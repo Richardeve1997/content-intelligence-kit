@@ -67,7 +67,7 @@ Ask in this order, one question at a time:
 
 1. Their name or brand, the way it should appear on screen.
 2. The platforms they post on, from Instagram, TikTok, YouTube, Facebook, LinkedIn and X. At least one.
-3. Their handle on each of those platforms, such as @yourname. Every platform on the list needs one.
+3. Their handle on each of those platforms, such as @yourname. LinkedIn has no @ handle, so ask for the last part of their profile or page address instead: yourname from linkedin.com/in/yourname, or yourpage from linkedin.com/company/yourpage. Every platform on the list needs one.
 4. What their videos are about, in a sentence.
 5. Why people should listen to them, in a sentence. Use only what they tell you. If they say little, write little.
 6. Who the videos are for, and what that audience wants from them.
@@ -96,8 +96,8 @@ For a plain follow, use `"cta": {"type": "follow", "keyword": null, "payload": n
 ### Step 4: Their look
 
 1. Colours, five of them: a light canvas (the background behind graphics and captions), an ink (dark text on that canvas), one bright accent for highlights, and two field colours, one dark and one light (the backgrounds mini me flips between). Each is a six digit hex code. If they have a website, offer to pull the palette and logo from it: read the page's styles, propose five colours, and say in a line what each one is for. If they have no palette, ask for a colour or a mood they like and propose a set.
-2. Fonts, three of them: display (headlines and captions), body, and mono. The kit ships Inter Tight, Inter and JetBrains Mono, so offer those. To use their own, they copy the font file (.woff2, .woff, .ttf or .otf) into `me/brand/fonts/` and give its path, such as `brand/fonts/YourFont.woff2`. Only fonts they have the right to use.
-3. A logo, if they have one: a PNG or SVG copied into `me/brand/logo/` and given as `brand/logo/logo.png`. No logo is fine, and the answer is null.
+2. Fonts, three of them: display (headlines and captions), body, and mono. The kit ships Inter Tight, Inter and JetBrains Mono, so offer those. To use their own, make the folder with `mkdir -p me/brand/fonts`, then they copy the font file (.woff2, .woff, .ttf or .otf) into `me/brand/fonts/` and give its path, such as `brand/fonts/YourFont.woff2`. Only fonts they have the right to use.
+3. A logo, if they have one: make the folder with `mkdir -p me/brand/logo`, then a PNG or SVG copied into `me/brand/logo/` and given as `brand/logo/logo.png`. No logo is fine, and the answer is null.
 4. Preview it before saving. This writes `me/brand/preview.html` and prints any colour pair that is hard to read:
 
 ```bash
@@ -127,7 +127,7 @@ uv run python -m kit.onboarding save voice
 
 ### Step 6: Their watch list
 
-1. Ask for 5 to 30 creators they watch on Instagram, TikTok or YouTube. These are people whose videos they admire or compete with. Accept handles, profile links or channel links, and write each as a handle with the @.
+1. Ask for 5 to 30 creators they watch on Instagram, TikTok or YouTube. These are people whose videos they admire or compete with. Accept handles, profile links or channel links, and write each as a handle with the @. Fewer than 5 is fine to start with: research still runs, but its ideas rest on fewer videos, so suggest adding more as they find them.
 2. Explain the cost in plain words. Instagram and TikTok research needs an Apify key. Apify has a free plan with a monthly credit, and each research run has a spending cap: 25 cents on Instagram and 50 cents on TikTok unless they change it. YouTube creators and links they paste cost nothing. If they have no Apify key yet, keep their Instagram and TikTok names in the list anyway for when they add one.
 3. Write `me/watchlist.json` in the same shape as `me.example/watchlist.json`: one list of handles for each of `instagram`, `tiktok` and `youtube`, and an empty list for a platform with none.
 4. Ask once whether they already have video ideas. Write any they give you as bullets in `me/ideas.md`, under the heading `# Ideas` and one line saying that the research run reads the file. Leave out the example ideas from `me.example/ideas.md`.
