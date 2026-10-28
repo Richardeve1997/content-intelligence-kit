@@ -59,7 +59,10 @@ Setup takes care of the rest and asks before each install: Homebrew, ffmpeg, uv 
 
 ### How the install is tested
 
-A GitHub Actions job, `.github/workflows/smoke.yml`, is started by hand before each release and runs on a clean Apple silicon Mac. It installs ffmpeg with Homebrew, Python 3.11 and the Python tools (yt-dlp among them) with uv, HyperFrames with `npm ci`, Chromium and GSAP, then runs the machine check, the tests and a three second test render. Those install steps are tested only on that job, because the Mac the kit is built on already had Homebrew, ffmpeg, Node and uv. Nothing tests installing Homebrew itself, or installing uv and Node with Homebrew, because the job sets those up another way. Onboarding and both video styles are run end to end on a real Mac.
+Before each release:
+
+- A smoke job, `.github/workflows/smoke.yml`, installs the kit on a fresh GitHub macOS runner with an Apple silicon chip and renders a three second card. On the runner it installs ffmpeg with Homebrew, Python 3.11 and the Python tools (yt-dlp among them) with uv, HyperFrames with `npm ci`, Chromium and GSAP, then runs the machine check and the tests.
+- The whole kit runs end to end as a made-up creator, in Claude Code and in Codex: onboarding, research, both video styles and a posting dry run.
 
 ## Quick start
 
@@ -68,7 +71,7 @@ git clone https://github.com/Richardeve1997/content-intelligence-kit
 cd content-intelligence-kit
 ```
 
-On a new Mac, `git clone` first asks to install Apple's command line developer tools. Say yes, and run it again once they are installed.
+On a new Mac, `git clone` first asks to install Apple's command line developer tools. Say yes, and run both commands again once they are installed.
 
 Open the folder in Claude Code or Codex by running `claude` or `codex` inside it, then say "set me up". Setup is one conversation of 30 to 45 minutes. It asks about one thing at a time and saves after every step, so you can stop and pick it up later. [ONBOARDING.md](ONBOARDING.md) walks through each step.
 
@@ -91,7 +94,7 @@ Apart from your Claude or ChatGPT plan, every paid tool is optional, and each ha
 
 Codex reads `AGENTS.md`, which points it to `CLAUDE.md`, and it finds the same skills through `.agents/skills`, a link to `.claude/skills`. The kit sets up no hooks for Codex, so Codex runs the start-of-session check itself, and each skill records your corrections in its own Feedback step. In Codex the video styles need a paid ChatGPT plan, as they need Claude Max in Claude Code.
 
-Codex usually runs commands in a sandbox that can write only inside this folder and cannot reach the internet. Rendering video, installing tools, research, voice-overs and posting cannot run there, so for those steps Codex asks before it runs a command outside the sandbox. Say yes when it asks.
+Codex usually runs commands in a sandbox that can write only in this folder and the temporary folder, and cannot reach the internet. Rendering video, installing tools, research, voice-overs and posting cannot run there, so for those steps Codex asks before it runs a command outside the sandbox. Say yes when it asks.
 
 ## Updating
 
