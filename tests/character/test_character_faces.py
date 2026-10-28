@@ -486,6 +486,38 @@ def test_a_beard_in_the_outline_colour_stays_a_beard_when_the_mouth_opens():
         assert (after != before).any()
 
 
+def test_a_beard_in_the_outline_colour_stays_a_beard_when_the_outline_is_the_darkest_colour(monkeypatch):
+    """An opening mouth is painted over with what surrounds it, leaving out the darkest colour (the mouth's own
+    dark edge), unless that colour is most of the ring round the mouth: a beard drawn in the outline colour. The
+    stand-in's pupils are darker than its outline, so the test above never reaches that rule. Here the pupils are
+    lighter, so the outline is the darkest colour, as it is in most sprites, and the mouth is thick enough that the
+    rounded opening leaves its lower corners as they were painted: the rule is what keeps them beard, not skin."""
+    import character_sprites
+    from character_sprites import OUTLINE
+
+    monkeypatch.setattr(character_sprites, "PUPIL", (72, 66, 80))
+    rgba, _ = draw_figure("idle", hair=OUTLINE, beard=OUTLINE, mouth_size=(14, 5))
+    colours = {tuple(int(v) for v in c) for c in rgba[..., :3][rgba[..., 3] > 0]}
+    lightness = {c: float(faces.art.lab_of(np.array([c]))[0][0]) for c in colours}
+    assert min(lightness, key=lightness.get) == OUTLINE, "the outline must be the sprite's darkest colour here"
+    face = faces.locate(rgba)
+    states = faces.face_states(rgba, face)
+    skin = faces.skin_colours(rgba, face.skin)
+
+    def is_skin(cells):
+        return np.array([[tuple(int(v) for v in c) in skin for c in row] for row in cells[..., :3]])
+
+    for name in ("mouth_mid", "mouth_open"):
+        rect = states.rects[name]
+        before = rgba[rect.y : rect.y1, rect.x : rect.x1]
+        after = states.patches[name]
+        # the closed mouth is painted over with what surrounds it, here the beard, before the opening is drawn:
+        # wherever the opening does not cover it again, skin would show inside the beard
+        new_skin = is_skin(after) & ~is_skin(before)
+        assert not new_skin.any(), f"{name} puts skin at {np.argwhere(new_skin).tolist()} inside the beard"
+        assert (after != before).any()
+
+
 @pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
 @pytest.mark.parametrize("neck", [0, 1, 2], ids=["no neck", "a one-row neck", "a two-row neck"])
 @pytest.mark.parametrize("size", [(12, 4), (14, 5), (16, 6)], ids=["12 x 4", "14 x 5", "16 x 6"])
