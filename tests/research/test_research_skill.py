@@ -136,3 +136,9 @@ def test_the_install_sentence_always_keeps_the_research_tools(text):
 def test_the_skill_explains_the_notices_about_creators_and_spending_caps(text):
     assert "returned nothing" in text
     assert "`research.cost_cap.<platform>`" in text
+
+
+def test_the_skill_names_the_setting_that_gives_the_scrape_longer(text):
+    assert "`research.scrape_seconds`" in text
+    assert "10 to 1800" in text
+    assert "me/profile.json" in text.split("`research.scrape_seconds`")[1][:120]
