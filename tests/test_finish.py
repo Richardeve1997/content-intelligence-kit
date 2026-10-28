@@ -296,6 +296,82 @@ def test_three_finishes_from_the_command_line_use_one_bed_and_one_row(example_me
     assert len(_ledger_rows(example_me, "example-reel")) == 1
 
 
+
+def test_a_changed_bed_moves_its_row_last_so_the_next_pick_skips_it(example_me):
+    """The ledger is newest last, and pick() skips the last track. A video whose bed changed used the new bed
+    most recently, so its row moves to the end instead of keeping its old place."""
+    calm = example_me / "music" / "calm"
+    first, second, third = _track(calm, "a.mp3"), _track(calm, "b.mp3"), _track(calm, "c.mp3")
+    music.log(first, "example-reel")
+    music.log(second, "other-reel")
+    music.log(third, "example-reel")  # the example's bed changed after the other video was finished
+    rows = [line for line in (example_me / "music" / "MUSIC.md").read_text().splitlines() if line.startswith("| 2")]
+    assert [row.split("|")[2].strip() for row in rows] == ["other-reel", "example-reel"], rows
+    assert rows[-1].endswith("| calm/c.mp3 |")
+    assert music.pick("calm") != third, "the bed used last is not handed out next"
+
+
+def test_a_bed_outside_me_music_is_logged_by_a_path_that_finds_it(example_me, tmp_path):
+    """A bed passed as a file from elsewhere was logged by its bare name, so the video lost it on the next
+    finish. The ledger keeps its whole path, and the video keeps that bed."""
+    elsewhere = _track(tmp_path / "downloads", "licensed-bed.mp3")
+    music.log(elsewhere, "example-reel")
+    rows = _ledger_rows(example_me, "example-reel")
+    assert len(rows) == 1 and rows[0].endswith(f"| {elsewhere.resolve().as_posix()} |"), rows
+    assert music.chosen("example-reel") == elsewhere.resolve()
+    assert music.for_video("example-reel") == elsewhere.resolve(), "every finish of the video keeps that bed"
+
+
+def _fake_finish(monkeypatch):
+    calls = []
+
+    def fake(src, out, **kwargs):
+        calls.append(kwargs["music"])
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_bytes(b"finished")
+        return Path(out)
+
+    monkeypatch.setattr(finish, "finish", fake)
+    return calls
+
+
+def test_a_bed_file_finishes_a_folder_that_is_not_a_video_name_and_says_how_to_log_it(example_me, tmp_path, monkeypatch, capsys):
+    """With --music <file> the output folder's name is only used to log the bed. A folder such as "My Reel" is
+    not a video name, so the finish goes ahead without the ledger row and says how to log it."""
+    calls = _fake_finish(monkeypatch)
+    bed = _track(example_me / "music" / "calm", "a.mp3")
+    src, out = tmp_path / "edit.mp4", tmp_path / "My Reel" / "final.mp4"
+    src.write_bytes(b"edit")
+    assert finish.main([str(src), str(out), "--music", str(bed)]) == 0
+    assert calls == [bed] and out.read_bytes() == b"finished"
+    said = capsys.readouterr().out
+    assert "--slug" in said and "My Reel" in said and "not logged" in said, said
+    assert "| My Reel |" not in (example_me / "music" / "MUSIC.md").read_text()
+
+
+def test_a_slug_that_is_not_a_video_name_is_refused_by_name_before_the_finish(example_me, tmp_path, monkeypatch, capsys):
+    calls = _fake_finish(monkeypatch)
+    bed = _track(example_me / "music" / "calm", "a.mp3")
+    src, out = tmp_path / "edit.mp4", tmp_path / "example-reel" / "final.mp4"
+    src.write_bytes(b"edit")
+    assert finish.main([str(src), str(out), "--music", str(bed), "--slug", "My Reel"]) == 1
+    assert calls == [], "refused before the long finish"
+    said = capsys.readouterr().out
+    assert "--slug" in said and "My Reel" in said, said
+
+
+def test_auto_needs_a_video_name_and_says_to_pass_slug(example_me, tmp_path, monkeypatch, capsys):
+    """--music auto keeps one bed per video, so it needs the video's name: the output folder's, or --slug."""
+    calls = _fake_finish(monkeypatch)
+    _track(example_me / "music" / "calm", "a.mp3")
+    src, out = tmp_path / "edit.mp4", tmp_path / "My Reel" / "final.mp4"
+    src.write_bytes(b"edit")
+    assert finish.main([str(src), str(out), "--music", "auto"]) == 1
+    assert calls == []
+    said = capsys.readouterr().out
+    assert "--slug" in said and "My Reel" in said, said
+
+
 # --- a failed finish leaves the old file alone ------------------------------------------------------------------
 
 
