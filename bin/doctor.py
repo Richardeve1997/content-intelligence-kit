@@ -45,6 +45,8 @@ NODE_MIN = 22
 BREW_PREFIX = "/opt/homebrew/"
 
 # The fixes that are commands. ONBOARDING.md shows every one of them.
+# A new Mac has a python3 that only asks to install Apple's command line developer tools. This installs them.
+FIX_PYTHON3 = "xcode-select --install"
 FIX_BREW = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 FIX_BREW_PATH = (
     "echo 'eval \"$(/opt/homebrew/bin/brew shellenv)\"' >> ~/.zprofile && "
@@ -67,6 +69,7 @@ FIX_SYNC = "uv sync --group video --group research --inexact"
 FIX_CHROMIUM = "uv run python -m playwright install chromium"
 FIX_GSAP = "bash bin/fetch_gsap.sh"
 FIX_COMMANDS = (
+    FIX_PYTHON3,
     FIX_BREW,
     FIX_BREW_PATH,
     FIX_FFMPEG,
@@ -236,6 +239,19 @@ def check_mac(probe: Probe) -> Result:
     if probe.machine() == "arm64":
         return "ok", ""
     return "missing", FIX_ROSETTA if probe.apple_silicon_hardware() else FIX_MAC
+
+
+def check_python3(probe: Probe) -> Result:
+    """Passes when `python3 --version` answers with a Python 3 version.
+
+    The machine check and the Claude Code hooks run on python3. Until Apple's command line developer tools
+    are installed, the python3 on a new Mac only asks to install them and then stops, without running anything.
+    """
+    path = probe.which("python3")
+    result = probe.run([path, "--version"], timeout=20) if path else None
+    if result and result[0] == 0 and re.match(r"Python 3\.\d+", result[1].strip()):
+        return "ok", ""
+    return "missing", FIX_PYTHON3
 
 
 def check_brew(probe: Probe) -> Result:
@@ -445,6 +461,7 @@ def collect(probe: Probe) -> List[Row]:
         report = None
     checks: List[Tuple[str, Callable[[], Result]]] = [
         ("macOS on Apple silicon", lambda: check_mac(probe)),
+        ("python3 command", lambda: check_python3(probe)),
         ("Homebrew", lambda: check_brew(probe)),
         ("ffmpeg with h264_videotoolbox", lambda: check_ffmpeg(probe)),
         ("HDR tone mapping (zscale filter)", lambda: check_zscale(probe)),

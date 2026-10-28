@@ -50,6 +50,7 @@ It lists each check with its status (ok, missing or warn) and the fix for anythi
 | Check | What it is for | Fix when it is missing |
 |---|---|---|
 | macOS on Apple silicon | Version 1 runs only on a Mac with an M1 chip or newer. | No command can fix this. |
+| python3 command | The machine check and the Claude Code hooks run on the Mac's own `python3`. On a new Mac it only asks to install Apple's command line developer tools. | `xcode-select --install` |
 | Homebrew | Installs most of the tools below. | `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` |
 | Homebrew, installed but not found | The terminal does not know where Homebrew is. | `echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile && eval "$(/opt/homebrew/bin/brew shellenv)"` |
 | ffmpeg with h264_videotoolbox | Encodes video on the Mac's own hardware. | `brew install ffmpeg`, or `brew reinstall ffmpeg` if ffmpeg is there but built without that encoder |

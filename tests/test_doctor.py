@@ -34,6 +34,7 @@ BREW_SHELLENV = (
     'eval "$(/opt/homebrew/bin/brew shellenv)"'
 )
 SYNC = "uv sync --group video --group research --inexact"
+CLT = "xcode-select --install"
 CHROMIUM = "uv run python -m playwright install chromium"
 ENV_EXAMPLE = "# Names only.\nAPIFY_TOKEN=\nOPENAI_API_KEY=\nGEMINI_API_KEY=\nELEVENLABS_API_KEY=\nZERNIO_API_KEY=\n"
 KEYS = ["APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"]
@@ -75,6 +76,7 @@ def fake(doctor):
             self.arch = "arm64"
             self.arm_hardware = True
             self.programs = {
+                "python3": "/usr/bin/python3",
                 "brew": "/opt/homebrew/bin/brew",
                 "ffmpeg": "/opt/homebrew/bin/ffmpeg",
                 "uv": "/opt/homebrew/bin/uv",
@@ -82,6 +84,7 @@ def fake(doctor):
                 "npx": "/opt/homebrew/bin/npx",
             }
             self.outputs = {
+                "python3 --version": (0, "Python 3.9.6\n"),
                 "ffmpeg -hide_banner -encoders": (0, ENCODERS),
                 "ffmpeg -hide_banner -filters": (0, FILTERS),
                 "uv python find 3.11": (0, "/opt/homebrew/bin/python3.11\n"),
@@ -175,6 +178,7 @@ def test_a_healthy_mac_passes_every_required_check(doctor, fake):
 
     for words in (
         "macOS",
+        "python3",
         "Homebrew",
         "ffmpeg",
         "zscale",
@@ -225,7 +229,17 @@ def test_a_package_json_that_cannot_be_read_gives_the_same_plain_row(doctor, fak
     assert find(rows_of(doctor, probe), "HyperFrames")["status"] == "missing"
 
 
+STUB_NOTE = (
+    "xcode-select: note: No developer tools were found, requesting install.\n"
+    "If developer tools are located at a non-default location on disk, use `sudo xcode-select --switch path/to/Xcode.app` "
+    "to specify the Xcode that you wish to use for command line developer tools, and cancel the installation dialog.\n"
+)
+
 COMMAND_FIXES = [
+    pytest.param("python3", lambda p: p.outputs.update({"python3 --version": (1, STUB_NOTE)}), CLT, id="python3-stub"),
+    pytest.param("python3", lambda p: p.outputs.update({"python3 --version": None}), CLT, id="python3-will-not-start"),
+    pytest.param("python3", lambda p: p.outputs.update({"python3 --version": (0, "")}), CLT, id="python3-says-nothing"),
+    pytest.param("python3", lambda p: p.programs.pop("python3"), CLT, id="no-python3"),
     pytest.param("Homebrew", lambda p: p.programs.pop("brew"), BREW_INSTALL, id="no-homebrew"),
     pytest.param(
         "Homebrew",
@@ -344,6 +358,27 @@ def test_a_terminal_running_under_rosetta_gets_a_specific_fix(doctor, fake):
     row = find(rows_of(doctor, probe), "macOS")
     assert row["status"] == "missing"
     assert "Rosetta" in row["fix"]
+
+
+def test_the_python3_row_comes_right_after_the_mac_and_before_homebrew(doctor, fake):
+    names = [row["check"] for row in rows_of(doctor, fake())]
+    python3 = names.index(find(rows_of(doctor, fake()), "python3")["check"])
+    assert python3 == names.index("macOS on Apple silicon") + 1
+    assert python3 < names.index("Homebrew"), "Homebrew's own installer needs the command line developer tools"
+
+
+def test_the_python3_row_asks_python3_for_its_version_and_nothing_else(doctor, fake):
+    probe = fake()
+    rows_of(doctor, probe)
+    assert [call for call in probe.calls if call.startswith("python3")] == ["python3 --version"]
+
+
+def test_a_working_python3_from_anywhere_passes(doctor, fake):
+    for path, answer in (("/opt/homebrew/bin/python3", "Python 3.14.0\n"), ("/usr/local/bin/python3", "Python 3.12.7\n")):
+        probe = fake()
+        probe.programs["python3"] = path
+        probe.outputs["python3 --version"] = (0, answer)
+        assert find(rows_of(doctor, probe), "python3")["status"] == "ok", path
 
 
 def test_ffmpeg_from_somewhere_else_is_not_fixed_by_brew_alone(doctor, fake):
