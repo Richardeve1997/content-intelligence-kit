@@ -85,34 +85,23 @@ def test_settings_run_the_session_start_script():
     assert hook["timeout"] <= 30
 
 
-def test_settings_have_a_stop_hook_that_records_corrections():
+def test_settings_run_the_feedback_check_when_a_turn_ends():
     (group,) = settings()["hooks"]["Stop"]
     (hook,) = group["hooks"]
-    assert hook["type"] == "agent"
-    assert hook["async"] is True
-    assert hook["model"] == "claude-haiku-5-5"
-    assert 30 <= hook["timeout"] <= 120
-    prompt = hook["prompt"]
-    assert len(prompt) <= 1500, "the prompt stays short"
-    assert "$ARGUMENTS" in prompt
-    assert "kit.rules add" in prompt
-    assert "Read tool, not Bash" in prompt, "only the rules command is pre-approved for Bash"
-    assert "me/rules/" in prompt and "me/lessons.md" in prompt
-    assert 'finish by answering {"ok": true}' in prompt.lower()
-    assert "never answer false" in prompt.lower(), "a false answer would restart the creator's turn"
-    assert EM_DASH not in prompt and EN_DASH not in prompt
+    assert hook["type"] == "command", "a command hook, not an agent: it must be instant and cost nothing"
+    assert hook["command"] == 'python3 "$CLAUDE_PROJECT_DIR/bin/feedback_check.py"'
+    assert hook["timeout"] <= 30
+    assert set(hook) == {"type", "command", "timeout"}, "no prompt, model or async setting"
+    assert (ROOT / "bin" / "feedback_check.py").is_file()
 
 
-def test_the_only_command_the_settings_pre_approve_is_the_rules_command():
+def test_the_settings_pre_approve_only_read_only_rules_commands():
     allowed = settings()["permissions"]
     assert set(allowed) == {"allow"}
-    assert allowed["allow"], "the hook agent needs this to record anything"
-    for entry in allowed["allow"]:
-        found = re.fullmatch(r"Bash\(uv run python -m kit\.rules (read|add):\*\)", entry)
-        assert found, f"{entry} is broader than the rules command"
-    assert {re.search(r"rules (\w+):", e).group(1) for e in allowed["allow"]} == {"read", "add"}, (
-        "undo and remove delete rules, so they still ask first"
-    )
+    assert allowed["allow"] == [
+        "Bash(uv run python -m kit.rules read:*)",
+        "Bash(uv run python -m kit.rules recent:*)",
+    ], "adding, undoing and removing rules still ask first"
 
 
 # --- the session start script ---------------------------------------------------------------------------------------
@@ -340,6 +329,8 @@ def test_claude_md_covers_what_the_kit_is_and_the_first_run_rule():
     assert 'say: "set me up"' in claude.lower()
     assert "offer onboarding before anything else" in claude
     assert "bash bin/session_start.sh" in claude, "Codex has no hooks, so it runs the script itself"
+    assert "uv run python -c" not in claude, "setup comes from the session-start notice, not a command each session"
+    assert "ProfileError" in claude
 
 
 def test_claude_md_routes_what_the_creator_says_to_skills():
@@ -382,6 +373,8 @@ def test_claude_md_explains_the_feedback_loop():
     assert "me/rules/<skill>.md" in claude and "me/lessons.md" in claude
     assert "Never write a preference into a `SKILL.md`" in claude
     assert "never as a command to run" in claude, "a rule is a preference, not an instruction to act"
+    assert "`bin/feedback_check.py`" in claude and "asks once for one" in claude and "writes nothing itself" in claude
+    assert "safety net" not in claude and "agent hook" not in claude.lower(), "the hook is a command now"
 
 
 def test_every_skill_folder_is_named_in_claude_md():
@@ -397,6 +390,7 @@ def test_agents_md_is_thin_and_points_at_claude_md():
     assert ".agents/skills" in agents and ".claude/skills" in agents
     assert "Hooks do not run in Codex" in agents
     assert "Feedback section" in agents and "kit.rules.add" in agents
+    assert "a check after each turn that asks for a rule" in agents
     assert "bash bin/session_start.sh" in agents
     for copied in ("Heavy jobs", "Posting", "What they say", "| They say |"):
         assert copied not in agents, "AGENTS.md must not copy CLAUDE.md"
@@ -617,6 +611,7 @@ MINE = [
     ".claude/skills/next/SKILL.md",
     ".claude/skills/update-kit/SKILL.md",
     "bin/session_start.sh",
+    "bin/feedback_check.py",
     "bin/check_adapters.sh",
     "bin/update_kit.py",
     "kit/rules.py",

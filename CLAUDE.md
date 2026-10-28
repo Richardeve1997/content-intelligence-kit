@@ -6,13 +6,7 @@ The creator talks in plain language and never types a slash command, so choose t
 
 ## First run
 
-At the start of every session, check that setup has finished:
-
-```bash
-uv run python -c "from kit import config; config.load_profile()"
-```
-
-If `kit.config.load_profile()` raises `NotOnboarded`, offer onboarding before anything else. Tell the creator to say: "set me up", and start the `onboard` skill when they do. If it raises `ProfileError`, show them its message, which lists each problem in plain words, and offer to fix them through onboarding. If the command fails because `uv` is not installed, say so and offer onboarding too, since onboarding checks the machine. Claude Code prints the same notice at session start from a hook. Codex has no hooks, so run `bash bin/session_start.sh` yourself first.
+Setup is checked for you. Claude Code runs `bin/session_start.sh` when a session starts, and Codex runs it by hand as its first action: `bash bin/session_start.sh`. If it prints "This kit is not set up yet. Say: set me up.", or `kit.config.load_profile()` raises `NotOnboarded` anywhere, offer onboarding before anything else. Tell the creator to say: "set me up", and start the `onboard` skill when they do. A `ProfileError` carries a message that lists each problem in plain words. Show it, and offer to fix the problems through onboarding. If a `uv run` command fails because `uv` is not installed, say so and offer onboarding too, since onboarding checks the machine.
 
 ## What they say
 
@@ -62,7 +56,7 @@ Every skill ends with a Feedback section. When the creator corrects something, o
 3. If it contradicts an older rule, take the old one out first. `uv run python -m kit.rules undo <skill>` removes the newest, and `learnings` handles the rest.
 4. Say in one line what you recorded.
 
-Rules and lessons live in `me/rules/<skill>.md` and `me/lessons.md`, so they survive updates. Never write a preference into a `SKILL.md`, because an update replaces it. In Claude Code, a Stop hook (see `.claude/settings.json`) also checks each turn for a correction that a skill missed, and writes only to those two places. Codex has no hooks, so the Feedback section is the only recorder there.
+Rules and lessons live in `me/rules/<skill>.md` and `me/lessons.md`, so they survive updates. Never write a preference into a `SKILL.md`, because an update replaces it. In Claude Code, a Stop hook (`bin/feedback_check.py`, set up in `.claude/settings.json`) backs this up. When the creator's last message read like a correction and the turn recorded no rule, it asks once for one, with a fixed reason, and writes nothing itself. Codex has no hooks, so the Feedback section is the only recorder there.
 
 After you add or change a skill, run `bash bin/check_adapters.sh`. It confirms the Codex link, and that every skill reads its rules first and ends with a Feedback section.
 
