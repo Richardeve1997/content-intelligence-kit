@@ -8,8 +8,9 @@ Each row is {"check": ..., "status": "ok" | "missing" | "warn", "fix": ...}.
 
   ok       the check passes, and "fix" is empty.
   missing  a required check fails. "fix" is the exact command to run, or a sentence when no command can help.
-  warn     worth a look but it does not stop anything: low disk space, or an ffmpeg without the zscale
-           filter (HDR phone videos then keep washed-out colours).
+  warn     worth a look but it does not stop anything: low disk space, an ffmpeg without the zscale
+           filter (HDR phone videos then keep washed-out colours), or, inside Codex's sandbox, a tool that
+           cannot start there (HyperFrames and Chromium). One run outside the sandbox checks those.
 
 Under the table, one line names the optional keys that are not set yet (Apify, an image model,
 ElevenLabs, Zernio). A key that is not set is not a problem, so it is a line and not a row, and
@@ -95,6 +96,18 @@ FIX_DISK = (
     "Empty the Trash, then move old videos and downloads to an external drive or cloud storage."
 )
 
+# Codex runs each command in a sandbox and sets CODEX_SANDBOX for it. Inside it HyperFrames cannot reach the
+# Keychain and Chromium cannot register its Mach port, so their rows cannot be checked there. A failure in the
+# sandbox says nothing about the Mac, so those rows are warnings that say so, and the rest of the check still counts.
+SANDBOX_VARIABLE = "CODEX_SANDBOX"
+FIX_OUTSIDE_SANDBOX = (
+    "Not checked inside Codex's sandbox. Approve running python3 bin/doctor.py outside the sandbox to check it."
+)
+SANDBOX_NOTE = (
+    "Some rows cannot be checked inside Codex's sandbox. One run of python3 bin/doctor.py outside the sandbox "
+    "gives the full check. Inside the sandbox, start the kit's uv commands with UV_NO_CACHE=1."
+)
+
 # The optional keys. The names that count come from .env.example, and these are the ones to use when that file cannot be read.
 KNOWN_KEYS = ("APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY")
 
@@ -105,6 +118,7 @@ REPORT_SCRIPT = '''
 import importlib
 import importlib.util
 import json
+import os
 
 
 def state(name):
@@ -123,7 +137,9 @@ def state(name):
 report = {}
 for name in ("mlx_whisper", "faster_whisper", "whisperx", "torch", "yt_dlp", "playwright"):
     report[name] = state(name)
-if report["playwright"] == "ok":
+if report["playwright"] == "ok" and os.environ.get("CODEX_SANDBOX", "").strip():
+    report["chromium"] = "not checked"  # Codex's sandbox stops Chromium from starting, so a launch proves nothing
+elif report["playwright"] == "ok":
     try:
         from playwright.sync_api import sync_playwright
 
@@ -324,18 +340,27 @@ def pinned_hyperframes(probe: Probe) -> Optional[str]:
     return None
 
 
+def in_codex_sandbox(probe: Probe) -> bool:
+    """True when Codex runs this check inside its sandbox, where some tools cannot start at all."""
+    return bool((probe.environ(SANDBOX_VARIABLE) or "").strip())
+
+
 def check_hyperframes(probe: Probe, pin: Optional[str]) -> Result:
     # Look on disk first: asking npx about a package that is not installed would go to the network.
     if not pin or not probe.file_size("node_modules/hyperframes/package.json") or not probe.which("npx"):
         return "missing", FIX_HYPERFRAMES
+    if in_codex_sandbox(probe):  # HyperFrames reaches for the Keychain as it starts, which the sandbox refuses
+        return "warn", FIX_OUTSIDE_SANDBOX
     result = probe.run(["npx", "--no-install", "hyperframes", "--version"], timeout=60)
     found = re.search(r"\d+\.\d+\.\d+", result[1]) if result and result[0] == 0 else None
     return ("ok", "") if found and found.group(0) == pin else ("missing", FIX_HYPERFRAMES)
 
 
-def check_chromium(report: Optional[Dict[str, str]]) -> Result:
+def check_chromium(report: Optional[Dict[str, str]], sandboxed: bool = False) -> Result:
     if not report or report.get("playwright") != "ok":
         return "missing", FIX_SYNC
+    if sandboxed:
+        return "warn", FIX_OUTSIDE_SANDBOX
     return ("ok", "") if report.get("chromium") == "ok" else ("missing", FIX_CHROMIUM)
 
 
@@ -461,7 +486,7 @@ def collect(probe: Probe) -> List[Row]:
         ("Python 3.11", lambda: check_python(probe)),
         ("Node 22 or newer", lambda: check_node(probe)),
         (f"HyperFrames CLI {pin}" if pin else "HyperFrames CLI at the pinned version", lambda: check_hyperframes(probe, pin)),
-        ("Chromium for Playwright", lambda: check_chromium(report)),
+        ("Chromium for Playwright", lambda: check_chromium(report, in_codex_sandbox(probe))),
         ("GSAP in kit/vendor", lambda: check_gsap(probe)),
         ("Transcription (mlx-whisper or faster-whisper)", lambda: check_package(report, "mlx_whisper", "faster_whisper")),
         ("WhisperX word alignment", lambda: check_package(report, "whisperx")),
@@ -482,6 +507,13 @@ def format_table(rows: List[Row]) -> str:
 
 
 def summary(rows: List[Row]) -> str:
+    sentence = _summary_sentence(rows)
+    if any(row["fix"] == FIX_OUTSIDE_SANDBOX for row in rows):
+        return f"{sentence}\n{SANDBOX_NOTE}"
+    return sentence
+
+
+def _summary_sentence(rows: List[Row]) -> str:
     missing = sum(1 for row in rows if row["status"] == "missing")
     if missing == 1:
         return "1 check needs fixing. Fix it, then run python3 bin/doctor.py again."

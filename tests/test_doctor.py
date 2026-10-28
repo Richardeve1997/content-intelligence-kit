@@ -486,6 +486,96 @@ def test_chromium_is_only_fixed_by_the_installer_when_the_playwright_package_is_
     assert (row["status"], row["fix"]) == ("missing", SYNC)
 
 
+# --- inside Codex's sandbox ------------------------------------------------------------------------------
+# Codex runs each command in a sandbox and sets CODEX_SANDBOX for it. There HyperFrames cannot reach the Keychain
+# and Chromium cannot register its Mach port, so those rows cannot be checked, and a failure there means nothing.
+
+NOT_CHECKED = "Not checked inside Codex's sandbox"
+
+
+def sandboxed(fake):
+    probe = fake()
+    probe.env["CODEX_SANDBOX"] = "seatbelt"
+    return probe
+
+
+def test_inside_codex_sandbox_the_rows_it_cannot_check_are_warnings_that_say_so(doctor, fake, capsys):
+    probe = sandboxed(fake)
+    rows = rows_of(doctor, probe)
+    for words in ("HyperFrames", "Chromium"):
+        row = find(rows, words)
+        assert row["status"] == "warn", words
+        assert row["fix"].startswith(NOT_CHECKED) and "outside the sandbox" in row["fix"], row["fix"]
+    assert not any("hyperframes" in call for call in probe.calls), "it does not start HyperFrames where it cannot run"
+    assert all(row["status"] == "ok" for row in rows if row["check"].split()[0] not in ("HyperFrames", "Chromium"))
+
+    assert doctor.main([], probe=probe) == 0
+    text = capsys.readouterr().out
+    assert "One run of python3 bin/doctor.py outside the sandbox gives the full check." in text
+    assert "UV_NO_CACHE=1" in text, "it says how the kit's uv commands run inside the sandbox"
+
+
+def test_inside_codex_sandbox_what_can_be_seen_on_disk_is_still_missing(doctor, fake):
+    probe = sandboxed(fake)
+    probe.sizes.pop("node_modules/hyperframes/package.json", None)
+    probe.report.update({"playwright": "missing", "chromium": "missing"})
+    rows = rows_of(doctor, probe)
+    assert (find(rows, "HyperFrames")["status"], find(rows, "HyperFrames")["fix"]) == ("missing", "npm ci")
+    assert (find(rows, "Chromium")["status"], find(rows, "Chromium")["fix"]) == ("missing", SYNC)
+    assert doctor.main(["--json"], probe=probe) == 1
+
+
+def test_inside_codex_sandbox_another_missing_row_still_fails_the_run(doctor, fake, capsys):
+    probe = sandboxed(fake)
+    probe.programs.pop("ffmpeg")
+    assert doctor.main([], probe=probe) == 1
+    text = capsys.readouterr().out
+    assert "1 check needs fixing" in text and "outside the sandbox gives the full check" in text
+
+
+def test_outside_the_sandbox_nothing_changes(doctor, fake, capsys):
+    probe = fake()
+    rows = rows_of(doctor, probe)
+    assert find(rows, "HyperFrames")["status"] == "ok" and find(rows, "Chromium")["status"] == "ok"
+    assert "npx --no-install hyperframes --version" in probe.calls
+    doctor.main([], probe=probe)
+    assert "sandbox" not in capsys.readouterr().out
+
+
+def test_the_report_script_does_not_launch_chromium_inside_the_sandbox(doctor, tmp_path):
+    # A stand-in playwright package that leaves a mark when a browser is launched.
+    stub = tmp_path / "stub" / "playwright"
+    stub.mkdir(parents=True)
+    (stub / "__init__.py").write_text("")
+    mark = tmp_path / "launched"
+    (stub / "sync_api.py").write_text(
+        "import contextlib, pathlib\n"
+        "class _Browser:\n"
+        "    def close(self):\n"
+        "        pass\n"
+        "class _Chromium:\n"
+        "    def launch(self):\n"
+        f"        pathlib.Path({str(mark)!r}).write_text('yes')\n"
+        "        return _Browser()\n"
+        "class _Playwright:\n"
+        "    chromium = _Chromium()\n"
+        "@contextlib.contextmanager\n"
+        "def sync_playwright():\n"
+        "    yield _Playwright()\n"
+    )
+
+    def report(**extra):
+        env = {**os.environ, "PYTHONPATH": str(tmp_path / "stub"), **extra}
+        env.pop("CODEX_SANDBOX", None) if not extra else None
+        done = subprocess.run([sys.executable, "-c", doctor.REPORT_SCRIPT], env=env, capture_output=True, text=True, timeout=300)
+        line = [l for l in done.stdout.splitlines() if l.startswith(doctor.REPORT_MARK + " ")][-1]
+        return json.loads(line[len(doctor.REPORT_MARK) + 1 :])
+
+    assert report(CODEX_SANDBOX="seatbelt")["chromium"] == "not checked"
+    assert not mark.exists(), "no browser is launched inside the sandbox"
+    assert report()["chromium"] == "ok" and mark.exists(), "outside it the browser is launched as before"
+
+
 def test_one_sync_command_covers_every_gap_and_the_rows_that_pass_stay_ok(doctor, fake):
     probe = fake()
     probe.report.update({"whisperx": "missing", "yt_dlp": "missing"})
