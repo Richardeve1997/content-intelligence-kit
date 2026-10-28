@@ -505,7 +505,7 @@ with log.open("a") as handle:
 MODE
 """
 # A real script says what it used on its last line, after any notes: "test clip <path> (7.2 s, voice: ...)".
-OK = 'pathlib.Path(a.out).write_bytes(b"clip"); print("test clip " + a.out + " (7.0 s, voice: a scratch voice)")'
+OK = 'pathlib.Path(a.out).write_bytes(b"clip"); print("test clip " + a.out + " (7.0 s, voice: a scratch voice (macOS say))")'
 NOTES = (
     'print("note: this take is HDR, so its colours may look washed out"); '
     'print("take/take-01.mov points to a file that is not there any more, so the clip uses the sample card."); '
@@ -674,7 +674,26 @@ def test_the_result_line_says_what_each_clip_used(kit_folder, capsys):
     assert code == 0
     folder = kit_folder.root / "work" / "onboarding-test"
     assert f"UI story test clip: {folder / 'ui-story.mp4'} (7.0 s, a sample card)" in out
-    assert f"mini me test clip: {folder / 'mini-me.mp4'} (7.0 s, voice: a scratch voice)" in out
+    assert f"mini me test clip: {folder / 'mini-me.mp4'} (7.0 s, voice: a scratch voice (macOS say))" in out
+
+
+# What the two clip scripts print in brackets on their last line, one for each way a clip can be made.
+REAL_LABELS = [
+    "7.1 s, your take in the picture-in-picture",
+    "6.9 s, a sample card and a scratch voice",
+    "6.2 s, voice: your recording",
+    "6.2 s, voice: ElevenLabs",
+    "6.2 s, voice: a scratch voice (macOS say)",
+]
+
+
+@pytest.mark.parametrize("label", REAL_LABELS)
+@pytest.mark.parametrize("path", ["work/onboarding-test/mini-me.mp4", "work/take (old)/mini-me.mp4"])
+def test_every_label_the_clip_scripts_print_is_read_whole(label, path):
+    import subprocess
+
+    said = f"note: something on the way\ntest clip {path} ({label})\n"
+    assert onboarding._what_it_used(subprocess.CompletedProcess([], 0, stdout=said, stderr="")) == label
 
 
 def test_notes_from_both_styles_are_shown(kit_folder, capsys):

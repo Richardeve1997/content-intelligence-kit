@@ -694,7 +694,9 @@ def _notes(done: subprocess.CompletedProcess) -> list[str]:
 
 
 # A clip script's last line: "test clip <path> (7.2 s, voice: ElevenLabs)". The part in brackets says what it used.
-_RESULT = re.compile(r"^test clip .+ \(([^()]+)\)$")
+# It is found by the length it starts with, because a label can hold brackets of its own ("a scratch voice
+# (macOS say)") and so can the path.
+_RESULT = re.compile(r"^test clip .+ \((\d+(?:\.\d+)? s, .+)\)$")
 
 
 def _what_it_used(done: subprocess.CompletedProcess) -> str | None:
