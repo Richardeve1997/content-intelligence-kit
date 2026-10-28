@@ -24,6 +24,7 @@ from kit.transcribe import Word
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / ".claude" / "skills" / "ui-story" / "kit" / "test_clip.py"
+MINI_ME_CLIP = ROOT / ".claude" / "skills" / "mini-me" / "kit" / "test_clip.py"
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)  # written as code points so this file holds no dash
 
 
@@ -475,6 +476,13 @@ def test_a_step_that_fails_stops_the_clip_with_what_it_said(clip, tmp_path):
     assert "while testing a failure (exit 3)" in sentence and "one" in sentence and "two" in sentence
 
 
+def test_both_clip_scripts_say_that_their_notes_start_with_note():
+    """The clips command skips notes when it looks for the line that says what stopped, so both scripts promise the prefix."""
+    for path in (SCRIPT, MINI_ME_CLIP):
+        text = path.read_text(encoding="utf-8")
+        assert 'starts with "note:"' in text, path.parent.parent.name
+
+
 def test_the_script_names_no_machine_and_no_brand():
     text = SCRIPT.read_text(encoding="utf-8")
     assert "/" + "Users" + "/" not in text and "System/Volumes" not in text
@@ -815,7 +823,6 @@ def test_the_runner_keeps_its_own_words_free_of_dashes(kit_folder, capsys):
 
 # --- both clips, for real -----------------------------------------------------------------------------------------------------
 
-MINI_ME_CLIP = ROOT / ".claude" / "skills" / "mini-me" / "kit" / "test_clip.py"
 MINI_ME_HELPERS = ROOT / "tests" / "mini_me" / "mini_me_helpers.py"
 
 

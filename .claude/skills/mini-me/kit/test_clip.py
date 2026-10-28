@@ -14,8 +14,9 @@ a full Reel, in a scratch video folder (work/mini-me-test-clip/). Afterwards eve
 deleted unless --keep, and nothing else: a recording kept in that folder stays where it is.
 It should run 5 to 10 seconds; a line much longer or shorter is said anyway, with a note.
 
-Whatever this script prints before its last line is a note for the creator. The build steps print a log of their
-own (the pages, the sound check, the speech gate), which is kept off the screen and shown only when the clip fails.
+Whatever this script prints before its last line is a note for the creator, and starts with "note:". The build steps
+print a log of their own (the pages, the sound check, the speech gate), which is kept off the screen and shown only
+when the clip fails.
 """
 
 from __future__ import annotations
