@@ -1,0 +1,285 @@
+# Smoke test on a clean Apple silicon Mac.
+#
+# The kit is built on a Mac that already has every tool installed, so a wrong or missing install step
+# would never show up there. This job starts from an empty hosted Mac and checks the result: the
+# machine check, the tests, and one three second HyperFrames render. Homebrew installs ffmpeg and
+# yt-dlp. uv and Node come from their setup actions instead of Homebrew, so this job does not test
+# `brew install uv` or `brew install node`.
+#
+# It runs only when you start it (the Actions tab, or `gh workflow run smoke.yml`). The repository takes
+# no pull requests. A public repository runs it for free, but on a private one a macOS minute costs
+# several times what a Linux minute does, so run it once before each release and not on every push.
+name: macOS smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Starting the job twice replaces the first run, so a double click does not run it twice.
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Naming the shell adds -o pipefail, so a failing command at the start of a pipe fails the step.
+    shell: bash
+
+env:
+  # Keep telemetry, hints and update notices out of the log. None of these is a secret.
+  HOMEBREW_NO_ANALYTICS: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HYPERFRAMES_NO_TELEMETRY: "1"
+  DO_NOT_TRACK: "1"
+  NPM_CONFIG_AUDIT: "false"
+  NPM_CONFIG_FUND: "false"
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+jobs:
+  smoke:
+    name: Clean Apple silicon Mac
+    # macos-15 is an arm64 (M1) image that GitHub documents and has not deprecated. macos-14 now carries
+    # GitHub's deprecated badge, and macos-latest has moved to macOS 26, which would change this test
+    # from one release to the next.
+    runs-on: macos-15
+    # A hang cannot run past this. The long steps carry tighter limits of their own.
+    timeout-minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show the runner
+        run: |
+          sw_vers
+          echo "machine: $(uname -m)"
+          df -h "$GITHUB_WORKSPACE"
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "::error::This job needs an Apple silicon runner, and this one is $(uname -m)."
+            exit 1
+          fi
+
+      - name: Install ffmpeg and yt-dlp with Homebrew
+        timeout-minutes: 20
+        run: |
+          # The runner image can be weeks old, so refresh Homebrew's list before installing.
+          brew update
+          brew install ffmpeg yt-dlp
+          ffmpeg -version | sed -n 1p
+          yt-dlp --version
+
+          # Homebrew's ffmpeg is a small build, and the machine check only looks for h264_videotoolbox.
+          # Check two more things the kit needs. Each listing goes into a variable first, so no pipe
+          # can stop ffmpeg early and fail the step by accident under pipefail.
+          encoders="$(ffmpeg -hide_banner -encoders)"
+          filters="$(ffmpeg -hide_banner -filters)"
+          # The test the kit uses: the second word on a line is the name.
+          has() { awk -v name="$2" '$2 == name { found = 1 } END { exit !found }' <<< "$1"; }
+          # The UI story graphics layer is rendered as VP9 with alpha, and read back with libvpx-vp9
+          # because ffmpeg's own VP9 decoder drops the alpha. Without it the edit cannot run.
+          if has "$encoders" libvpx-vp9; then
+            echo "ffmpeg has the libvpx-vp9 encoder."
+          else
+            echo "::error::This ffmpeg has no libvpx-vp9 encoder, and the UI story graphics layer needs it."
+            exit 1
+          fi
+          # HDR phone takes are tone-mapped with zscale. Without it the kit prints a note and goes on,
+          # so this is a warning and not a failure.
+          if has "$filters" zscale; then
+            echo "ffmpeg has the zscale filter."
+          else
+            echo "::warning::This ffmpeg has no zscale filter, so HDR phone takes cannot be tone-mapped with this build."
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          # An exact uv version, so a new uv release cannot change a run. The action checks the
+          # download against a checksum it already knows. To use a newer uv, raise the action and
+          # this number together.
+          version: "0.13.5"
+          # A clean run means no cache from an earlier one.
+          enable-cache: false
+
+      - name: Install Node 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Install the Python environment
+        timeout-minutes: 25
+        # --locked stops the run if uv.lock is out of date with pyproject.toml, instead of quietly
+        # resolving again. The dev group, which holds pytest, is installed by default.
+        run: |
+          uv --version
+          uv sync --locked --group video --group research --group character
+          uv run python --version
+
+      - name: Install the pinned HyperFrames
+        timeout-minutes: 10
+        run: |
+          node --version
+          npm ci
+          npx --no-install hyperframes --version
+
+      - name: Install Chromium for the Python tools
+        timeout-minutes: 15
+        run: uv run python -m playwright install chromium
+
+      - name: Download GSAP
+        timeout-minutes: 5
+        run: bash bin/fetch_gsap.sh
+
+      # Prints every row. The step fails when a required row is missing. A warn row, such as low free
+      # disk space, does not stop the job: bin/doctor.py exits 0 unless a row says missing.
+      - name: Machine check
+        timeout-minutes: 15
+        run: |
+          status=0
+          python3 bin/doctor.py --json > "$RUNNER_TEMP/doctor.json" || status=$?
+          cat "$RUNNER_TEMP/doctor.json"
+          python3 - "$RUNNER_TEMP/doctor.json" >> "$GITHUB_STEP_SUMMARY" <<'PY' || true
+          import json
+          import sys
+
+
+          def cell(text):
+              # One line with no bare pipe, because a pipe would end the table cell.
+              return " ".join(str(text).split()).replace("|", "\\|")
+
+
+          rows = json.load(open(sys.argv[1], encoding="utf-8"))
+          print("### Machine check\n")
+          print("| Status | Check | Fix |")
+          print("| --- | --- | --- |")
+          for row in rows:
+              print(f"| {cell(row['status'])} | {cell(row['check'])} | {cell(row['fix'])} |")
+          PY
+          exit "$status"
+
+      # A hosted runner is a virtual machine, and a virtual machine may have no hardware video
+      # encoder. The kit picks h264_videotoolbox whenever ffmpeg lists it, so on such a runner the
+      # tests that encode a clip would fail for a reason that has nothing to do with the install
+      # steps. Try the kit's own encoder settings once. If they fail, switch the kit to libx264 for
+      # the tests with KIT_FORCE_X264, which it reads, and say so in the summary.
+      - name: Check the hardware video encoder
+        timeout-minutes: 5
+        run: |
+          # The settings go into a variable first. Inside read's here-string a failing uv run would
+          # not fail the step.
+          settings="$(uv run python -m kit.media encoder)"
+          read -r -a encoder <<< "$settings"
+          if [ "${#encoder[@]}" -lt 2 ]; then
+            echo "::error::kit.media encoder printed no encoder settings."
+            exit 1
+          fi
+          echo "The kit's encoder settings: $settings"
+          probe="$RUNNER_TEMP/encoder-probe.mp4"
+          if ffmpeg -nostdin -v error -f lavfi -i testsrc2=s=128x224:r=30:d=0.5 "${encoder[@]}" "$probe"; then
+            echo "That encoder works on this runner."
+            echo "Video encoder in the tests: the kit's default (${encoder[1]})" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::The kit's default video encoder does not work on this runner, so the tests use libx264."
+            echo "KIT_FORCE_X264=1" >> "$GITHUB_ENV"
+            echo "Video encoder in the tests: libx264, because ${encoder[1]} cannot encode on this runner" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Tests
+        timeout-minutes: 25
+        run: uv run pytest -q -W error -m "not heavy and not mac"
+
+      # The render goes through the kit's own path: scaffold.py builds the HyperFrames project from the
+      # example profile (tokens, fonts, GSAP and the kit's helpers), hyperframes lint checks it, and
+      # kit.media takes a heavy-job slot around the render, as the ui-story skill does.
+      - name: Build the test card project
+        timeout-minutes: 10
+        env:
+          KIT_ME: ${{ github.workspace }}/me.example
+        run: |
+          mkdir -p "$RUNNER_TEMP/card"
+          cp tests/ci/card.html "$RUNNER_TEMP/card/index.html"
+          uv run python .claude/skills/ui-story/kit/scaffold.py "$RUNNER_TEMP/card" 3
+          npx --no-install hyperframes lint "$RUNNER_TEMP/card"
+
+      - name: Render the test card (3 seconds)
+        timeout-minutes: 15
+        # The first render downloads HyperFrames' own copy of Chrome, which can take a minute or two.
+        run: |
+          uv run python -m kit.media run -- npx --no-install hyperframes render \
+            --fps 60 --workers 1 --output "$RUNNER_TEMP/card.mp4" "$RUNNER_TEMP/card"
+
+      - name: Check the rendered card
+        timeout-minutes: 10
+        env:
+          KIT_ME: ${{ github.workspace }}/me.example
+        run: |
+          video="$RUNNER_TEMP/card.mp4"
+          test -s "$video" || { echo "::error::The render left no MP4 at $video."; exit 1; }
+          ffprobe -v error -show_entries stream=codec_name,width,height,nb_frames:format=duration,size \
+            -of default=noprint_wrappers=1 "$video"
+          duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$video")"
+          if ! awk -v d="$duration" 'BEGIN { exit !(d >= 2.95 && d <= 3.05) }'; then
+            echo "::error::The card should last 3 seconds and lasts $duration."
+            exit 1
+          fi
+          # The accent bar in tests/ci/card.html is empty at 0.05 s and full by 2.5 s. One pixel of the
+          # bar reads as the canvas colour at first and as the accent colour later only when the tokens
+          # loaded and GSAP ran. A render of the right length can still be blank, so check this too.
+          uv run python - "$video" "$RUNNER_TEMP" <<'PY'
+          import subprocess
+          import sys
+
+          from PIL import Image
+
+          from kit import config
+
+          video, folder = sys.argv[1], sys.argv[2]
+          colours = config.load_profile().colours
+
+
+          def rgb(value):
+              value = value.lstrip("#")
+              return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+
+          palette = {"canvas": rgb(colours.canvas), "ink": rgb(colours.ink), "accent": rgb(colours.accent)}
+
+
+          def frame(seconds):
+              path = f"{folder}/card-{seconds}.png"
+              command = ["ffmpeg", "-v", "error", "-y", "-ss", str(seconds), "-i", video, "-frames:v", "1", path]
+              subprocess.run(command, check=True)
+              image = Image.open(path).convert("RGB")
+              if image.size != (1080, 1920):
+                  sys.exit(f"The card is {image.size[0]}x{image.size[1]}, not 1080x1920.")
+              return image
+
+
+          def nearest(pixel):
+              return min(palette, key=lambda name: sum((a - b) ** 2 for a, b in zip(pixel, palette[name])))
+
+
+          early, late = frame(0.05), frame(2.7)
+          bar = (150, 820)
+          for label, image, point, want in (
+              ("corner at 0.05 s", early, (5, 5), "canvas"),
+              ("bar at 0.05 s", early, bar, "canvas"),
+              ("bar at 2.7 s", late, bar, "accent"),
+          ):
+              got = nearest(image.getpixel(point))
+              print(f"{label}: pixel {image.getpixel(point)} reads as {got}, expected {want}")
+              if got != want:
+                  sys.exit(f"The {label} reads as {got}, and should read as {want}.")
+          print("The card has the canvas colour first and the accent colour later.")
+          PY
+          echo "### Test card" >> "$GITHUB_STEP_SUMMARY"
+          echo "Rendered a card that lasts $duration seconds, and its frames show the tokens and the animation." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Disk at the end
+        if: always()
+        run: df -h "$GITHUB_WORKSPACE"

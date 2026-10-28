@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  A three second test card for the macOS smoke test (.github/workflows/smoke.yml).
+
+  The workflow copies this file into a fresh HyperFrames project as index.html, runs
+  .claude/skills/ui-story/kit/scaffold.py on that folder with the example profile (so tokens.css, the
+  copied fonts, GSAP and the kit's helpers sit beside it), and renders it to an MP4. Every colour and
+  font comes from the tokens, like a real Reel's graphics.
+
+  The accent bar is empty at 0.05 s and full by 2.5 s. The workflow samples one pixel of the bar at both
+  times: the canvas colour first and the accent after proves the tokens loaded and GSAP ran.
+-->
+<html><head><meta charset="utf-8">
+<title>Smoke test card</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="uistory.css">
+<style>
+/* The kit's graphics layer is transparent because the compositor paints the canvas. This card is
+   rendered straight to an MP4, so it paints the canvas itself. */
+#root{background:var(--canvas)}
+#bar{position:absolute;left:90px;top:760px;width:900px;height:120px;border-radius:20px;
+  background:var(--accent);transform-origin:0 50%}
+</style>
+<script src="vendor/gsap.min.js"></script>
+<script src="uistory.js"></script>
+</head><body>
+<div id="root" data-composition-id="main" data-width="1080" data-height="1920" data-duration="3">
+
+  <div class="card" id="card" style="left:90px;top:300px;width:900px;height:330px">
+    <div class="hdr"><div><div class="ttl">Smoke test</div><div class="sub">Rendered on a clean machine</div></div></div>
+    <div class="row"><span class="tick"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg></span><span class="txt">Tokens loaded</span><span class="meta">tokens.css</span></div>
+    <div class="row"><span class="tick"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg></span><span class="txt">Animation ran</span><span class="meta">gsap</span></div>
+    <div class="row"><span class="tick"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5l4 4 8-9"/></svg></span><span class="txt">Frames encoded</span><span class="meta">ffmpeg</span></div>
+  </div>
+
+  <div id="bar"></div>
+
+</div>
+<script>
+window.__timelines = window.__timelines || {};
+const tl = gsap.timeline({paused: true});
+UIS.pop(tl, '#card', 0.2);
+UIS.fill(tl, '#card .row', [0.8, 1.3, 1.8], '.tick');
+gsap.set('#bar', {scaleX: 0});
+tl.to('#bar', {scaleX: 1, duration: 2, ease: 'power2.out'}, 0.3);
+window.__timelines.main = tl;
+</script>
+</body></html>
