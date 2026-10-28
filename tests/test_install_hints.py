@@ -18,8 +18,9 @@ from kit.config import KitError
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# A command as written in code or prose: it runs to the end of the line or to a quote or a backtick.
-COMMAND = re.compile(r"uv sync(?P<rest>[^\n`\"']*)")
+# A command as written in code or prose: it runs to the end of the line or to a quote or a backtick. One that is
+# introduced as "a bare `uv sync`" is a warning about what not to run, not a hint to follow, so it is skipped.
+COMMAND = re.compile(r"(?<!bare )(?<!bare `)uv sync(?P<rest>[^\n`\"']*)", re.IGNORECASE)
 INEXACT = re.compile(r"(?<![\w-])--inexact(?![\w-])")
 
 # Not read by a creator as advice, so not checked: tests (they hold the expected text, and skip reasons for
@@ -27,9 +28,6 @@ INEXACT = re.compile(r"(?<![\w-])--inexact(?![\w-])")
 # and the humanizer, which is a third party's skill kept as it came.
 LEFT_OUT_FOLDERS = ("tests/", ".github/", ".claude/skills/humanizer/")
 LOCKS = ("uv.lock", "package-lock.json")
-# Two files that still say `uv sync --group character` and are fixed separately. Take a file off this list once it
-# says --inexact: the last test here fails to remind whoever fixes it.
-LEFT_OUT_FILES = ("kit/character/__main__.py", ".claude/skills/character/SKILL.md")
 
 
 def repo_files() -> list[Path]:
@@ -59,7 +57,7 @@ def checked_files() -> list[Path]:
     return [
         path
         for path in repo_files()
-        if not relative(path).startswith(LEFT_OUT_FOLDERS) and relative(path) not in LEFT_OUT_FILES and path.name not in LOCKS
+        if not relative(path).startswith(LEFT_OUT_FOLDERS) and path.name not in LOCKS
     ]
 
 
@@ -112,15 +110,7 @@ def test_the_scan_reaches_the_files_that_name_a_sync(name):
 
 def test_the_scan_leaves_out_only_what_it_says():
     left = {relative(p) for p in repo_files()} - {relative(p) for p in checked_files()}
-    assert all(n.startswith(LEFT_OUT_FOLDERS) or n in LEFT_OUT_FILES or Path(n).name in LOCKS for n in left)
-    for name in LEFT_OUT_FILES:
-        assert (ROOT / name).is_file(), f"{name} is on the left-out list but is not there"
-
-
-def test_a_file_that_was_left_out_still_needs_it():
-    for name in LEFT_OUT_FILES:
-        bad = [command for command in hints(ROOT / name) if not INEXACT.search(command)]
-        assert bad, f"{name} now says --inexact everywhere: take it off LEFT_OUT_FILES in this test"
+    assert all(n.startswith(LEFT_OUT_FOLDERS) or Path(n).name in LOCKS for n in left), "no single file is left out by name"
 
 
 def test_the_detector_reads_a_command_to_the_end_of_its_line_or_quote(tmp_path):
@@ -129,7 +119,31 @@ def test_the_detector_reads_a_command_to_the_end_of_its_line_or_quote(tmp_path):
         "run: uv sync --group video --group research --inexact, then npm install.\n"
         "Install them with `uv sync --group video` and carry on.\n"
         'x = "uv sync"\n'
-        "a bare uv sync, then more words on the line\n",
+        "then run uv sync, and more words on the line\n",
         encoding="utf-8",
     )
     assert [bool(INEXACT.search(c)) for c in hints(sample)] == [True, False, False, False]
+
+
+def test_a_bare_command_named_in_a_warning_is_not_a_hint(tmp_path):
+    """A skill may say what not to run, as "a bare `uv sync`". That names the command; it does not tell anyone to run it."""
+    sample = tmp_path / "sample.md"
+    sample.write_text(
+        "A bare `uv sync` removes the group again, so write both.\n"
+        "Never a bare uv sync here.\n"
+        "Bare `uv sync` is the mistake.\n"
+        "Run `uv sync --group character --inexact`. A bare `uv sync` would undo it.\n"
+        "Run `uv sync --group character`. A bare `uv sync` would undo it.\n"
+        "Run a bare-ish uv sync.\n",
+        encoding="utf-8",
+    )
+    found = hints(sample)
+    assert [bool(INEXACT.search(c)) for c in found] == [True, False, False], found
+    assert found[1] == "uv sync --group character", "a hint on the same line as a warning is still checked"
+    assert found[2].startswith("uv sync"), "only the word bare in front excuses a command"
+
+
+def test_the_character_files_are_scanned_like_every_other():
+    for name in ("kit/character/__main__.py", ".claude/skills/character/SKILL.md"):
+        assert ROOT / name in checked_files(), f"{name} is not scanned"
+        assert hints(ROOT / name), f"{name} no longer names a sync"
