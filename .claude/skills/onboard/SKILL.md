@@ -144,13 +144,13 @@ Ask whether they want the kit to post for them through Zernio.
 If they do:
 
 1. Their Zernio key goes in `.env`, typed by them, as described above. Run the doctor: `ZERNIO_API_KEY` is gone from its optional keys line once it is set.
-2. Check which platforms they have connected inside Zernio: `uv run python -m kit.onboarding accounts`. It calls `kit.post.accounts_check()` and prints each of their platforms as connected or not connected. For a platform that is not connected, tell them to connect it inside Zernio. The kit reports a platform that is not connected and skips it. It never routes around it. If Zernio turns the key away or cannot be reached, the command prints one sentence and exits with an error: say what it said, keep their key and posting times, and go on.
-3. Ask for their default posting time on each platform, as a 24 hour time such as 18:00 in their own time zone. If they have no preference, suggest 18:00 as a starting point and tell them they can change it later.
+2. Check which platforms they have connected inside Zernio: `uv run python -m kit.onboarding accounts`. It calls `kit.post.accounts_check()` and prints each of their platforms as connected or not connected. For a platform that is not connected, tell them to connect it inside Zernio. The kit reports a platform that is not connected and skips it. It never routes around it. If Zernio turns the key away or cannot be reached, the command prints one sentence and exits with an error: say what it said, keep their key, and go on.
 
-If they do not, say that every video still ends with the MP4 and a file with a caption for each platform (`post/manual.md` in the video's folder), ready to post by hand, and leave the posting times empty. The same goes for someone who said yes and has no key yet: `accounts` then prints one sentence saying so. Pass it on, ask whether they want to add the key now, and go on either way.
+If they do not, say that every video still ends with the MP4 and a file with a caption for each platform (`post/manual.md` in the video's folder), ready to post by hand. The same goes for someone who said yes and has no key yet: `accounts` then prints one sentence saying so. Pass it on, ask whether they want to add the key now, and go on either way.
 
-Both ways, ask for two more things:
+Both ways, ask for three more things:
 
+- Their usual posting time on each platform, as a 24 hour time such as 18:00 in their own time zone. When they later ask to post without naming a time, each platform goes out at its usual time, and `post/manual.md` lists that time beside each platform for posting by hand. If they have no preference, suggest 18:00 as a starting point and tell them they can change it later.
 - Their time zone. Run `readlink /etc/localtime`. The part after `zoneinfo/` is the zone name, such as Europe/London. Confirm it with them.
 - Three to five base hashtags that fit their niche. Each starts with # and has no spaces. They go on every post except LinkedIn, which gets none.
 
@@ -162,7 +162,7 @@ uv run python -m kit.onboarding save posting - <<'EOF'
 EOF
 ```
 
-Use `"posting_times": {}` when they post by hand.
+If they would rather not choose times, save `"posting_times": {}`. Each post then needs a time when they ask for it.
 
 ### Step 8: Styles
 

@@ -99,7 +99,7 @@ REQUIRED = (
 )
 _DEFAULTS: dict[str, Any] = {
     "logo": None,
-    "posting_times": {},  # the creator posts by hand
+    "posting_times": {},  # no usual times, so every post needs a time named when it is asked for
     "voice_over": "record",
     "image_provider": "manual",
     "hashtags": {"base": []},
