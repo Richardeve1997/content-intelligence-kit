@@ -54,8 +54,10 @@ def label(tile, text):
 
 
 def frames_at_rate(video: Path, fps: float, folder: Path) -> list[Path]:
-    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(video), "-vf", f"fps={fps},scale={TILE_W}:-2",
-                    "-q:v", "3", str(folder / "f%04d.jpg")], check=True)
+    """One frame every 1/fps seconds, each the frame at its own time. ffmpeg's fps filter rounds to the nearest
+    slot by default, which hands each slot the last frame before the next half period: half a period late."""
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(video), "-vf",
+                    f"fps={fps}:round=up,scale={TILE_W}:-2", "-q:v", "3", str(folder / "f%04d.jpg")], check=True)
     return sorted(folder.glob("f*.jpg"))
 
 

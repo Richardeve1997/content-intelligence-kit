@@ -139,6 +139,22 @@ def test_every_tile_on_a_sheet_has_its_own_time(fps):
     assert stamp(0.2, 1) == "0.2s" and stamp(3, 1) == "3s" and stamp(1.5, 2) == "1.5s"
 
 
+@pytest.mark.parametrize("fps", [0.5, 1, 2])
+def test_each_tile_shows_the_frame_at_its_time(tmp_path, fps):
+    """A tile stamped 1.5s shows the frame at 1.5 s, so a fix named by that time lands where the review saw it.
+    The test video's brightness is twice its frame number, so each tile says which frame it holds."""
+    from PIL import Image, ImageStat
+
+    video = tmp_path / "ramp.mp4"
+    ffmpeg("-f", "lavfi", "-i", "nullsrc=s=64x64:r=30:d=4,format=gray,geq=lum='N*2'", "-c:v", "libx264", "-qp", "0",
+           "-pix_fmt", "yuv420p", video)
+    tiles = _review_frames().frames_at_rate(video, fps, tmp_path)
+    assert len(tiles) >= 2
+    for index, tile in enumerate(tiles):
+        frame = ImageStat.Stat(Image.open(tile).convert("L")).mean[0] / 2
+        assert abs(frame - index / fps * 30) <= 1.5, (index, frame)
+
+
 # --- what this round of fixes added ------------------------------------------------------------------------
 
 
