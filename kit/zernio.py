@@ -224,8 +224,14 @@ class Client:
     # --- posts -------------------------------------------------------------------------------------
 
     def create_post(self, body: dict, request_id: str) -> dict:
-        """Create a post. Zernio returns the first post again when the same request id arrives twice."""
-        return self.call("POST", "/posts", json=body, headers={"X-Request-Id": request_id}, timeout=CREATE_TIMEOUT)
+        """Create a post, sending `request_id` as both X-Request-Id and Idempotency-Key.
+
+        Zernio returns the first post again when the same Idempotency-Key arrives twice within 24 hours,
+        even if the body has changed. X-Request-Id does that only when the body is the same, and a changed
+        body with the same X-Request-Id makes a new post, so the kit sends both.
+        """
+        headers = {"X-Request-Id": request_id, "Idempotency-Key": request_id}
+        return self.call("POST", "/posts", json=body, headers=headers, timeout=CREATE_TIMEOUT)
 
     def get_post(self, post_id: str) -> dict:
         """The post itself, as Zernio holds it."""

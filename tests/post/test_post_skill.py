@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
 from kit.post import captions, cli, payloads
+
+schedule_module = sys.modules["kit.post.schedule"]  # the package's `schedule` is the function
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / ".claude" / "skills" / "post" / "SKILL.md"
@@ -124,6 +128,16 @@ def test_step_8_keeps_the_creator_in_charge_of_what_goes_out():
     assert "never call the python function directly" in step.lower()
     assert "TikTok" in step and "preview and consent" in step  # their yes to that caption is TikTok's consent
     assert "`schedule` refuses to send until the creator approves again" in re.search(r"^9\. (.+)$", text(), re.M).group(1)
+
+
+def test_the_skill_claims_no_more_than_the_code_guarantees():
+    body = text()
+    assert "never made twice" not in body and "never makes a second" not in body
+    # the retry rule it describes is the one in the code: a search, then the same key, and a stop after 23 hours
+    assert "23 hours" in body and "24 hours" in body and schedule_module.IDEMPOTENCY_WINDOW == timedelta(hours=23)
+    assert "could make a second post" in body
+    assert "still holds the earlier text" in body
+    assert "reach a post whose create was interrupted" in body
 
 
 def test_the_numbers_in_the_skill_match_the_rules_in_the_code():

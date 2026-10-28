@@ -6,14 +6,17 @@ updating and deleting posts) and records every request. Where the kit depends on
 behaves, the stand-in behaves the same way:
 
 * a create that repeats an earlier X-Request-Id and carries the same content returns the first post
-  and makes nothing new;
+  and makes nothing new, while the same X-Request-Id with different content makes a new post;
+* a create that repeats an earlier Idempotency-Key returns the first post whatever the body now says,
+  and the key takes precedence over X-Request-Id;
 * the same caption and video for the same account, sent again, is refused with the first post's id;
 * a scheduled time that has already passed publishes the post at once;
 * a published post cannot be deleted;
 * a list call with a query parameter the real one does not know is refused.
 
 A test can also make the next create lose its answer (with or without the post being saved), have
-the API answer 429 for a while, or give a canned reply to one address.
+the API answer 429 for a while, make the post list lag behind (list_lag), hold a create while it looks
+around (before_create), or give a canned reply to one address.
 """
 
 from __future__ import annotations
@@ -141,6 +144,8 @@ class _Handler(BaseHTTPRequestHandler):
                 time.sleep(canned.delay)
             outcome = HANG_UP if canned.status is HANG_UP else (canned.status, canned.body, canned.headers)
         else:
+            if fake.before_create is not None and seen.method == "POST" and seen.path == "/api/v1/posts":
+                fake.before_create(seen)
             outcome = fake.respond(seen, raw)
         if outcome is HANG_UP:
             self.close_connection = True
@@ -188,9 +193,13 @@ class FakeZernio:
         # "before" loses the answer without saving anything.
         self.drop_creates: list[str] = []
         self.rate_limits = 0  # how many of the next API requests are answered with 429
-        self.before_create = None  # called with the request when a create arrives
+        self.list_lag = False  # when True the post list shows nothing, as if it had not caught up yet
+        # Called with the request when a create arrives, before the stand-in does anything with it and
+        # outside its own lock, so a test may hold the request here while it looks at the stand-in.
+        self.before_create = None
         self._canned: list[_Canned] = []
         self._request_ids: dict[str, tuple[tuple, str]] = {}
+        self._idempotency_keys: dict[str, str] = {}
         self._order: dict[str, int] = {}
         self._count = 0
         self._uploads_issued = 0
@@ -463,13 +472,14 @@ class FakeZernio:
         problem = self._validate_new(body)
         if problem:
             return 400, {"error": problem}, {}
-        if self.before_create is not None:
-            self.before_create(seen)
         if self.drop_creates and self.drop_creates[0] == "before":
             self.drop_creates.pop(0)
             return HANG_UP
         fingerprint = self._fingerprint(body)
-        request_id = seen.headers.get("x-request-id")
+        key = seen.headers.get("idempotency-key")
+        request_id = None if key else seen.headers.get("x-request-id")  # the key takes precedence
+        if key and key in self._idempotency_keys and self._idempotency_keys[key] in self.posts:
+            return 200, {"post": self.posts[self._idempotency_keys[key]]}, {}  # whatever the body now says
         if request_id and request_id in self._request_ids:
             earlier, post_id = self._request_ids[request_id]
             if earlier == fingerprint and post_id in self.posts:
@@ -488,7 +498,9 @@ class FakeZernio:
                 return 409, reply, {}
         post = self._make_post(body)
         self.posts[post["_id"]] = post
-        if request_id:
+        if key:
+            self._idempotency_keys[key] = post["_id"]
+        elif request_id:
             self._request_ids[request_id] = (fingerprint, post["_id"])
         if self.drop_creates and self.drop_creates[0] == "after":
             self.drop_creates.pop(0)
@@ -551,7 +563,7 @@ class FakeZernio:
         sort = query.get("sortBy", "scheduled-desc")
         if not 1 <= limit <= 500 or page < 1 or sort not in SORTS:
             return 400, {"error": "page, limit or sortBy is out of range"}, {}
-        posts = list(self.posts.values())
+        posts = [] if self.list_lag else list(self.posts.values())
         if "status" in query:
             posts = [p for p in posts if p["status"] == query["status"]]
         if "platform" in query:

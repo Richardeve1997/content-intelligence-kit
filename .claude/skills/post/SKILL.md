@@ -45,9 +45,9 @@ You drive the kit with `uv run python -m kit.post <command>`. A command prints p
 ## When something fails
 
 - Skipped with "not connected in Zernio": the creator connects that platform inside Zernio and asks again. The other platforms are not affected.
-- A dropped connection: run the same `schedule` command again. The kit looks for the post in Zernio before it sends anything, so a post is never made twice.
+- A dropped connection: run the same `schedule` command again. The kit first looks in Zernio for a post with that title and uses it if it finds one. If it finds none, it sends the same request again, and Zernio treats a repeat of that request as one post for 24 hours. After 23 hours with no post found, the kit stops and says to check Zernio, because sending it again could make a second post.
 - Zernio gives its own reason in the sentence, such as an account that needs reconnecting or a video it will not take. Pass it on in plain words.
-- "Already scheduled" means an earlier run made the post and nothing was repeated.
+- "Already scheduled" means an earlier run made the post and nothing was repeated. When the line also says Zernio still holds the earlier text, the caption was edited after the post was made. Cancel that post and schedule it again to use the new words.
 - A post that failed inside Zernio has to be cancelled before it is scheduled again.
 
 ## After it is scheduled
@@ -55,6 +55,7 @@ You drive the kit with `uv run python -m kit.post <command>`. A command prints p
 - `uv run python -m kit.post list <slug>` shows each platform as Zernio reports it now, with the address once a post is live.
 - `uv run python -m kit.post reschedule <slug> tiktok --on 2026-10-30 --time 09:00` moves one post. Only a post that has not started to publish can move.
 - `uv run python -m kit.post cancel <slug> tiktok` cancels one. Scheduling it again afterwards makes a fresh post.
+- `reschedule` and `cancel` also reach a post whose create was interrupted, by finding it in Zernio under its title. If Zernio has no post with that title, they say so and change nothing.
 - To change the words of a scheduled post, cancel it, edit `captions.json`, show the creator, approve and schedule again.
 
 ## Without a Zernio key

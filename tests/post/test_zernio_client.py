@@ -318,6 +318,31 @@ def test_create_post_sends_the_request_id_and_returns_the_answer(stub):
     assert stub.client().get_post(answer["post"]["_id"])["title"] == "Example Studio instagram example-reel"
 
 
+def test_a_create_sends_the_request_id_as_the_idempotency_key_too(stub):
+    stub.client().create_post(new_post(), "00000000-0000-4000-8000-000000000002")
+    (seen,) = stub.creates()
+    assert seen.headers["x-request-id"] == seen.headers["idempotency-key"] == "00000000-0000-4000-8000-000000000002"
+
+
+def test_the_same_idempotency_key_returns_the_first_post_whatever_the_body_now_says(stub):
+    client = stub.client()
+    first = client.create_post(new_post(), "00000000-0000-4000-8000-000000000003")["post"]
+    edited = {**new_post(), "content": "Water the base, and never the leaves."}
+    again = client.create_post(edited, "00000000-0000-4000-8000-000000000003")["post"]
+    assert again["_id"] == first["_id"] and again["content"] == "Water the base, never the leaves."
+    assert len(stub.posts) == 1
+
+
+def test_the_same_request_id_alone_makes_a_new_post_when_the_words_changed(stub):
+    # Zernio's documented difference, which is why the kit sends the Idempotency-Key as well
+    client = stub.client()
+    request_id = "00000000-0000-4000-8000-000000000004"
+    client.call("POST", "/posts", json=new_post(), headers={"X-Request-Id": request_id})
+    edited = {**new_post(), "content": "Water the base, and never the leaves."}
+    client.call("POST", "/posts", json=edited, headers={"X-Request-Id": request_id})
+    assert len(stub.posts) == 2
+
+
 def test_get_update_and_delete_a_post(stub):
     client = stub.client()
     post = client.create_post(new_post(), "00000000-0000-4000-8000-000000000001")["post"]

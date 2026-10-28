@@ -507,6 +507,187 @@ def test_the_usual_time_comes_from_the_profile(profile):
         post.default_when(bare, "tiktok", date(2099, 7, 1))
 
 
+# --- a create whose answer was lost, found again --------------------------------------------------------------------------
+
+
+def edit_caption(reel, platform: str, words: str) -> None:
+    path = reel.folder / "captions.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data[platform]["body"] = words
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+NEW_WORDS = 'Basil lasts longer when you skip one thing.\n\nComment "GROW" for the balcony planting checklist.'
+
+
+def test_the_request_id_is_also_the_idempotency_key(reel, stub, when):
+    run(reel, stub, ["instagram", "tiktok"], when)
+    for create in stub.creates():
+        platform = create.body["platforms"][0]["platform"]
+        assert create.headers["x-request-id"] == create.headers["idempotency-key"] == receipt(reel, platform)["request_id"]
+
+
+def test_an_edited_caption_resent_after_a_lost_answer_does_not_make_a_second_post(reel, stub, when):
+    stub.drop_creates = ["after"]  # Zernio saves the post, the answer is lost
+    run(reel, stub, ["instagram"], when)
+    stub.list_lag = True  # and the list has not caught up, so a search by title finds nothing
+    edit_caption(reel, "instagram", NEW_WORDS)
+
+    (again,) = run(reel, stub, ["instagram"], when)  # the creator approved the new words first
+    sent = stub.creates()
+    assert len(sent) == 2 and len(stub.posts) == 1  # the key made Zernio answer with the post it already had
+    assert sent[0].headers["idempotency-key"] == sent[1].headers["idempotency-key"]
+    assert sent[0].body["content"] != sent[1].body["content"]
+    assert again.status == "scheduled" and again.post_id in stub.posts
+    assert "still holds the earlier text" in again.reason  # and the result says which words are scheduled
+
+
+def test_after_23_hours_an_attempt_that_left_no_post_is_not_sent_again(reel, stub, when, monkeypatch):
+    clock = {"now": datetime.now(timezone.utc)}
+    monkeypatch.setattr(schedule_module, "_now", lambda: clock["now"])
+    later = when + timedelta(days=3)
+    stub.drop_creates = ["before"]
+    (first,) = run(reel, stub, ["instagram"], later)
+    assert first.status == "failed" and len(stub.posts) == 0
+
+    clock["now"] += timedelta(hours=23, minutes=1)
+    (second,) = run(reel, stub, ["instagram"], later)
+    assert second.status == "failed"
+    for words in ("more than 23 hours ago", "Check Zernio", 'titled "Example Studio instagram example-reel"', "instagram.json"):
+        assert words in second.reason
+    assert len(stub.creates()) == 1  # it was not sent again
+    assert receipt(reel, "instagram")["create_attempted"] is True  # and the record is left for the creator
+
+
+def test_inside_23_hours_it_is_sent_again_with_the_same_key(reel, stub, when, monkeypatch):
+    clock = {"now": datetime.now(timezone.utc)}
+    monkeypatch.setattr(schedule_module, "_now", lambda: clock["now"])
+    later = when + timedelta(days=3)
+    stub.drop_creates = ["before"]
+    run(reel, stub, ["instagram"], later)
+
+    clock["now"] += timedelta(hours=22, minutes=59)
+    (second,) = run(reel, stub, ["instagram"], later)
+    assert second.status == "scheduled"
+    sent = stub.creates()
+    assert len(sent) == 2 and sent[0].headers["idempotency-key"] == sent[1].headers["idempotency-key"]
+
+
+def test_the_time_of_the_first_attempt_is_kept_when_it_is_sent_again(reel, stub, monkeypatch):
+    clock = {"now": datetime(2030, 1, 1, 9, 0, tzinfo=timezone.utc)}
+    monkeypatch.setattr(schedule_module, "_now", lambda: clock["now"])
+    later = datetime(2030, 1, 5, 18, 0, tzinfo=LONDON)
+    stub.drop_creates = ["before", "before"]
+    run(reel, stub, ["instagram"], later)
+    first = receipt(reel, "instagram")["attempted_at"]
+    assert first == "2030-01-01T09:00:00+00:00"
+
+    clock["now"] += timedelta(hours=5)
+    run(reel, stub, ["instagram"], later)
+    assert receipt(reel, "instagram")["attempted_at"] == first  # Zernio's 24 hours run from the first request
+
+
+def test_a_record_with_no_time_on_it_is_treated_as_too_old_to_send_again(reel, stub, when):
+    (reel.folder / "post").mkdir()
+    (reel.folder / "post" / "instagram.json").write_text(
+        json.dumps({"title": "Example Studio instagram example-reel", "request_id": "r-1", "create_attempted": True}),
+        encoding="utf-8",
+    )
+    (result,) = run(reel, stub, ["instagram"], when)
+    assert result.status == "failed" and "Check Zernio" in result.reason
+    assert stub.creates() == []
+
+
+def test_editing_a_caption_after_scheduling_says_zernio_still_holds_the_earlier_text(reel, stub, when):
+    run(reel, stub, ["instagram", "tiktok"], when)
+    edit_caption(reel, "instagram", NEW_WORDS)
+    results = by_platform(run(reel, stub, ["instagram", "tiktok"], when))
+
+    assert results["instagram"].reason.startswith("Already scheduled from an earlier run.")
+    assert "still holds the earlier text" in results["instagram"].reason and "cancel it" in results["instagram"].reason
+    assert results["tiktok"].reason == "Already scheduled from an earlier run."  # nothing changed there
+    assert len(stub.creates()) == 2  # and nothing was sent again
+
+
+def test_the_same_words_with_different_line_breaks_are_not_a_change(reel, stub, when):
+    run(reel, stub, ["instagram"], when)
+    (held,) = stub.posts.values()
+    held["content"] = held["content"].replace("\n\n", "\n").replace("\n", " \n ")
+    (again,) = run(reel, stub, ["instagram"], when)
+    assert again.reason == "Already scheduled from an earlier run."
+
+
+# --- cancelling and moving a post whose create lost its answer -----------------------------------------------------------------
+
+
+def test_cancel_removes_the_post_the_stand_in_holds_after_a_lost_answer(reel, stub, when):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    (held,) = stub.posts.values()
+    assert "post_id" not in receipt(reel, "instagram")  # the kit never heard which post it made
+
+    result = post.cancel(reel.slug, "instagram", client=stub.client())
+    assert (result.status, result.post_id) == ("cancelled", held["_id"])
+    assert stub.posts == {}  # the post is gone from Zernio, not only forgotten here
+    assert (reel.folder / "post" / "instagram.cancelled.json").is_file()
+    assert not (reel.folder / "post" / "instagram.json").exists()
+
+
+def test_reschedule_moves_the_post_the_stand_in_holds_after_a_lost_answer(reel, stub, when):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    (held,) = stub.posts.values()
+
+    later = when + timedelta(days=2)
+    result = post.reschedule(reel.slug, "instagram", later, client=stub.client())
+    assert (result.status, result.post_id) == ("scheduled", held["_id"])
+    assert datetime.fromisoformat(held["scheduledFor"].replace("Z", "+00:00")) == later
+    saved = receipt(reel, "instagram")
+    assert saved["post_id"] == held["_id"] and saved["scheduled_for"] == later.astimezone(LONDON).isoformat()
+
+
+def test_cancel_and_reschedule_say_so_when_the_interrupted_create_made_no_post(reel, stub, when):
+    stub.drop_creates = ["before"]
+    run(reel, stub, ["instagram"], when)
+
+    for result, undone in (
+        (post.cancel(reel.slug, "instagram", client=stub.client()), "cancelled"),
+        (post.reschedule(reel.slug, "instagram", when + timedelta(days=1), client=stub.client()), "moved"),
+    ):
+        assert result.status == "skipped"
+        assert "interrupted" in result.reason and "no post titled" in result.reason
+        assert "Example Studio instagram example-reel" in result.reason and f"Nothing was {undone}" in result.reason
+    assert stub.calls("DELETE") == [] and post_edits(stub) == []
+    assert receipt(reel, "instagram")["create_attempted"] is True  # the record stays, in case the create lands late
+
+
+def test_the_search_for_an_interrupted_post_stays_inside_its_own_profile(reel, stub, when):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    before = len(stub.calls("GET", "/api/v1/posts"))
+    post.cancel(reel.slug, "instagram", client=stub.client())
+    reads = stub.calls("GET", "/api/v1/posts")[before:]
+    assert reads and {r.query["profileId"] for r in reads} == {"profile-main"}
+
+
+def test_cancel_and_reschedule_of_an_interrupted_create_need_the_key(reel, stub, when):
+    stub.drop_creates = ["before"]
+    run(reel, stub, ["instagram"], when)
+    with pytest.raises(NoZernio):
+        post.cancel(reel.slug, "instagram")
+    with pytest.raises(NoZernio):
+        post.reschedule(reel.slug, "instagram", when + timedelta(days=1))
+
+
+def test_a_failed_search_while_cancelling_is_reported_not_guessed_at(reel, stub, when):
+    stub.drop_creates = ["after"]
+    run(reel, stub, ["instagram"], when)
+    stub.reply("GET", r"/api/v1/posts", 503, {"error": "Try later"})
+    result = post.cancel(reel.slug, "instagram", client=stub.client())
+    assert result.status == "failed" and "HTTP 503" in result.reason
+    assert len(stub.posts) == 1 and stub.calls("DELETE") == []
+
+
 # --- looking at, moving and cancelling what was scheduled ---------------------------------------------------------------
 
 

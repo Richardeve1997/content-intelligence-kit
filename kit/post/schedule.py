@@ -18,6 +18,10 @@ and holds the request id and the post's title ("<name> <platform> <slug>"). If t
 never arrives, the next run looks for a post with that title in Zernio and uses it, and only sends the
 create again, with the same request id, when there is none. media.json remembers the upload.
 
+`cancel` and `reschedule` look for such a post the same way, so they can reach a post whose create was
+interrupted. After 23 hours with no post found, `schedule` stops and says to check Zernio, because Zernio
+only treats a repeated request as the same one for 24 hours.
+
 `schedule` returns one Result for each platform. A problem with one platform (not connected, refused by
 Zernio, a damaged record) is that platform's Result, and the others carry on.
 """
@@ -53,6 +57,10 @@ __all__ = [
 MIN_LEAD = timedelta(minutes=5)  # the least notice a post can be scheduled with
 CREATE_MARGIN = timedelta(seconds=60)  # the least time left when a create is sent, after a slow upload
 TOLERANCE = timedelta(seconds=1)  # how far Zernio's time may differ from the one that was asked for
+# Zernio treats a repeat of the same Idempotency-Key as the same post for 24 hours. A minute-sized margin
+# is not enough to trust that, so after 23 hours an attempt that left no post behind is not sent again.
+IDEMPOTENCY_WINDOW = timedelta(hours=23)
+EARLIER_TEXT = "Zernio still holds the earlier text of this post. To use the new text, cancel it and schedule it again."
 LOCK = ".post.lock"  # in the video's folder, so work/<slug>/post/ appears only once something is recorded in it
 AGAIN = "Run the same command again: it looks for the post in Zernio before it sends anything."
 CANCEL_FIRST = "To try again, cancel it first and then schedule it again."
@@ -203,6 +211,28 @@ def _pick_account(candidates: list[dict], handle: str) -> tuple[dict | None, str
     return None, "more than one account is connected in Zernio, and none matches the handle in your profile"
 
 
+def _same_text(held, wanted) -> bool:
+    """True when the text Zernio holds is the text we mean to send, ignoring how the lines are broken."""
+    return " ".join(str(held or "").split()) == " ".join(str(wanted or "").split())
+
+
+def _recover(client: zernio.Client, receipt: dict, path: Path, fallback_title: str) -> bool:
+    """Look in Zernio for the post that an interrupted create may have made. True, with its id kept in the
+    receipt, when there is one."""
+    found = client.find_post_by_title(receipt.get("title") or fallback_title, profile_id=receipt.get("profile_id"))
+    if found and found.get("_id"):
+        receipt["post_id"] = found["_id"]
+        store.write(path, receipt)
+        return True
+    return False
+
+
+def _attempt_is_old(receipt: dict) -> bool:
+    """True when the first attempt is too old to count on Zernio treating a repeat as the same request."""
+    attempted = _parse(receipt.get("attempted_at"))
+    return attempted is None or _now() - attempted > IDEMPOTENCY_WINDOW
+
+
 def _state(post: Mapping, platform: str) -> tuple[str, str | None, str | None]:
     """(status, address, reason) for a post as Zernio reports it."""
     wanted = payloads.ZERNIO_PLATFORM[platform]
@@ -341,16 +371,27 @@ class _Run:
                 "request_id": str(uuid.uuid4()),
                 "account_id": account["_id"],
             }
+            if _profile_id(account):
+                receipt["profile_id"] = _profile_id(account)
         elif receipt.get("create_attempted"):
             # An earlier run sent the create and never heard back. The post may exist.
-            found = self.client.find_post_by_title(receipt.get("title") or title, profile_id=_profile_id(account))
-            if found and found.get("_id"):
-                receipt["post_id"] = found["_id"]
-                store.write(path, receipt)
+            if not receipt.get("profile_id") and _profile_id(account):
+                receipt["profile_id"] = _profile_id(account)
+            if _recover(self.client, receipt, path, title):
                 outcome = self._existing(platform, receipt)
                 if outcome is not None:
                     return outcome
                 receipt.pop("post_id")  # it vanished again, so the create goes ahead
+            elif _attempt_is_old(receipt):
+                return Result(
+                    platform, "failed",
+                    reason=(
+                        f'An earlier attempt to schedule this was sent more than 23 hours ago, and Zernio has no post '
+                        f'titled "{receipt.get("title") or title}". Check Zernio before you try again, because sending '
+                        f"it again could make a second post. If it is not there, delete work/{self.slug}/post/"
+                        f"{platform}.json and ask again."
+                    ),
+                )
 
         _require_lead(self.when, CREATE_MARGIN)
         media = self.media_url()
@@ -368,6 +409,8 @@ class _Run:
         )
         receipt["account_id"] = account["_id"]
         receipt["create_attempted"] = True
+        # The first attempt's time is kept: Zernio's 24 hours run from the first request with this key.
+        receipt.setdefault("attempted_at", _now().isoformat(timespec="seconds"))
         store.write(path, receipt)  # the request id is on disk before the request leaves
         try:
             created = self.client.create_post(body, receipt["request_id"])
@@ -423,10 +466,17 @@ class _Run:
                     platform, "failed", post_id, reason=f"Zernio set it for {said}, not {describe_time(self.when)}. Check it in Zernio.",
                     scheduled_for=shown,
                 )
-            return Result(platform, "scheduled", post_id, scheduled_for=shown)
+            return Result(platform, "scheduled", post_id, reason=self._text_note(platform, post), scheduled_for=shown)
         if status == "published":
             return Result(platform, "published", post_id, url, "Zernio published it at once, not at the time you chose.", shown)
         return Result(platform, "failed", post_id, None, reason or f"Zernio shows it as {post.get('status')}.", shown)
+
+    def _text_note(self, platform: str, post: Mapping) -> str | None:
+        """A sentence when Zernio holds other words than the ones just approved, such as after a caption edit."""
+        if "content" not in post:
+            return None
+        wanted = payloads.content_for(self.captions[platform], platform)
+        return None if _same_text(post["content"], wanted) else EARLIER_TEXT
 
     def _existing(self, platform: str, receipt: dict) -> Result | None:
         """The state of a post made on an earlier run, or None when Zernio no longer has it."""
@@ -448,7 +498,8 @@ class _Run:
                 )
             else:
                 note = "Already scheduled from an earlier run."
-            return Result(platform, "scheduled", post_id, None, note, shown)
+            earlier = self._text_note(platform, post)
+            return Result(platform, "scheduled", post_id, None, f"{note} {earlier}" if earlier else note, shown)
         if status == "published":
             return Result(platform, "published", post_id, url, "Already posted.", shown)
         held = reason or f"Zernio shows it as {post.get('status')}."
@@ -524,6 +575,32 @@ def _receipt(folder: Path, platform: str) -> tuple[Path, dict]:
     return path, store.read(path)
 
 
+def _adopt_interrupted(
+    client: zernio.Client, receipt: dict, path: Path, platform: str, slug: str, profile, undone: str
+) -> Result | None:
+    """For `cancel` and `reschedule` when the record has no post id.
+
+    A create whose answer never arrived may still have made a post. This looks for it by its title and
+    keeps its id in the record, and returns None so the caller carries on with it. When there is no such
+    post it returns the Result to give back, which says so plainly.
+    """
+    if not receipt.get("create_attempted"):
+        return Result(platform, "skipped", reason=f"Nothing is scheduled on {captions.display_name(platform)} for {slug}.")
+    title = receipt.get("title") or f"{profile.name} {platform} {slug}"
+    try:
+        if _recover(client, receipt, path, title):
+            return None
+    except zernio.ZernioError as exc:
+        return Result(platform, "failed", reason=str(exc))
+    return Result(
+        platform, "skipped",
+        reason=(
+            f'An earlier attempt to schedule it was interrupted, and Zernio has no post titled "{title}". '
+            f"Nothing was {undone}."
+        ),
+    )
+
+
 def list_scheduled(slug: str, *, client: zernio.Client | None = None) -> list[Result]:
     """What was scheduled for this video, as Zernio reports it now. Needs a key only when there is something to look up."""
     profile = config.load_profile()
@@ -564,11 +641,15 @@ def reschedule(slug: str, platform: str, when: datetime, *, client: zernio.Clien
     when = local_time(when, profile.timezone)
     _require_lead(when, MIN_LEAD)
     path, receipt = _receipt(folder, name)
-    if not receipt.get("post_id"):
+    if not receipt.get("post_id") and not receipt.get("create_attempted"):
         return Result(name, "skipped", reason=f"Nothing is scheduled on {captions.display_name(name)} for {slug}.")
     client = client or zernio.Client.from_env()
     with store.locked(folder / LOCK):
         receipt = store.read(path)
+        if not receipt.get("post_id"):
+            outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "moved")
+            if outcome is not None:
+                return outcome
         post_id = receipt["post_id"]
         try:
             post = client.get_post(post_id)
@@ -601,11 +682,15 @@ def cancel(slug: str, platform: str, *, client: zernio.Client | None = None) -> 
     folder = _folder(slug)
     name = platform_names([platform], profile)[0]
     path, receipt = _receipt(folder, name)
-    if not receipt.get("post_id"):
+    if not receipt.get("post_id") and not receipt.get("create_attempted"):
         return Result(name, "skipped", reason=f"Nothing is scheduled on {captions.display_name(name)} for {slug}.")
     client = client or zernio.Client.from_env()
     with store.locked(folder / LOCK):
         receipt = store.read(path)
+        if not receipt.get("post_id"):
+            outcome = _adopt_interrupted(client, receipt, path, name, slug, profile, "cancelled")
+            if outcome is not None:
+                return outcome
         post_id = receipt["post_id"]
         try:
             post = client.get_post(post_id)
