@@ -36,7 +36,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from kit import brand, config, finish, media, qa_captions, transcribe
+from kit import brand, config, finish, media, qa_captions, telemetry, transcribe
 from kit.config import KitError
 from kit.transcribe import Word
 
@@ -272,9 +272,9 @@ def write_scene(hf: Path, profile, mode: str, duration: float) -> None:
 # --- the build ------------------------------------------------------------------------------------------
 
 
-def run(doing: str, command, *, cwd: Path | None = None) -> str:
+def run(doing: str, command, *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
     """Run one step. A step that fails stops the clip with one plain sentence and the end of what it said."""
-    done = subprocess.run([str(part) for part in command], cwd=cwd, capture_output=True, text=True)
+    done = subprocess.run([str(part) for part in command], cwd=cwd, env=env, capture_output=True, text=True)
     if done.returncode:
         said = "\n".join((done.stdout + done.stderr).strip().splitlines()[-6:])
         raise KitError(f"The test clip stopped while {doing} (exit {done.returncode}). What it said:\n{said}")
@@ -312,12 +312,13 @@ def blank_base(profile, seconds: float, out: Path) -> Path:
 
 
 def render_graphics(hf: Path, out: Path) -> Path:
-    """The card and the captions on a transparent layer, rendered by HyperFrames."""
+    """The card and the captions on a transparent layer, rendered by HyperFrames with its telemetry off."""
     npx = shutil.which("npx")
     if not npx:
         raise KitError("Node is not installed, so the graphics cannot be drawn. Run python3 bin/doctor.py and follow its fix.")
     run("drawing the card and the captions", [npx, "--no-install", "hyperframes", "render", "--format", "webm", "--crf", "10",
-                                              "--fps", FPS, "--workers", 1, "--output", out, hf], cwd=config.kit_root())
+                                              "--fps", FPS, "--workers", 1, "--output", out, hf], cwd=config.kit_root(),
+        env=telemetry.env())
     if not out.is_file():
         raise KitError("HyperFrames finished but left no graphics layer. Run python3 bin/doctor.py, then try again.")
     return out

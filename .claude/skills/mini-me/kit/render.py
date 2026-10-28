@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from kit import config, media
+from kit import config, media, telemetry
 from kit.config import KitError
 
 
@@ -42,7 +42,7 @@ def render(slug: str, quality: str = "delivery") -> Path:
     out = folder / "build" / "picture.mp4"
     partial = out.with_name("picture.part.mp4")
     partial.unlink(missing_ok=True)
-    env = {**os.environ, "HYPERFRAMES_NO_TELEMETRY": "1", "HYPERFRAMES_SKIP_SKILLS": "1"}
+    env = {**telemetry.env(), "HYPERFRAMES_SKIP_SKILLS": "1"}
     with media.heavy_slot(label=f"render {slug}"):
         done = subprocess.run([str(tool), "render", "--fps", "60", "--workers", "1", "--quality", quality, "--quiet",
                                "--output", str(partial), str(hf)], cwd=tool.parents[2], env=env, capture_output=True, text=True)

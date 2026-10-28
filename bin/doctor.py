@@ -21,9 +21,10 @@ when .env sets it. When this shell's environment holds one that .env lacks, one 
 The command exits 0 when no row is missing and 1 otherwise. Rows come in the order the fixes have to
 be made, so working down the table works.
 
-It uses only the Python standard library and nothing from the kit, so the Python that ships with a
-Mac can run it on a fresh clone, before the kit's own environment exists. Keys are named and never
-shown: a value is never printed.
+It uses only the Python standard library and one file from the kit, kit/telemetry.py, which holds the
+switches that turn HyperFrames' telemetry off and uses only the standard library too. So the Python that
+ships with a Mac can run it on a fresh clone, before the kit's own environment exists. Every program
+the check starts gets those switches. Keys are named and never shown: a value is never printed.
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))  # so the import below finds kit/telemetry.py in this copy of the kit
+from kit import telemetry  # noqa: E402
 
 GIB = 1024 ** 3
 DISK_WARN_GB = 20
@@ -191,11 +194,16 @@ class Probe:
         return os.path.exists(path)
 
     def run(self, argv: Sequence[str], timeout: float = 30) -> Optional[Tuple[int, str]]:
-        """(exit status, output) of a program, or None when it will not start or takes too long."""
+        """(exit status, output) of a program, or None when it will not start or takes too long.
+
+        The program gets this environment plus the switches from kit/telemetry.py, so the HyperFrames
+        version check reports no usage.
+        """
         try:
             done = subprocess.run(
                 list(argv),
                 cwd=str(self.root),
+                env=telemetry.env(),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

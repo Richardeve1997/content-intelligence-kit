@@ -998,6 +998,28 @@ def test_the_real_probe_runs_programs_and_reports_trouble_as_none(doctor, tmp_pa
     assert probe.which("a-program-that-does-not-exist-here") is None
 
 
+def test_the_hyperframes_probe_runs_with_its_telemetry_off(doctor, tmp_path, monkeypatch):
+    """The version check starts HyperFrames, so it gets the same two switches as every other HyperFrames call."""
+    (tmp_path / "node_modules" / "hyperframes").mkdir(parents=True)
+    (tmp_path / "node_modules" / "hyperframes" / "package.json").write_text("{}")
+    seen = {}
+
+    def answer(argv, **kwargs):
+        seen["argv"], seen["env"] = argv, kwargs.get("env")
+        return subprocess.CompletedProcess(argv, 0, PIN + "\n", None)
+
+    monkeypatch.setattr(doctor.subprocess, "run", answer)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/opt/example/bin/" + name)
+    monkeypatch.delenv("CODEX_SANDBOX", raising=False)
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.setenv("KIT_EXAMPLE_SETTING", "kept")
+    assert doctor.check_hyperframes(doctor.Probe(tmp_path, progress=False), PIN) == ("ok", "")
+    assert seen["argv"] == ["npx", "--no-install", "hyperframes", "--version"]
+    assert seen["env"]["HYPERFRAMES_NO_TELEMETRY"] == "1" and seen["env"]["DO_NOT_TRACK"] == "1"
+    assert seen["env"]["KIT_EXAMPLE_SETTING"] == "kept", "the rest of the environment goes along unchanged"
+    assert "DO_NOT_TRACK" not in os.environ, "the check changes nothing in its own environment"
+
+
 def test_the_real_probe_finds_the_kit_environment(doctor, tmp_path, monkeypatch):
     monkeypatch.delenv("UV_PROJECT_ENVIRONMENT", raising=False)
     probe = doctor.Probe(tmp_path)
@@ -1084,17 +1106,30 @@ def test_the_real_probe_without_an_environment_has_no_report(doctor, tmp_path, m
 # --- what the script is allowed to be ---------------------------------------------------------------------
 
 
-def test_the_script_uses_only_the_standard_library_and_nothing_from_the_kit():
+def test_the_script_uses_only_the_standard_library_and_the_telemetry_switches():
+    """It runs on the Mac's own Python before the kit's environment exists. The one kit file it reads is
+    kit/telemetry.py, the switches every HyperFrames call takes, and tests/test_telemetry.py checks that the
+    file uses only the standard library and runs on Python 3.9 too."""
     tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
-    imported = set()
+    imported, from_kit = set(), set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.level == 0:
             imported.add((node.module or "").split(".")[0])
+            if node.module == "kit":
+                from_kit |= {alias.name for alias in node.names}
     outside = {name for name in imported if name not in sys.stdlib_module_names}
-    assert outside == set(), f"not standard library: {outside}"
-    assert "kit" not in imported
+    assert outside == {"kit"}, f"not standard library: {outside - {'kit'}}"
+    assert from_kit == {"telemetry"}, "the telemetry switches are the one thing it takes from the kit"
+
+
+def fresh_clone(folder: Path) -> Path:
+    """The files a fresh clone holds that the script reads, with no environment, node_modules or GSAP."""
+    for name in ("bin/doctor.py", "package.json", ".env.example", "kit/__init__.py", "kit/telemetry.py"):
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / name, folder / name)
+    return folder / "bin" / "doctor.py"
 
 
 def test_the_script_is_written_for_python_39():
@@ -1120,14 +1155,11 @@ def test_the_script_starts_under_the_systems_own_python3():
 
 def test_the_script_runs_in_a_fresh_clone_with_no_environment(tmp_path):
     """No virtual environment, no node_modules, no GSAP: every row still comes back and nothing crashes."""
-    (tmp_path / "bin").mkdir()
-    shutil.copy(SCRIPT, tmp_path / "bin" / "doctor.py")
-    shutil.copy(ROOT / "package.json", tmp_path / "package.json")
-    shutil.copy(ROOT / ".env.example", tmp_path / ".env.example")
+    script = fresh_clone(tmp_path)
     env = {k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"}
 
     done = subprocess.run(
-        [sys.executable, str(tmp_path / "bin" / "doctor.py"), "--json"],
+        [sys.executable, str(script), "--json"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -1149,16 +1181,13 @@ def test_the_script_runs_in_a_fresh_clone_with_no_environment(tmp_path):
 
 
 def test_json_keeps_both_streams_clean_when_the_environment_answers(tmp_path):
-    (tmp_path / "bin").mkdir()
-    shutil.copy(SCRIPT, tmp_path / "bin" / "doctor.py")
-    shutil.copy(ROOT / "package.json", tmp_path / "package.json")
-    shutil.copy(ROOT / ".env.example", tmp_path / ".env.example")
+    script = fresh_clone(tmp_path)
     write_python(tmp_path / ".venv" / "bin" / "python", 'echo \'KIT_DOCTOR_REPORT {"torch": "ok"}\'\n')
     env = {k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"}
 
     def run(*flags):
         return subprocess.run(
-            [sys.executable, str(tmp_path / "bin" / "doctor.py"), *flags],
+            [sys.executable, str(script), *flags],
             cwd=tmp_path,
             env=env,
             capture_output=True,

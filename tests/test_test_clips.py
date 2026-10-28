@@ -11,6 +11,7 @@ import importlib.util
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -474,6 +475,24 @@ def test_a_step_that_fails_stops_the_clip_with_what_it_said(clip, tmp_path):
         clip.run("testing a failure", [sys.executable, "-c", "import sys; print('one'); print('two', file=sys.stderr); sys.exit(3)"])
     sentence = str(caught.value)
     assert "while testing a failure (exit 3)" in sentence and "one" in sentence and "two" in sentence
+
+
+def test_the_graphics_render_turns_hyperframes_telemetry_off(clip, tmp_path, monkeypatch):
+    seen = {}
+
+    def answer(command, **kwargs):
+        seen["command"], seen["env"] = command, kwargs.get("env")
+        Path(command[command.index("--output") + 1]).write_bytes(b"a graphics layer")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(clip.subprocess, "run", answer)
+    monkeypatch.setattr(clip.shutil, "which", lambda name: "/opt/example/bin/" + name)
+    monkeypatch.delenv("DO_NOT_TRACK", raising=False)
+    monkeypatch.setenv("KIT_EXAMPLE_SETTING", "kept")
+    assert clip.render_graphics(tmp_path / "hf", tmp_path / "gfx.webm") == tmp_path / "gfx.webm"
+    assert seen["command"][1:4] == ["--no-install", "hyperframes", "render"]
+    assert seen["env"]["HYPERFRAMES_NO_TELEMETRY"] == "1" and seen["env"]["DO_NOT_TRACK"] == "1"
+    assert seen["env"]["KIT_EXAMPLE_SETTING"] == "kept"
 
 
 def test_both_clip_scripts_say_that_their_notes_start_with_note():

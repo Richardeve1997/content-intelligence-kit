@@ -13,7 +13,7 @@ it starts, because the slot's path travels in the KIT_HEAVY_SLOT environment var
 
 Command line:
 
-    python -m kit.media run -- <command...>    run a command inside a heavy slot
+    python -m kit.media run -- <command...>    run a command inside a heavy slot, with HyperFrames' telemetry off
     python -m kit.media free                   print the free disk space
     python -m kit.media encoder                print the video encoder arguments
     python -m kit.media probe <file>           print a file's size, frame rate, duration and frame count
@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-from kit import config
+from kit import config, telemetry
 from kit.config import KitError
 
 __all__ = [
@@ -290,7 +290,7 @@ def probe(path: Path) -> MediaInfo:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m kit.media", description="Heavy-job slots, free disk and the encoder.")
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="run a command inside a heavy-job slot")
+    run = sub.add_parser("run", help="run a command inside a heavy-job slot, with HyperFrames' telemetry off")
     run.add_argument("argv", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
     sub.add_parser("free", help="print the free disk space in GB")
     sub.add_parser("encoder", help="print the video encoder arguments for this machine")
@@ -316,7 +316,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Give the command to run after --, such as: python -m kit.media run -- npx hyperframes render ...")
             return 2
         with heavy_slot(label=" ".join(command[:3])):
-            return subprocess.run(command).returncode
+            # Every HyperFrames command in the skills runs through here, so the switches from kit.telemetry go with it.
+            return subprocess.run(command, env=telemetry.env()).returncode
     except KitError as problem:
         print(problem)
         return 1

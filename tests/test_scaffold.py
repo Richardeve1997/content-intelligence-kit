@@ -145,6 +145,12 @@ def test_third_party_records_the_hyperframes_pin():
     assert version in text, "THIRD_PARTY.md must name the pinned version"
 
 
+def test_third_party_says_the_kit_turns_hyperframes_telemetry_off():
+    section = (ROOT / "THIRD_PARTY.md").read_text().split("## HyperFrames", 1)[1].split("\n## ", 1)[0]
+    assert "telemetry off" in section
+    assert "HYPERFRAMES_NO_TELEMETRY" in section and "DO_NOT_TRACK" in section
+
+
 def test_dependency_groups_declared():
     data = _pyproject()
     assert _dep_names(data["project"]["dependencies"]) == {"requests", "jsonschema"}

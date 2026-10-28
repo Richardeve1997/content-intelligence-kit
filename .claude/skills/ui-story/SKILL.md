@@ -134,7 +134,7 @@ The last beat shows the creator's call to action, built by `closer.py` from `pro
 
 ## The edit
 
-Heavy steps (cutting the base, transcription, matting, the graphics render, the composite, the finish) each take a heavy-job slot from `kit.media`, so at most two run at once, and each checks for 5 GB of free disk first. Run them one after another, and delete test renders when they have been looked at. Link the raw take; never move, copy or delete it.
+Heavy steps (cutting the base, transcription, matting, the graphics render, the composite, the finish) each take a heavy-job slot from `kit.media`, so at most two run at once, and each checks for 5 GB of free disk first. Run them one after another, and delete test renders when they have been looked at. Link the raw take; never move, copy or delete it. Run every HyperFrames command through `uv run python -m kit.media run --` as the recipe does, because that turns HyperFrames' telemetry off.
 
 ```bash
 K=.claude/skills/ui-story/kit; V=<video>; W=work/$V; B=$W/build
@@ -165,7 +165,7 @@ uv run python $K/build_captions.py --words $B/base.words.json --hf $B/hf --layou
 
 # 5. Scenes: write them into $B/hf/index.html (or index.src.html, then fill_times.py)
 uv run python $K/closer.py --start <t> --html          # the closer scene; --js prints its timeline lines
-npx hyperframes lint $B/hf
+uv run python -m kit.media run -- npx hyperframes lint $B/hf
 uv run python $K/check_scenes.py $B/hf/index.html
 uv run python $K/check_cues.py $B/hf/index.html $B/base.words.json
 uv run python $K/check_js.py $B/hf/index.html
@@ -174,7 +174,8 @@ mkdir -p $B/sources                                   # prep.py makes it too
 uv run python $K/audit_dom.py $B/hf/index.html $B/blocks.json $B/base.words.json > $B/sources/reading-load.md
 
 # 6. Look before the heavy render: snapshot, then composite one frame over the real take
-npx hyperframes snapshot $B/hf --at 1.0,3.0,5.0 --no-end --describe false -o $B/snaps
+uv run python -m kit.media run -- npx hyperframes snapshot $B/hf --at 1.0,3.0,5.0 --no-end --describe false \
+  -o $B/snaps
 uv run python $K/composite_v2.py --base $B/zbase.mp4 --matte $B/matte.mp4 --layout $B/layout.resolved.json \
   --geometry $B/geometry.json --gfx $B/snaps/frame-00-at-1s.png --from 1.0 --out $B/check-1.0.png
 

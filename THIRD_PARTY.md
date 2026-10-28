@@ -19,7 +19,7 @@ Each piece reaches your Mac in one of three ways. Bundled means its files are in
 
 ## HyperFrames
 
-HyperFrames renders the kit's HTML and GSAP animations to video. It is licensed under Apache-2.0: https://github.com/heygen-com/hyperframes.
+HyperFrames renders the kit's HTML and GSAP animations to video. It is licensed under Apache-2.0: https://github.com/heygen-com/hyperframes. Its command line tool reports anonymous usage by default, and the kit turns that telemetry off for every call it makes by setting `HYPERFRAMES_NO_TELEMETRY=1` and `DO_NOT_TRACK=1`.
 
 `package.json` pins it at exactly 0.8.68, and `package-lock.json` records the same version. `npm ci` installs it into `node_modules/` during setup, so this repo does not ship it. To move to another version, change `package.json`, `package-lock.json` and this paragraph together.
 

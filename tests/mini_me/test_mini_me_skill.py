@@ -62,6 +62,13 @@ def test_the_skill_names_the_no_key_sentence_and_the_house_numbers():
         assert words in BODY, words
 
 
+def test_the_lint_runs_through_kit_media_like_every_hyperframes_call():
+    """`kit.media run` turns HyperFrames' telemetry off. render.py does the same for the render itself."""
+    blocks = re.findall(r"^```bash\n(.*?)^```", BODY, re.M | re.S)
+    calls = [line for block in blocks for line in block.splitlines() if "hyperframes " in line]
+    assert calls == ["uv run python -m kit.media run -- npx hyperframes lint $W/build/hf"]
+
+
 def test_every_kit_file_the_skill_names_exists():
     for name in re.findall(r"`([a-z_]+\.(?:py|sh|js|css))`", BODY):
         if name in {"character.js", "scenes.js", "kit.py"}:

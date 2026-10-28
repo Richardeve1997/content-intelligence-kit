@@ -270,6 +270,26 @@ def test_the_lint_warnings_the_kit_causes_on_purpose_are_named_as_expected():
     assert "timeline_track_too_dense" not in text(SKILLS["ui-story"]), "the caption track no longer causes it"
 
 
+def code_lines(body: str) -> list[str]:
+    """The lines inside the fenced code blocks: the commands the agent runs."""
+    lines, inside = [], False
+    for line in body.splitlines():
+        if line.startswith("```"):
+            inside = not inside
+        elif inside:
+            lines.append(line)
+    return lines
+
+
+def test_every_hyperframes_command_runs_through_kit_media():
+    """`kit.media run` holds a heavy-job slot and turns HyperFrames' telemetry off, so the lint, the snapshot
+    and the render all go through it. A bare npx line would send usage data."""
+    calls = [line for line in code_lines(text(SKILLS["ui-story"])) if "hyperframes " in line]
+    assert {re.search(r"hyperframes (\w+)", line).group(1) for line in calls} == {"lint", "snapshot", "render"}
+    for line in calls:
+        assert line.startswith("uv run python -m kit.media run -- npx hyperframes "), line
+
+
 def test_the_cleanup_waits_for_the_render_gate_and_the_review():
     """The snapshots were once deleted before the render, because the note said "after the composite passes";
     snap_render_gate.py needs them after the render, and every ship reads gfx.webm."""

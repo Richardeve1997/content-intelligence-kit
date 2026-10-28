@@ -123,7 +123,8 @@ def test_a_failed_render_leaves_no_picture_and_says_why(kit_home, monkeypatch):
     assert not (build / "picture.mp4").exists() and not (build / "picture.part.mp4").exists()
     assert seen["cmd"][0].endswith("node_modules/.bin/hyperframes") and seen["cmd"][1] == "render", "the kit's own pinned copy"
     assert seen["cmd"][2:4] == ["--fps", "60"] and "--workers" in seen["cmd"]
-    assert seen["env"]["HYPERFRAMES_NO_TELEMETRY"] == "1"
+    assert seen["env"]["HYPERFRAMES_NO_TELEMETRY"] == "1" and seen["env"]["DO_NOT_TRACK"] == "1"
+    assert seen["env"]["HYPERFRAMES_SKIP_SKILLS"] == "1"
 
 
 def test_render_says_when_hyperframes_is_not_installed(kit_home, monkeypatch):

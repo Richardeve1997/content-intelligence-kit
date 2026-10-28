@@ -4,6 +4,7 @@ Renders, encodes, transcription and matting are heavy. At most HEAVY_SLOTS of th
 every process on the machine, and none starts with less than 5 GB of disk free.
 """
 
+import json
 import multiprocessing
 import os
 import subprocess
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from kit import media
+from kit import media, telemetry
 from kit.config import KitError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -296,6 +297,32 @@ def test_the_command_line_runs_a_command_in_a_slot(slots, tmp_path):
     done = subprocess.run([sys.executable, str(outer)], capture_output=True, text=True, cwd=ROOT, timeout=60)
     assert done.returncode == 0, done.stdout + done.stderr
     assert Path(marker.read_text()).parent == slots
+
+
+def test_the_command_line_turns_hyperframes_telemetry_off(slots, tmp_path):
+    """Every HyperFrames call the skills make runs through `kit.media run`, so it sets both switches for the command."""
+    marker = tmp_path / "env.json"
+    inner = tmp_path / "inner.py"
+    inner.write_text(
+        "import json, os\n"
+        f"names = {sorted(telemetry.OFF) + ['KIT_EXAMPLE_SETTING']!r}\n"
+        f"open({str(marker)!r}, 'w').write(json.dumps({{n: os.environ.get(n) for n in names}}))\n"
+    )
+    outer = tmp_path / "outer.py"
+    outer.write_text(
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from kit import media\n"
+        f"media._slots_dir = lambda: Path({str(slots)!r})\n"
+        "media.MIN_FREE_GB = 0.0\n"
+        f"raise SystemExit(media.main(['run', '--', sys.executable, {str(inner)!r}]))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k not in telemetry.OFF}
+    env["KIT_EXAMPLE_SETTING"] = "kept"
+    done = subprocess.run([sys.executable, str(outer)], capture_output=True, text=True, cwd=ROOT, env=env, timeout=60)
+    assert done.returncode == 0, done.stdout + done.stderr
+    seen = json.loads(marker.read_text())
+    assert seen == {**{name: "1" for name in telemetry.OFF}, "KIT_EXAMPLE_SETTING": "kept"}
 
 
 def test_probe_reads_duration_and_size(tmp_path):

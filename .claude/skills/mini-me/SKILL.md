@@ -147,7 +147,7 @@ The full list of what `c` holds is at the top of `stage.js`.
 
 ## The build
 
-Heavy steps (the voice-over, the render, the finish and the speech gate) each take a heavy-job slot from `kit.media`, so at most two run at once, and each checks for 5 GB of free disk first. Run them one after another, and delete test renders once they have been looked at.
+Heavy steps (the voice-over, the render, the finish and the speech gate) each take a heavy-job slot from `kit.media`, so at most two run at once, and each checks for 5 GB of free disk first. Run them one after another, and delete test renders once they have been looked at. HyperFrames' telemetry stays off: `render.py` turns it off for the render, and the lint runs through `uv run python -m kit.media run --`, which does the same.
 
 ```bash
 K=.claude/skills/mini-me/kit; V=<video>; W=work/$V
@@ -167,7 +167,7 @@ uv run python $K/install.py $V
 
 # 5. Load it headless: page errors, layout, and the hit times; look at a few frames
 uv run python $K/check.py $V --at 0.2 1 2 3 4
-npx hyperframes lint $W/build/hf
+uv run python -m kit.media run -- npx hyperframes lint $W/build/hf
 
 # 6. Render, then the sound, the finish and the speech gate
 uv run python $K/render.py $V
