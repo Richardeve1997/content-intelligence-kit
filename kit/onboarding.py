@@ -665,7 +665,7 @@ def _what_it_said(done: subprocess.CompletedProcess) -> str:
             f"It stopped with an error it did not explain ({err.splitlines()[-1].strip()}). "
             "Try the clip again. If it stops the same way, that error is the reason."
         )
-    lines = _lines(done.stdout)
+    lines = _lines(done.stdout) or _lines(done.stderr)  # a script that never got as far as a sentence wrote to stderr
     if len(lines) > _LAST_LINES + 1:
         lines = [lines[0], *lines[-_LAST_LINES:]]
     return "It said:\n" + "\n".join("  " + line for line in lines) if lines else "It gave no reason."

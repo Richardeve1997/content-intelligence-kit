@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -676,6 +677,19 @@ def test_a_failure_keeps_the_line_that_says_which_step_stopped_and_the_last_line
     assert "detail 3" not in out and "detail 1\n" not in out, "the middle is left out"
 
 
+def test_a_script_that_only_wrote_to_the_error_stream_still_gets_to_say_why(kit_folder, capsys):
+    kit_folder.script("ui-story", 'print("npx could not start", file=sys.stderr); sys.exit(2)')
+    code, out, err = clips(capsys)
+    assert code == 1 and "npx could not start" in out
+    assert "It gave no reason." not in out
+
+
+def test_a_script_with_nothing_to_say_at_all_is_told_so(kit_folder, capsys):
+    kit_folder.script("ui-story", "sys.exit(2)")
+    code, out, err = clips(capsys)
+    assert code == 1 and "It gave no reason." in out
+
+
 def test_a_short_failure_is_not_repeated(kit_folder, capsys):
     kit_folder.script("ui-story", FAILS)
     code, out, err = clips(capsys)
@@ -752,24 +766,41 @@ def test_the_runner_keeps_its_own_words_free_of_dashes(kit_folder, capsys):
 
 # --- both clips, for real -----------------------------------------------------------------------------------------------------
 
+MINI_ME_CLIP = ROOT / ".claude" / "skills" / "mini-me" / "kit" / "test_clip.py"
+MINI_ME_HELPERS = ROOT / "tests" / "mini_me" / "mini_me_helpers.py"
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 SPOKEN = {
     "ui-story": lambda profile: SCRIPT_MODULE.SAMPLE_LINE,
-    "mini-me": lambda profile: f"Hi, this is {profile.name}. Meet my mini me. It tells my stories while I stay off camera.",
+    "mini-me": lambda profile: load_module("mini_me_clip_under_test", MINI_ME_CLIP).default_line(profile),
 }
-SPEED = {"ui-story": finish.HOUSE["speed"], "mini-me": 1.0}
+SPEED = {"ui-story": finish.HOUSE["speed"], "mini-me": 1.0}  # the mini me finish keeps the voice-over's own pace
+
+
+def test_the_mini_me_line_the_skill_and_the_test_expect_is_the_one_the_script_says():
+    line = load_module("mini_me_clip_for_the_line", MINI_ME_CLIP).default_line(SimpleNamespace(name="Example Studio"))
+    assert line == SPOKEN["mini-me"](SimpleNamespace(name="Example Studio"))
+    assert line.startswith("Hi, this is Example Studio.")
 
 
 @pytest.mark.heavy
-@pytest.mark.parametrize(
-    "style",
-    [
-        "ui-story",
-        pytest.param("mini-me", marks=pytest.mark.skip(reason="mini me test clip arrives with the mini me style")),
-    ],
-)
-def test_both_clips_render(style, tmp_path, example_me, capsys):
-    """For the example creator the clip exists, runs 5 to 10 seconds and says every word its captions show."""
+@pytest.mark.skipif(shutil.which("say") is None, reason="needs the macOS say command for the scratch voice")
+@pytest.mark.parametrize("style", ["ui-story", "mini-me"])
+def test_both_clips_render(style, tmp_path, example_me, capsys, monkeypatch):
+    """For the example creator the clip exists, runs 5 to 10 seconds and says every word of its line."""
     media.require_free()  # a heavy job needs 5 GB free
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)  # the scratch voice, never a paid one
+    if style == "mini-me":
+        # The example creator has no character. This one is drawn with numpy in the shape the character skill packs.
+        load_module("mini_me_helpers_for_clips", MINI_ME_HELPERS).make_character(example_me / "character")
     folder = tmp_path / "onboarding-test"
     assert onboarding.make_clips(folder=folder, styles=[style]) == 0, capsys.readouterr().out
     made = folder / f"{style}.mp4"
@@ -780,5 +811,6 @@ def test_both_clips_render(style, tmp_path, example_me, capsys):
     profile = config.load_profile()
     spoken = SPOKEN[style](profile).split()
     words = [Word(text, round(i * 0.3, 3), round(i * 0.3 + 0.25, 3)) for i, text in enumerate(spoken)]
-    assert qa_captions.check(made, words, speed=SPEED[style]) == [], f"the {style} clip lost a caption word"
-    assert not (folder / SCRIPT_MODULE.SCRATCH).exists(), "the scratch files are cleaned up"
+    assert qa_captions.check(made, words, speed=SPEED[style]) == [], f"the {style} clip lost a word"
+    assert not (folder / SCRIPT_MODULE.SCRATCH).exists(), "the UI story scratch files are cleaned up"
+    assert not config.work_dir("mini-me-test-clip").exists(), "and so are the mini me ones"
