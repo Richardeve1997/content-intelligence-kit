@@ -462,13 +462,38 @@ def test_update_kit_skill_keeps_the_groups_that_are_installed_when_it_syncs():
 def test_update_kit_skill_sends_git_clones_to_git_pull_and_explains_what_is_kept():
     body = text(SKILLS / "update-kit" / "SKILL.md")
     assert "`git pull`" in body and "gitignored" in body
-    assert "copies without git history, such as a copy made from the template or an unzipped download" in body
     assert body.index("git pull") < body.index("uv run python bin/update_kit.py\n"), "the clone check comes first"
     for words in ("Kept your edits", "stays as it is", "stays deleted", "unless the release changed"):
         assert words in body, words
     assert "replaced even when the release did not change it" not in body, "the old policy is gone"
     claude = text(ROOT / "CLAUDE.md")
     assert "`git pull`" in claude and "me/kit-backups/" in claude and "unless the release changed it too" in claude
+
+
+def test_only_a_clone_whose_origin_is_the_kit_updates_with_git_pull():
+    """A copy made with "Use this template" has git history, but its origin is the creator's own repository,
+    so a pull there never brings a release. The origin decides, not the .git folder."""
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    step = re.search(r"^2\. (.+?)(?=^3\. )", body, re.M | re.S).group(1)
+    assert "`git remote get-url origin`" in step
+    assert "https://github.com/" in step and "/content-intelligence-kit" in step, "the kit's address to compare with"
+    assert "Use this template" in step and "origin" in step
+    assert "If the folder has a `.git` folder, it is a git clone" not in body, "a .git folder alone is not the test"
+    assert body.index("git remote get-url origin") < body.index("uv run python bin/update_kit.py\n")
+    claude = text(ROOT / "CLAUDE.md")
+    updating = claude[claude.index("## Updating") :]
+    assert "`git remote get-url origin`" in updating and "Use this template" in updating
+    assert "A kit cloned with git updates with `git pull`" not in claude
+
+
+def test_update_kit_skill_says_what_to_do_when_a_pull_refuses():
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    step = re.search(r"^2\. (.+?)(?=^3\. )", body, re.M | re.S).group(1)
+    assert "If `git pull` refuses" in step
+    for words in ("me/kit-backups/", "git checkout --", "again", "rules"):
+        assert words in step, words
+    assert "git pull --ff-only" in step, "a pull never makes a merge on its own"
+    assert "uv sync --group video --group research --inexact" in step and "npm ci" in step, "a pull can change the dependencies"
 
 
 def test_shell_examples_that_add_a_rule_use_single_quotes_so_dollar_signs_and_backticks_survive():
