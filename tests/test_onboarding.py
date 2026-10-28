@@ -1203,6 +1203,59 @@ def test_the_preview_is_one_self_contained_page(me):
     assert files_under(me) == ["brand/preview.html"], "a preview does not write the tokens or the profile"
 
 
+def compositor_grid() -> tuple[int, int, float]:
+    """(cell size, line thickness, strength) of the grid the UI story compositor draws, read from its own file."""
+    path = ROOT / ".claude" / "skills" / "ui-story" / "kit" / "composite_v2.py"
+    source = path.read_text(encoding="utf-8")
+    size = int(re.search(r'"--grid", type=int, default=(\d+)', source).group(1))
+    line = int(re.search(r'"--grid-t", type=int, default=(\d+)', source).group(1))
+    strength = float(re.search(r"^GRID_ALPHA = ([0-9.]+)", source, re.M).group(1))
+    return size, line, strength
+
+
+def test_the_preview_draws_the_same_grid_as_the_ui_story_canvas(me, tmp_path):
+    """The compositor draws a thin line every few pixels in the accent, faint over the canvas colour.
+
+    The preview must show that grid, in the colour ffmpeg really makes, so the card looks like the canvas
+    the videos sit on. A frame is drawn with the compositor's own filter and compared with the page.
+    """
+    from PIL import Image
+
+    size, line, strength = compositor_grid()
+    page = onboarding.preview(LOOK)[0].read_text(encoding="utf-8")
+    assert f"background-size: {size}px {size}px" in page
+    assert page.count(f"{line}px") >= 4, "each of the two gradients draws a line of that thickness"
+    drawn = re.search(r"--canvas-grid: (#[0-9a-f]{6});", page)
+    assert drawn, "the grid colour is one variable the page reads"
+
+    canvas, accent = EXAMPLE["colours"]["canvas"], EXAMPLE["colours"]["accent"]
+    frame = tmp_path / "grid.png"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i",
+         f"color=c=0x{canvas[1:]}:s=200x200:r=60:d=0.1,drawgrid=w={size}:h={size}:t={line}:c=0x{accent[1:]}@{strength},format=rgba",
+         "-frames:v", "1", str(frame)],
+        check=True,
+    )
+    image = Image.open(frame).convert("RGB")
+
+    def near(pixel, hex_colour):
+        wanted = tuple(int(hex_colour[i : i + 2], 16) for i in (1, 3, 5))
+        return max(abs(a - b) for a, b in zip(pixel, wanted)) <= 3
+
+    assert near(image.getpixel((0, 0)), drawn.group(1)), "where the lines cross"
+    assert near(image.getpixel((size + 40, 0)), drawn.group(1)), "on a horizontal line"
+    assert near(image.getpixel((0, size + 40)), drawn.group(1)), "on a vertical line"
+    assert near(image.getpixel((size // 2, size // 2)), canvas), "between the lines"
+    assert not near(image.getpixel((0, 0)), canvas), "the grid has to show"
+
+
+def test_the_preview_grid_follows_the_accent_and_the_canvas(me):
+    look = {**LOOK, "colours": {**EXAMPLE["colours"], "accent": "#ff0000", "canvas": "#ffffff"}}
+    page = onboarding.preview(look)[0].read_text(encoding="utf-8")
+    # 9% red over white: the red channel stays full and the others drop by 9% of 255 (23)
+    assert "--canvas-grid: #ffe8e8;" in page
+
+
 def test_the_preview_uses_the_saved_name_when_none_is_given(me):
     State().save("who", {"name": "Example Studio"})
     path, _ = onboarding.preview(LOOK)
@@ -1285,6 +1338,85 @@ def test_the_preview_command_reports_a_problem_as_a_sentence(me, capsys):
     code, out, err = run(["preview", json.dumps({"colours": {}, "fonts": EXAMPLE["fonts"]})], capsys)
     assert code == 1 and out == ""
     assert "colours.canvas is missing" in err
+
+
+# --- step 7: which platforms are connected in Zernio ---------------------------------------------------------------
+
+
+def zernio_says(monkeypatch, **states):
+    """Make kit.post.accounts_check answer without asking Zernio: every platform is connected unless named."""
+    from kit import post
+
+    answer = {name: states.get(name, "connected") for name in config.PLATFORMS}
+    monkeypatch.setattr(post, "accounts_check", lambda *args, **kwargs: dict(answer))
+
+
+@pytest.fixture
+def no_key(tmp_path, monkeypatch):
+    """No Zernio key anywhere: not in the environment, and no .env in the kit folder."""
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path / "kit")
+    monkeypatch.delenv("ZERNIO_API_KEY", raising=False)
+
+
+def test_each_platform_is_shown_as_connected_or_not(me, monkeypatch):
+    zernio_says(monkeypatch, tiktok="not connected")
+    lines = onboarding.account_lines(["instagram", "tiktok", "twitter"])
+    assert lines[:3] == ["Instagram: connected", "TikTok: not connected", "X: connected"]
+
+
+def test_a_platform_that_is_not_connected_is_named_with_what_to_do(me, monkeypatch):
+    zernio_says(monkeypatch, tiktok="not connected", youtube="not connected")
+    lines = onboarding.account_lines(["instagram", "tiktok", "youtube"])
+    assert len(lines) == 4
+    assert lines[3].startswith("Connect TikTok and YouTube inside Zernio to post there.")
+    assert "never posts it another way" in lines[3]
+
+
+def test_when_every_platform_is_connected_there_is_nothing_to_fix(me, monkeypatch):
+    zernio_says(monkeypatch)
+    assert onboarding.account_lines(["instagram", "tiktok"]) == ["Instagram: connected", "TikTok: connected"]
+
+
+def test_every_platform_the_kit_knows_is_listed_when_the_creator_has_not_chosen_any(me, monkeypatch):
+    zernio_says(monkeypatch)
+    names = [line.split(":")[0] for line in onboarding.account_lines()]
+    assert names == ["Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"]
+
+
+def test_the_command_shows_the_platforms_the_creator_chose(me, monkeypatch, capsys):
+    zernio_says(monkeypatch, instagram="not connected")
+    State().save("who", {"platforms": ["instagram", "twitter"]})
+    code, out, err = run(["accounts"], capsys)
+    assert (code, err) == (0, "")
+    assert out.splitlines()[:2] == ["Instagram: not connected", "X: connected"]
+    assert "TikTok" not in out and "Connect Instagram inside Zernio" in out
+
+
+def test_without_a_key_posting_by_hand_is_one_plain_sentence_and_setup_moves_on(me, no_key, capsys):
+    code, out, err = run(["accounts"], capsys)
+    assert (code, err) == (0, ""), "not a problem: the creator posts by hand"
+    assert out.strip() == onboarding.NO_ZERNIO
+    assert out.count("\n") == 1, "one sentence"
+    assert "caption file" in out and "by hand" in out and "Traceback" not in out
+
+
+def test_a_key_that_zernio_turns_away_is_a_sentence_on_the_error_stream(me, monkeypatch, capsys):
+    from kit import post
+
+    def refused(*args, **kwargs):
+        raise post.ZernioError("Zernio did not accept the key (HTTP 401). Check ZERNIO_API_KEY in .env.", status=401)
+
+    monkeypatch.setattr(post, "accounts_check", refused)
+    code, out, err = run(["accounts"], capsys)
+    assert code == 1 and out == ""
+    assert "did not accept the key" in err
+
+
+def test_the_accounts_command_never_shows_the_key(me, monkeypatch, capsys):
+    monkeypatch.setenv("ZERNIO_API_KEY", "not-a-real-key")
+    zernio_says(monkeypatch)
+    code, out, err = run(["accounts"], capsys)
+    assert "not-a-real-key" not in out + err
 
 
 # --- the onboard and voice skills and the guide -------------------------------------------------------------
@@ -1385,7 +1517,8 @@ def test_each_step_section_names_what_it_runs_and_says_so_when_a_piece_is_missin
     assert "what they want to change" in look
     assert "`voice` skill" in found[5][1]
     posting = found[7][1]
-    assert "kit.post.accounts_check()" in posting and "not there yet" in posting
+    assert "kit.post.accounts_check()" in posting and "kit.onboarding accounts" in posting
+    assert "not there yet" not in posting, "the posting code ships with the kit, so there is no gap to explain"
     styles = found[8][1]
     assert "`character` skill" in styles and "not there yet" in styles
     test_clip = found[9][1]
@@ -1393,6 +1526,52 @@ def test_each_step_section_names_what_it_runs_and_says_so_when_a_piece_is_missin
     assert ".claude/skills/mini-me/kit/test_clip.py" in test_clip
     assert "not there yet" in test_clip
     assert "run my research" in found[10][1]
+
+
+def test_posting_without_a_key_is_one_plain_sentence_and_setup_goes_on():
+    posting = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[7][1]
+    assert "post by hand" in posting and "caption files" in posting
+    assert "exits with an error" in posting and "go on" in posting, "a key Zernio turns away does not stop setup"
+
+
+def test_the_styles_step_hands_mini_me_to_the_character_skill_and_keeps_its_gates():
+    styles = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[8][1]
+    assert "hand over to the `character` skill" in styles and "its own approval gates" in styles
+    for gate in ("character sheet", "poses", "in-between drawings", "pack"):
+        assert gate in styles, gate
+    for command in ("kit.character status", "kit.character start", "kit.character sheet", "approve sheet",
+                    "kit.character poses", "approve poses", "redraw <pose> --note", "kit.character moves",
+                    "approve moves all", "kit.character pack"):
+        assert command in styles, command
+    assert "uv sync --group character --inexact" in styles
+    assert "me/character/manifest.json" in styles, "how the handover is known to be done"
+    assert "not there yet" in styles, "a copy of the kit without the character skill says so and goes on"
+    # the profile has to exist before the handover, because the character skill reads the image tool from it
+    assert styles.index("onboarding finish") < styles.index("hand over to the `character` skill")
+
+
+def test_the_styles_step_has_the_hdr_tip_and_links_the_test_take():
+    styles = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[8][1]
+    assert "Settings, Camera, Record Video, HDR Video off" in styles
+    assert "work/onboarding-test/take" in styles and "ln -s" in styles
+    assert "Never copy or move it" in styles
+
+
+def test_the_test_clip_step_runs_the_clips_command_and_says_what_it_leaves_out():
+    clip_step = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[9][1]
+    assert "uv run python -m kit.onboarding clips" in clip_step
+    assert "one at a time" in clip_step and "5 GB" in clip_step
+    assert "full path" in clip_step
+    assert "exits with status 1" in clip_step and "carry on" in clip_step
+    body = read(SKILLS / "onboard" / "SKILL.md")
+    assert "uv run python -m kit.onboarding clips" in body.split("## Coming back later")[1], "it can be run again later"
+
+
+def test_the_machine_check_step_covers_the_hdr_row():
+    machine = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[2][1]
+    assert "HDR tone mapping row only warns" in machine
+    assert "turning HDR video off on the phone" in machine
+    assert "uv sync --group video --group research --inexact" in machine
 
 
 def test_the_skill_says_in_steps_3_and_7_that_x_is_saved_as_twitter():

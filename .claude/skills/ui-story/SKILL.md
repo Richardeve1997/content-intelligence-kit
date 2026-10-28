@@ -246,6 +246,7 @@ Everything is in `.claude/skills/ui-story/kit/`. Run the scripts with `uv run py
 | `check_static.py` | no split or canvas zone holds still over 3 s |
 | `caption_blink_check.py` | no one-frame hole in the captions |
 | `ig_safe_check.py` | frames as a tall phone crops them |
+| `test_clip.py` | a 5 to 10 second test clip in the creator's brand, made once during setup: a branded card with karaoke captions over their test take, or over a sample card with a scratch voice |
 
 Shared helpers in `kit/`: `kit.transcribe` (word timings), `kit.matte` (the person matte: Robust Video Matting through torch.hub at run time, GPL-3.0 and never stored in the repo; MediaPipe as the fallback), `kit.finish` (speed, bed, loudness), `kit.qa_captions` (the speech gate), `kit.music` (the creator's beds) and `kit.media` (the encoder, heavy-job slots, free disk, `probe`).
 

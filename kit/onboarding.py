@@ -23,6 +23,8 @@ A skill cannot call Python directly, so everything here is also a command:
     python -m kit.onboarding preview [look]          write me/brand/preview.html and list colours that are hard to read
     python -m kit.onboarding finish                  write me/profile.json and me/brand/tokens.css
     python -m kit.onboarding tokens                  write me/brand/tokens.css again from me/profile.json
+    python -m kit.onboarding accounts                which platforms are connected in Zernio (step 7)
+    python -m kit.onboarding clips                   make the test clip for each style they chose (step 9)
 
 Problems come back as one plain sentence each: an exception from the functions, a printed line and
 exit status 1 from the command.
@@ -40,11 +42,12 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
-from kit import brand, config
+from kit import brand, config, media
 from kit.config import KitError, Profile, ProfileError
 
 __all__ = [
@@ -52,9 +55,13 @@ __all__ = [
     "DONE",
     "COMMANDS",
     "REQUIRED",
+    "CLIP_FOLDER",
+    "NO_ZERNIO",
     "State",
     "StateError",
     "AnswerError",
+    "account_lines",
+    "make_clips",
     "preview",
     "rewrite_tokens",
     "main",
@@ -73,7 +80,7 @@ STEPS = (
     "tour",
 )
 DONE = "done"  # what next_step() returns when every step is finished
-COMMANDS = ("status", "next", "save", "preview", "finish", "tokens")
+COMMANDS = ("status", "next", "save", "preview", "finish", "tokens", "accounts", "clips")
 STATE_FILE = ".onboarding.json"
 
 # Answers the creator has to give. The rest of the profile has a sensible default.
@@ -451,8 +458,12 @@ _PAGE = """<!doctype html>
 <title>Your look</title>
 <style>
 @@TOKENS@@
+:root { --canvas-grid: @@GRID@@; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 32px 16px; background: var(--canvas); color: var(--ink); font-family: var(--font-body); font-size: 18px; line-height: 1.5; }
+body { margin: 0; padding: 32px 16px; color: var(--ink); font-family: var(--font-body); font-size: 18px; line-height: 1.5;
+  background-color: var(--canvas);
+  background-image: linear-gradient(var(--canvas-grid) @@LINE@@px, transparent @@LINE@@px), linear-gradient(90deg, var(--canvas-grid) @@LINE@@px, transparent @@LINE@@px);
+  background-size: @@CELL@@px @@CELL@@px; }
 main { max-width: 720px; margin: 0 auto; display: grid; gap: 28px; }
 .top { display: flex; align-items: center; gap: 20px; }
 .top img { height: 64px; width: auto; }
@@ -496,6 +507,12 @@ p { margin: 0; }
 </html>
 """
 
+# The UI story canvas: composite_v2.py draws a thin line every 90 px in the accent, faint over the canvas colour.
+# The preview draws the same grid, so the card looks like the canvas the videos sit on.
+CANVAS_GRID_CELL = 90  # pixels between lines
+CANVAS_GRID_LINE = 2  # pixels thick
+CANVAS_GRID_STRENGTH = 0.09  # how much of the accent shows through
+
 _SWATCHES = (
     ("canvas", "Canvas", "canvas"),
     ("ink", "Ink", "ink"),
@@ -528,8 +545,13 @@ def _preview_page(profile: Profile, css: str, warnings: list[str]) -> str:
         notes = f"<h2>Hard to read</h2>\n<ul>\n{items}\n</ul>"
     else:
         notes = "<p>Every colour pair is easy to read.</p>"
+    # The accent at 9% over the canvas, worked out here as one plain colour: the same blend ffmpeg makes.
+    grid = brand.grid_colour(profile.colours.accent, profile.colours.canvas, CANVAS_GRID_STRENGTH)
     return (
         _PAGE.replace("@@TOKENS@@", css.strip())
+        .replace("@@GRID@@", grid)
+        .replace("@@LINE@@", str(CANVAS_GRID_LINE))
+        .replace("@@CELL@@", str(CANVAS_GRID_CELL))
         .replace("@@LOGO@@", logo)
         .replace("@@NAME@@", e(profile.name))
         .replace("@@SWATCHES@@", swatches)
@@ -582,6 +604,103 @@ def rewrite_tokens() -> tuple[Path, list[str]]:
     except OSError as exc:
         raise StateError(_save_problem(exc, "the brand tokens")) from None
     return out, brand.check(profile)
+
+
+# --- step 7: which platforms are connected in Zernio -----------------------------------------------------
+
+# What the creator hears when there is no Zernio key. It is not a problem: every video still ends with the
+# MP4 and a caption file for each platform.
+NO_ZERNIO = (
+    "There is no Zernio key, so posting will give you the video and one caption file for each platform, "
+    "ready to post by hand."
+)
+
+
+def _list_of(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def account_lines(platforms: Iterable[str] | None = None) -> list[str]:
+    """One line for each platform: "Instagram: connected" or "TikTok: not connected", asked of Zernio.
+
+    `platforms` are the creator's own platforms. Without them every platform the kit knows is listed.
+    Raises kit.zernio.NoZernio when there is no key, and ZernioError when Zernio cannot be asked.
+    """
+    from kit import post  # the posting code, which only the creator who posts needs
+
+    found = post.accounts_check()
+    names = [name for name in (list(platforms) if platforms else config.PLATFORMS) if name in found]
+    lines = [f"{post.captions.display_name(name)}: {found[name]}" for name in names]
+    apart = [post.captions.display_name(name) for name in names if found[name] != "connected"]
+    if apart:
+        lines.append(
+            f"Connect {_list_of(apart)} inside Zernio to post there. "
+            "The kit skips a platform that is not connected, and never posts it another way."
+        )
+    return lines
+
+
+# --- step 9: a test clip for each style -------------------------------------------------------------------
+
+CLIP_FOLDER = "onboarding-test"  # work/onboarding-test/: the test take, and the clips made from it
+_CLIPS = {
+    "ui-story": ("UI story", ".claude/skills/ui-story/kit/test_clip.py"),
+    "mini-me": ("mini me", ".claude/skills/mini-me/kit/test_clip.py"),
+}
+_LAST_LINES = 6  # how much of what a script said is passed on when it fails
+
+
+def _what_it_said(done: subprocess.CompletedProcess) -> str:
+    """The reason a clip script gave, as plain sentences. A crash gives its last line and no stack."""
+    out, err = (done.stdout or "").strip(), (done.stderr or "").strip()
+    if "Traceback" in err:
+        return f"It stopped with an error it did not explain ({err.splitlines()[-1].strip()}). Tell your agent if it keeps happening."
+    lines = [line.rstrip() for line in out.splitlines() if line.strip()][-_LAST_LINES:]
+    return "It said:\n" + "\n".join("  " + line for line in lines) if lines else "It gave no reason."
+
+
+def make_clips(folder: Path | None = None, styles: Iterable[str] | None = None, run=subprocess.run) -> int:
+    """Make the test clip for each style one after the other, saying what happened to each. Returns 1 if one failed.
+
+    `styles` are the ones to make; the creator's chosen styles by default. A style whose script is not in this
+    copy of the kit, or whose character is not built yet, is said plainly and skipped, which is not a failure.
+    Each clip is a heavy job, so they never run side by side, and none starts with under 5 GB of disk free.
+    """
+    profile = config.load_profile()
+    chosen = list(styles) if styles is not None else list(profile.styles)
+    unknown = [style for style in chosen if style not in _CLIPS]
+    if unknown:
+        raise ValueError(f"{unknown[0]!r} is not a style. The styles are: {', '.join(_CLIPS)}.")
+    folder = Path(folder) if folder is not None else config.work_dir(CLIP_FOLDER)
+    media.require_free()
+    root = config.kit_root()
+    failed = 0
+    for style in chosen:
+        label, relative = _CLIPS[style]
+        if not (root / relative).is_file():
+            print(f"The {label} test clip is not in this copy of the kit yet ({relative}), so there is no clip for it. An update adds it.")
+            continue
+        if style == "mini-me" and not (config.me_dir() / "character" / "manifest.json").is_file():
+            print("Your mini me character is not built yet, so there is no mini me clip. Build it with the character skill, then make the clips again.")
+            continue
+        out = folder / f"{style}.mp4"
+        folder.mkdir(parents=True, exist_ok=True)
+        out.unlink(missing_ok=True)  # an old clip must not pass for a new one
+        command = [sys.executable, str(root / relative), "--out", str(out)]
+        if style == "ui-story":
+            command += ["--work", str(folder)]  # the take, if there is one, is in <folder>/take/
+        print(f"Making the {label} test clip. This takes a few minutes.", flush=True)
+        done = run(command, cwd=str(root), capture_output=True, text=True)
+        if done.returncode != 0 or not out.is_file():
+            failed += 1
+            print(f"The {label} test clip did not finish. {_what_it_said(done)}")
+            continue
+        try:
+            length = f" ({media.probe(out).duration:.1f} s)"
+        except KitError:
+            length = ""
+        print(f"{label} test clip: {out}{length}")
+    return 1 if failed else 0
 
 
 # --- the command line -------------------------------------------------------------------------------------
@@ -645,6 +764,15 @@ def _run(args: argparse.Namespace) -> int:
         path, warnings = preview(_answers_from(args.look))
         print("Wrote me/brand/preview.html. Open it in a browser to see the card.")
         print("\n".join(_warning_lines(warnings, "Hard to read:")) or "Every colour pair is easy to read.")
+    elif args.command == "accounts":
+        from kit.zernio import NoZernio
+
+        try:
+            print("\n".join(account_lines(State().answers.get("platforms"))))
+        except NoZernio:
+            print(NO_ZERNIO)  # not a problem: the creator posts by hand
+    elif args.command == "clips":
+        return make_clips()
     elif args.command == "finish":
         state = State()
         profile = state.finish()
@@ -678,6 +806,8 @@ def main(argv: list[str] | None = None) -> int:
     one.add_argument("look", nargs="?", help='{"colours": {...}, "fonts": {...}, "logo": null} as JSON, or "-" for standard input')
     commands.add_parser("finish", help="check every answer, then write me/profile.json and me/brand/tokens.css")
     commands.add_parser("tokens", help="write me/brand/tokens.css again from me/profile.json")
+    commands.add_parser("accounts", help="show which platforms are connected in Zernio (needs a Zernio key)")
+    commands.add_parser("clips", help="make the test clip for each style the creator chose")
 
     args = parser.parse_args(argv)
     try:
