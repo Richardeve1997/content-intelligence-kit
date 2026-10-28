@@ -408,6 +408,8 @@ def test_agents_md_says_what_cannot_run_inside_codex_sandbox():
     assert "approve running that command outside the sandbox" in agents
     assert "never means a tool is missing" in agents
     assert "python3 bin/doctor.py" in agents, "the machine check says which rows it could not check"
+    # UV_NO_CACHE=1 works because the sandbox lets uv make a folder in the temporary folder, so say so.
+    assert "can write only in this folder and the temporary folder" in agents
 
 
 # --- the three skills this task adds --------------------------------------------------------------------------------------
