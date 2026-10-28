@@ -693,6 +693,26 @@ def test_the_half_open_mouth_lowers_the_bottom_edge_and_keeps_the_top():
     assert tuple(int(v) for v in states.patches["mouth_mid"][mid_bottom, x, :3]) == lip, "no lower lip closes the opening"
 
 
+def test_a_hand_marked_box_keeps_a_touching_nose_out_of_the_mouth():
+    """A nose drawn in the mouth's own colour, down to the mouth, is not the mouth. With the box marked by hand
+    exactly on the drawn mouth, only strokes that leave the box at its sides are followed (a smile's tips), so the
+    open states change nothing above the box and the patch never grows up into the nose."""
+    from character_sprites import OUTLINE, OX, OY
+
+    rgba, _ = draw_figure("idle", nose=(3, 7), mouth=OUTLINE)
+    box = faces.Box(24 + OX, 29 + OY, 8, 2)  # exactly the drawn mouth
+    face, _ = faces.measure(rgba, {"mouth": [box.x, box.y, box.w, box.h]})
+    states = faces.face_states(rgba, face, open_rows=3)
+    for name in ("mouth_mid", "mouth_open"):
+        rect, patch = states.rects[name], states.patches[name]
+        assert rect.y >= box.y, f"{name} patch {rect} grows up above the marked box into the nose"
+        for y in (27, 28):  # the nose's last two rows, touching the mouth
+            for x in (27, 28, 29):
+                cy, cx = y + OY, x + OX
+                if rect.y <= cy < rect.y1 and rect.x <= cx < rect.x1:
+                    assert tuple(int(v) for v in patch[cy - rect.y, cx - rect.x, :3]) == OUTLINE, f"{name} changed the nose at {(x, y)}"
+
+
 def _tile_in(board: np.ndarray, tile: np.ndarray) -> bool:
     """Whether `tile` appears, pixel for pixel, somewhere on `board` (both RGB arrays)."""
     th, tw = tile.shape[:2]

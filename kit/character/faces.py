@@ -819,8 +819,9 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     lash_unit = max(1, int(round(min(face.left_eye.h, face.right_eye.h) / 7)))
     eyes_rect = face.eyes.grown(lash_unit, lash_unit, lash_unit, lash_unit)
     # The drawn mouth: whatever in the box is neither skin nor what surrounds the mouth, and the strokes in those
-    # colours followed out of the box (the raised tips of a smile marked tighter than it is drawn), inside the face,
-    # below the eyes and above the neck. The open states are drawn from this shape, and the patch grows to hold it.
+    # colours followed out of the box's sides (the raised tips of a smile marked tighter than it is drawn), inside
+    # the face, below the eyes and above the neck. The open states are drawn from this shape, and the patch grows
+    # to hold it.
     inside = rgba[max(0, m.y) : m.y1, max(0, m.x) : m.x1]
     drawn = np.zeros(rgba.shape[:2], bool)
     drawn[max(0, m.y) : m.y1, max(0, m.x) : m.x1] = ~art.colour_mask(inside, family | {surround}) & (inside[..., 3] > 0)
@@ -833,9 +834,20 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
         same = art.colour_mask(cells, stroke_colours) & (cells[..., 3] > 0)
         same[: max(0, min(eyes_rect.y1, m.y) - y0)] = False  # never up into the eyes
         same[max(0, max(face.neck, m.y1) - y0) :] = False  # nor down past the head
-        labels, _ = ndimage.label(same, structure=np.ones((3, 3)))
-        seeds = labels[max(0, m.y) - y0 : m.y1 - y0, max(0, m.x) - x0 : m.x1 - x0]
-        drawn[y0:y1, x0:x1] |= np.isin(labels, seeds[seeds > 0])
+        # A stroke is followed only out of the box's left and right edges: from the drawn cells inside the box,
+        # sideways through the box's rows, and from there wherever it goes. A nose or a chin line in the same
+        # colour, touching the mouth from above or below, is not the mouth, and a box marked by hand keeps its word.
+        rows, cols = slice(max(0, m.y) - y0, m.y1 - y0), slice(max(0, m.x) - x0, m.x1 - x0)
+        outside = np.ones_like(same)
+        outside[:, cols] = False
+        band = np.zeros_like(same)
+        band[rows] = same[rows]
+        labels, _ = ndimage.label(band, structure=np.ones((3, 3)))
+        seeds = labels[rows, cols]
+        exits = np.isin(labels, seeds[seeds > 0]) & outside
+        labels, _ = ndimage.label(same & outside, structure=np.ones((3, 3)))
+        found = labels[exits]
+        drawn[y0:y1, x0:x1] |= np.isin(labels, found[found > 0])
     if not drawn.any():  # a mouth with no mark of its own (a line assumed in the skin): the box is its shape
         drawn[max(0, m.y) : m.y1, max(0, m.x) : m.x1] = True
     first, last, top, top_mid, base = _mouth_shape(drawn)
@@ -843,7 +855,7 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     unit = max(1, int(round(width / STROKE_PER_CELLS)))  # the teeth and the lower lip
     centre, half = (first + last) / 2, width / 2
     deepest = base + open_rows * unit  # the open mouth's bottom edge in the middle: open_rows strokes under the drawn mouth
-    mouth_rect = _union(m.grown(thick, thick, thick, thick), _box(first, min(top.values()), last + 1, deepest + 1))
+    mouth_rect = _union(m, _box(first, min(top.values()), last + 1, deepest + 1))  # the box and the opened mouth
     if mouth_rect.y < eyes_rect.y1:  # a small face: the mouth patch starts below the eye patch
         mouth_rect = _box(mouth_rect.x, eyes_rect.y1, mouth_rect.x1, max(mouth_rect.y1, eyes_rect.y1 + 1))
 
