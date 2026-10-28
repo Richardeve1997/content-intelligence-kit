@@ -664,6 +664,19 @@ def test_the_scripts_own_last_line_is_replaced_by_the_runners(kit_folder, capsys
     assert out.count(str(folder / "ui-story.mp4")) == 1
 
 
+def test_the_result_line_says_what_each_clip_used(kit_folder, capsys):
+    # Each script ends on what it used: the voice for mini me, the take or the sample card for UI story. The
+    # creator hears an ElevenLabs voice or a scratch voice, and the result line says which.
+    kit_folder.script("ui-story", NOTES)
+    kit_folder.script("mini-me")
+    kit_folder.built()
+    code, out, err = clips(capsys)
+    assert code == 0
+    folder = kit_folder.root / "work" / "onboarding-test"
+    assert f"UI story test clip: {folder / 'ui-story.mp4'} (7.0 s, a sample card)" in out
+    assert f"mini me test clip: {folder / 'mini-me.mp4'} (7.0 s, voice: a scratch voice)" in out
+
+
 def test_notes_from_both_styles_are_shown(kit_folder, capsys):
     kit_folder.script("ui-story", NOTES)
     kit_folder.script("mini-me", NOTES.replace("this take is HDR", "there is no copy of your voice yet"))

@@ -693,6 +693,17 @@ def _notes(done: subprocess.CompletedProcess) -> list[str]:
     return lines
 
 
+# A clip script's last line: "test clip <path> (7.2 s, voice: ElevenLabs)". The part in brackets says what it used.
+_RESULT = re.compile(r"^test clip .+ \(([^()]+)\)$")
+
+
+def _what_it_used(done: subprocess.CompletedProcess) -> str | None:
+    """What the clip script's last line says it made the clip with: its length and the voice or the take."""
+    lines = _lines(done.stdout)
+    found = _RESULT.match(lines[-1]) if lines else None
+    return found.group(1) if found else None
+
+
 def make_clips(
     folder: Path | None = None, styles: Iterable[str] | None = None, run=subprocess.run, voice: Path | str | None = None
 ) -> int:
@@ -738,13 +749,15 @@ def make_clips(
             failed += 1
             print(f"The {label} test clip did not finish. {_what_it_said(done)}")
             continue
-        try:
-            length = f" ({media.probe(out).duration:.1f} s)"
-        except KitError:
-            length = ""
+        used = _what_it_used(done)  # such as "6.2 s, voice: ElevenLabs", so the creator knows which voice they hear
+        if used is None:
+            try:
+                used = f"{media.probe(out).duration:.1f} s"
+            except KitError:
+                used = None
         for note in _notes(done):
             print(note)
-        print(f"{label} test clip: {out}{length}")
+        print(f"{label} test clip: {out}" + (f" ({used})" if used else ""))
     return 1 if failed else 0
 
 
