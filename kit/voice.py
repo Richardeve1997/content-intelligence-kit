@@ -14,8 +14,8 @@ The paths:
 * from_elevenlabs(text, slug, voice_id=None, voice=None): ElevenLabs reads the narration with the creator's
   key (ELEVENLABS_API_KEY, read through kit.config.env and never printed). With no voice id it uses one of
   the account's stock voices: the one named for this video, else the one the creator picked (saved by name
-  in me/voice/elevenlabs.json), else the first by name, with a sentence on how to choose another. No id is
-  ever written into the kit or the creator's files.
+  in me/voice/elevenlabs.json), else the first by name, with a sentence on how to choose another. A stock
+  voice is saved by its name, never its id.
 * stock_voices() and pick(name): the account's stock voices by name, with ElevenLabs's labels and a link to
   hear each, and saving the creator's pick. A copy of a voice, the creator's or anyone's, is never listed.
 * from_say(text, slug): a scratch voice from macOS `say`, for test clips and drafts only.
@@ -750,6 +750,8 @@ def _auto(slug: str, keep_pace: bool = False, voice: str | None = None) -> int:
     profile = config.load_profile()
     recording = take(slug)
     if recording is not None:
+        if voice:
+            print(f"The recording in work/{slug}/take/ is used for the voice-over, so --voice does not apply.")
         options = {"tempo": 1.0, "tighten": False} if keep_pace else {}
         _report(from_recording(recording, slug, **options))
         return 0

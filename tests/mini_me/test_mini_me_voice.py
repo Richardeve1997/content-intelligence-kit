@@ -153,6 +153,16 @@ def test_a_dropped_recording_wins_over_elevenlabs(kit_home, example_me, recordin
     assert (config.work_dir("example-reel") / "vo.m4a").is_file()
 
 
+def test_a_voice_named_for_a_video_with_a_recording_says_the_recording_is_used(kit_home, example_me, recording, heard,
+                                                                               monkeypatch, capsys):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("a recording needs no ElevenLabs call"))
+    assert voice.main(["auto", "example-reel", "--voice", "Ash"]) == 0
+    said = [line for line in capsys.readouterr().out.splitlines() if "--voice" in line]
+    assert len(said) == 1 and "work/example-reel/take/" in said[0], said
+
+
 def test_record_with_nothing_dropped_asks_for_the_recording(kit_home, capsys, monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)  # a key alone does not override the creator's choice
     assert voice.main(["auto", "example-reel"]) == voice.WAITING
