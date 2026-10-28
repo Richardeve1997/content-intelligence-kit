@@ -1,0 +1,69 @@
+{
+  "creators": [
+    {
+      "platform": "instagram",
+      "creator": "example_gardener_one",
+      "videos": [
+        {"id": "g1-1", "days_ago": 1, "title": "Why your basil dies in week three", "views": 61000, "likes": 5200, "comments": 410, "duration": 34,
+         "transcript": "Your basil is not dying because of the sun. You are watering it at night, and the roots sit in cold water until morning. Move the watering to breakfast and empty the saucer. That is the whole fix."},
+        {"id": "g1-2", "days_ago": 3, "title": "Three herbs that forgive a missed week", "views": 14000, "likes": 880, "comments": 40, "duration": 28,
+         "transcript": "If you forget to water, grow these three herbs. Mint, chives and thyme all survive a missed week. Here is how I set each pot up."},
+        {"id": "g1-3", "days_ago": 6, "title": "A windowsill that gets four hours of sun", "views": 16000, "likes": 1100, "comments": 55, "duration": 31},
+        {"id": "g1-4", "days_ago": 9, "title": "Is a self watering pot worth it", "views": 9800, "likes": 760, "comments": 31, "duration": 25,
+         "transcript": "I tested a self watering pot against a plain one for a month. The plain pot won on three of four plants. Here is what the pot hides from you."},
+        {"id": "g1-5", "days_ago": 12, "title": "Seed trays from kitchen waste", "views": 12500, "likes": 940, "comments": 47, "duration": 29},
+        {"id": "g1-6", "days_ago": 30, "title": "Last year's balcony in two minutes", "views": 18000, "likes": 1500, "comments": 90, "duration": 40}
+      ]
+    },
+    {
+      "platform": "instagram",
+      "creator": "example_gardener_two",
+      "videos": [
+        {"id": "g2-1", "days_ago": 2, "title": "The balcony tomato that never stops", "views": 27000, "likes": 2100, "comments": 130, "duration": 36,
+         "transcript": "Most people plant tomatoes too close together. Give each plant a pot this wide and you will pick fruit until the first frost."},
+        {"id": "g2-2", "days_ago": 5, "title": "How I water twelve pots in five minutes", "views": 19000, "likes": 1500, "comments": 70, "duration": 33,
+         "transcript": "I water twelve pots every morning and it takes five minutes. The trick is one watering can and one rule about the saucers."},
+        {"id": "g2-3", "days_ago": 8, "title": "Compost in a bucket", "views": 15000, "likes": 1300, "comments": 60, "duration": 27},
+        {"id": "g2-4", "days_ago": 11, "title": "Pruning mint without killing it", "views": 21000, "likes": 1800, "comments": 95, "duration": 30,
+         "transcript": "Cut mint just above a pair of leaves and it grows two new stems. Cut anywhere else and it sulks for a month."},
+        {"id": "g2-5", "days_ago": 40, "title": "The year the slugs won", "views": 90000, "likes": 5200, "comments": 400, "duration": 45,
+         "transcript": "Slugs ate eleven of my fourteen seedlings in one night. This is the cheap barrier that stopped them the next week."}
+      ]
+    },
+    {
+      "platform": "instagram",
+      "creator": "example_newcomer",
+      "videos": [
+        {"id": "n-1", "days_ago": 2, "title": "My first balcony box", "views": 41000, "likes": 3000, "comments": 250, "duration": 22,
+         "transcript": "I started a balcony box with a small budget and it fed me for a whole summer. Here are the receipts."},
+        {"id": "n-2", "days_ago": 6, "title": "A small start", "views": 4000, "likes": 300, "comments": 20, "duration": 20}
+      ]
+    },
+    {
+      "platform": "tiktok",
+      "creator": "example_tiktoker",
+      "videos": [
+        {"id": "t-1", "days_ago": 1, "title": "A full salad bowl on a windowsill", "views": 480000, "likes": 9000, "comments": 700, "duration": 38,
+         "transcript": "I grew a full salad bowl on a windowsill for less than a takeaway dinner. Here is exactly what I bought and what each thing cost."},
+        {"id": "t-2", "days_ago": 4, "title": "Soil that never dries out", "views": 30000, "likes": 1500, "comments": 90, "duration": 28,
+         "transcript": "Mix one part coconut fibre into any potting soil. Your pots stay damp for two days longer, and the roots love it."},
+        {"id": "t-3", "days_ago": 7, "title": "Regrowing spring onions", "views": 24000, "likes": 1200, "comments": 60, "duration": 24},
+        {"id": "t-4", "days_ago": 10, "title": "Why my lettuce bolts", "views": 33000, "likes": 1800, "comments": 110, "duration": 31,
+         "transcript": "Lettuce bolts when the nights stay warm. Move the pot to a shaded corner after four in the afternoon and it keeps going."},
+        {"id": "t-5", "days_ago": 25, "title": "Winter windowsill tour", "views": 21000, "likes": 1400, "comments": 80, "duration": 35}
+      ]
+    },
+    {
+      "platform": "youtube",
+      "creator": "example_channel",
+      "videos": [
+        {"id": "c-1", "days_ago": 2, "title": "Five herbs for a north window", "views": 9000, "likes": 700, "comments": 30, "duration": 41},
+        {"id": "c-2", "days_ago": 5, "title": "The pot size nobody tells you about", "views": 150000, "likes": 2600, "comments": 190, "duration": 47},
+        {"id": "c-3", "days_ago": 9, "title": "Watering by weight", "views": 7000, "likes": 650, "comments": 22, "duration": 39,
+         "transcript": "You do not need a moisture meter. Lift the pot, feel the weight, and water only when it feels light."},
+        {"id": "c-4", "days_ago": 13, "title": "A cheap grow light test", "views": 5200, "likes": 540, "comments": 18, "duration": 44},
+        {"id": "c-5", "days_ago": 50, "title": "Spring planting plan", "views": 8000, "likes": 800, "comments": 33, "duration": 50}
+      ]
+    }
+  ]
+}

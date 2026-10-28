@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research ideas",
+  "description": "research/runs/<date>/ideas.json: the ranked ideas for one research run. The video styles read this file, so its shape is fixed. An idea's n is its rank, and 'number 2' always means n 2 in the latest run.",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["n", "title", "angle", "why", "format", "evidence", "hooks"],
+    "properties": {
+      "n": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "the idea's rank as a whole number, starting at 1 with no gaps"
+      },
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 140,
+        "pattern": "\\S",
+        "description": "a short title for the video, in plain words"
+      },
+      "angle": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+        "pattern": "\\S",
+        "description": "one sentence on the way the video takes the topic"
+      },
+      "why": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 800,
+        "pattern": "\\S",
+        "description": "one or two sentences on why this idea and why now, with the numbers behind it"
+      },
+      "format": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60,
+        "pattern": "\\S",
+        "description": "the shape of the video, such as Tutorial, Listicle, Breakdown or Opinion"
+      },
+      "evidence": {
+        "type": "array",
+        "description": "a list of the watched videos or posts behind the idea, each with its address, its creator and its outlier score (0 for a source that has no score, such as an X post)",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "creator", "outlier"],
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^https?://\\S+$",
+              "description": "a web link starting with https:// or http://"
+            },
+            "creator": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S",
+              "description": "the account that posted it"
+            },
+            "outlier": {
+              "type": "number",
+              "minimum": 0,
+              "description": "the video's outlier score from items.json, or 0 when it has none"
+            }
+          }
+        }
+      },
+      "hooks": {
+        "type": "array",
+        "description": "a list of opening lines for the video, best first",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S"
+        }
+      }
+    }
+  }
+}
