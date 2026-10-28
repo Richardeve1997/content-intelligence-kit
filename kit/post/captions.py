@@ -435,9 +435,13 @@ def approve(slug: str) -> Path:
     return path
 
 
-def approval_problem(slug: str) -> str | None:
-    """Why the captions may not be sent yet, or None when the creator has approved exactly these words."""
-    captions = load(slug)
+def approval_problem(slug: str, captions: Mapping | None = None) -> str | None:
+    """Why the captions may not be sent yet, or None when the creator has approved exactly these words.
+
+    `captions` is the set that is about to be sent, for a caller that already holds it, so the approval is
+    checked against those very words and not against a second reading of the file. Without it the file is read.
+    """
+    captions = load(slug) if captions is None else captions
     try:
         record = store.read(_approval_path(slug))
     except PostError:

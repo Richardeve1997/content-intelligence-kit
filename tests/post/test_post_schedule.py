@@ -359,6 +359,24 @@ def test_a_caption_changed_after_the_yes_needs_a_new_yes(reel, stub, when):
     ]
 
 
+def test_the_approval_is_checked_against_the_words_that_will_actually_go_out(reel, stub, when, monkeypatch):
+    # if the file changed between schedule() reading it and checking the approval, a second reading would pass
+    captions.approve(reel.slug)
+    real, reads = captions.load, {"n": 0}
+
+    def edited_on_the_first_read(slug):
+        data = real(slug)
+        reads["n"] += 1
+        if reads["n"] == 1:
+            data["tiktok"]["body"] += " Sneaked in."
+        return data
+
+    monkeypatch.setattr(captions, "load", edited_on_the_first_read)
+    with pytest.raises(PostError, match="changed after"):
+        post.schedule(reel.slug, ["tiktok"], when, client=stub.client())
+    assert stub.calls() == []
+
+
 def test_no_file_for_posting_by_hand_is_written_for_captions_nobody_approved(reel, when):
     with pytest.raises(PostError, match="not been approved"):
         post.schedule(reel.slug, ["instagram"], when)  # no key either

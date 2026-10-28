@@ -127,6 +127,7 @@ def test_step_8_keeps_the_creator_in_charge_of_what_goes_out():
     assert "in this conversation" in step
     assert "never call the python function directly" in step.lower()
     assert "TikTok" in step and "preview and consent" in step  # their yes to that caption is TikTok's consent
+    assert "only because the creator approved that caption" in step
     assert "`schedule` refuses to send until the creator approves again" in re.search(r"^9\. (.+)$", text(), re.M).group(1)
 
 

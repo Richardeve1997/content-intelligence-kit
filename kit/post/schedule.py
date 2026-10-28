@@ -14,9 +14,10 @@
    cancelled alone.
 
 The records in work/<slug>/post/ make a rerun safe. <platform>.json is written before the create is sent
-and holds the request id and the post's title ("<name> <platform> <slug>"). If the answer to a create
-never arrives, the next run looks for a post with that title in Zernio and uses it, and only sends the
-create again, with the same request id, when there is none. media.json remembers the upload.
+and holds the request id (sent as both X-Request-Id and Idempotency-Key), the post's title
+("<name> <platform> <slug>"), the profile it belongs to and the time of the first attempt. If the answer
+to a create never arrives, the next run looks for a post with that title in Zernio and uses it, and only
+sends the create again, with the same request id, when there is none. media.json remembers the upload.
 
 `cancel` and `reschedule` look for such a post the same way, so they can reach a post whose create was
 interrupted. After 23 hours with no post found, `schedule` stops and says to check Zernio, because Zernio
@@ -60,6 +61,7 @@ TOLERANCE = timedelta(seconds=1)  # how far Zernio's time may differ from the on
 # Zernio treats a repeat of the same Idempotency-Key as the same post for 24 hours. A minute-sized margin
 # is not enough to trust that, so after 23 hours an attempt that left no post behind is not sent again.
 IDEMPOTENCY_WINDOW = timedelta(hours=23)
+WINDOW_HOURS = int(IDEMPOTENCY_WINDOW.total_seconds() // 3600)
 EARLIER_TEXT = "Zernio still holds the earlier text of this post. To use the new text, cancel it and schedule it again."
 WAITING = "Another run is posting this video. Waiting for it to finish."
 LOCK = ".post.lock"  # in the video's folder, so work/<slug>/post/ appears only once something is recorded in it
@@ -387,9 +389,9 @@ class _Run:
                 return Result(
                     platform, "failed",
                     reason=(
-                        f'An earlier attempt to schedule this was sent more than 23 hours ago, and Zernio has no post '
-                        f'titled "{receipt.get("title") or title}". Check Zernio before you try again, because sending '
-                        f"it again could make a second post. If it is not there, delete work/{self.slug}/post/"
+                        f"An earlier attempt to schedule this was sent more than {WINDOW_HOURS} hours ago, and Zernio has "
+                        f'no post titled "{receipt.get("title") or title}". Check Zernio before you try again, because '
+                        f"sending it again could make a second post. If it is not there, delete work/{self.slug}/post/"
                         f"{platform}.json and ask again."
                     ),
                 )
@@ -548,7 +550,7 @@ def schedule(
 
     # Nothing is sent, and no file for posting by hand is written, until the creator has read these exact
     # captions and said yes. Their yes to the TikTok caption is also the preview and consent TikTok asks for.
-    unapproved = captions.approval_problem(slug)
+    unapproved = captions.approval_problem(slug, data)
     if unapproved:
         raise PostError(unapproved)
 

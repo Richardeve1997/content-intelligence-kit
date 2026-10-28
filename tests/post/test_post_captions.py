@@ -576,6 +576,17 @@ def test_an_approval_holds_until_a_caption_changes(reel):
     assert "changed after" in captions.approval_problem("example-reel")
 
 
+def test_the_approval_can_be_checked_against_the_set_that_is_about_to_be_sent(reel):
+    captions.approve("example-reel")
+    on_disk = captions.load("example-reel")
+    assert captions.approval_problem("example-reel", on_disk) is None
+
+    about_to_go = json.loads(json.dumps(on_disk))
+    about_to_go["tiktok"]["body"] += " Sneaked in."
+    assert "changed after" in captions.approval_problem("example-reel", about_to_go)  # the file on disk still matches
+    assert captions.approval_problem("example-reel") is None
+
+
 def test_approving_new_words_replaces_the_old_approval(reel):
     captions.approve("example-reel")
     data = json.loads((reel.folder / "captions.json").read_text(encoding="utf-8"))
