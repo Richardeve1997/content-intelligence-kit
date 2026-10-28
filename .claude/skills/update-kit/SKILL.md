@@ -26,7 +26,7 @@ Replaces the kit's files (skills, code, scripts, docs) with the latest release. 
    uv run python bin/update_kit.py --apply
    ```
 
-7. Report what the output says: the counts, the files that were backed up and where, the kept edits, and the dependency line. When it says the dependencies changed, run `uv sync` and then `npm install`. Run `bash bin/check_adapters.sh` and report any problem it lists.
+7. Report what the output says: the counts, the files that were backed up and where, the kept edits, and the dependency line. When it says the dependencies changed, run `uv sync --group video --group research --inexact` and then `npm install`, and add `--group character` to the sync if they built a mini me character. Keep `--inexact`: without it uv removes the groups the command does not name. Run `bash bin/check_adapters.sh` and report any problem it lists.
 
 ## Notes
 

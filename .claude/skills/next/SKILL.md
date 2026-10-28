@@ -17,8 +17,11 @@ import json
 import os
 from pathlib import Path
 
+PLATFORMS = ("instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter")
+SCRATCH = ("onboarding-test", "mini-me-test-clip")  # setup's test take and clips, and the mini me clip's scratch folder: not videos
+
 work = Path("work")
-folders = [p for p in work.iterdir() if p.is_dir() and not p.name.startswith(".")] if work.is_dir() else []
+folders = [p for p in work.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in SCRATCH] if work.is_dir() else []
 folders.sort(key=lambda p: max(c.lstat().st_mtime for c in [p, *p.iterdir()]), reverse=True)
 slug = os.environ.get("SLUG") or (folders[0].name if folders else None)
 folder = work / slug if slug else None
@@ -30,14 +33,43 @@ def has(name):
     return folder is not None and (folder / name).exists()
 
 
+def status_of(path):
+    """What a live receipt says: scheduled (Zernio gave the post an id), unconfirmed or unreadable."""
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "unreadable"
+    if not isinstance(record, dict):
+        return "unreadable"
+    return "scheduled" if record.get("post_id") else "unconfirmed"
+
+
+def receipts():
+    """{platform: status} for the records in post/. A cancelled or lost post is put away as
+    <platform>.cancelled.json or <platform>.stale.json, so only <platform>.json says something was sent."""
+    found = {}
+    post = folder / "post" if folder is not None else None
+    for platform in PLATFORMS if post is not None and post.is_dir() else ():
+        if (post / f"{platform}.json").is_file():
+            found[platform] = status_of(post / f"{platform}.json")
+        elif (post / f"{platform}.cancelled.json").is_file():
+            found[platform] = "cancelled"
+        elif (post / f"{platform}.stale.json").is_file():
+            found[platform] = "gone"
+    return found
+
+
+sent = receipts()
 if folder is None:
     state = "no_video"
 elif not folder.is_dir():
     state = "no_such_video"
 elif not has("idea.json"):
     state = "no_idea"
-elif has("final.mp4") and has("post"):
+elif has("final.mp4") and "scheduled" in sent.values():
     state = "posted"
+elif has("final.mp4") and ("unconfirmed" in sent.values() or "unreadable" in sent.values()):
+    state = "post_unsure"
 elif has("final.mp4") and has("captions.json"):
     state = "captions_ready"
 elif has("final.mp4"):
@@ -55,6 +87,16 @@ print(f"video: {slug or 'none'}")
 print(f"state: {state}")
 markers = ["idea.json", "plan.md", "script.md", "take", "final.mp4", "captions.json", "post"]
 print("found: " + (", ".join(m for m in markers if has(m)) or "nothing"))
+if sent:
+    print("receipts: " + ", ".join(f"{platform} {status}" for platform, status in sent.items()))
+if has("post/manual.md"):
+    print("manual: post/manual.md")
+if state == "posted":
+    for platform, status in sent.items():
+        if status == "unconfirmed":
+            print(f"warning: post/{platform}.json shows an attempt Zernio never confirmed")
+        elif status == "unreadable":
+            print(f"warning: post/{platform}.json cannot be read")
 for f in take_files:
     if f.is_symlink() and not f.exists():
         print(f"warning: take/{f.name} points to a file that is not there any more")
@@ -85,10 +127,13 @@ if runs:
 | `take_ready` | `take/` holds a take and there is no `final.mp4`. | Edit it (`ui-story`). |
 | `mini_me_in_progress` | `script.md` is written and there is no `final.mp4`. | The narration is ready. The voice-over and the build come next (`mini-me`). |
 | `final_ready` | `final.mp4` exists and there are no captions. | The video is finished. Captions come next. The `post` skill writes one per platform for approval. |
-| `captions_ready` | `captions.json` exists and nothing is scheduled. | Show the captions for approval, then ask when to post, as in "post it everywhere tomorrow at 6pm" (`post`). |
-| `posted` | `post/` exists. | This video is posted or scheduled. Start another: "run my research", or pick another number from the latest run. |
+| `captions_ready` | `captions.json` exists and no platform has a live receipt in `post/`. A `post/` folder that holds only `media.json`, `manual.md`, or receipts for posts that were cancelled or lost counts as nothing scheduled. | Show the captions for approval, then ask when to post, as in "post it everywhere tomorrow at 6pm" (`post`). If `receipts:` lists a platform as cancelled, say which one and ask whether to schedule it again. If the script printed `manual:`, the captions are already written for posting by hand in that file, so ask whether they have posted it. |
+| `posted` | At least one platform has a receipt with a post id in `post/`. | This video is scheduled or posted, on the platforms `receipts:` lists as scheduled. A cancelled platform is not scheduled any more. A `warning:` about a receipt means that platform is not confirmed, so ask the `post` skill to list what is scheduled. Otherwise start another: "run my research", or pick another number from the latest run. |
+| `post_unsure` | `post/` holds a receipt for an attempt that was never confirmed, or one that cannot be read, and no confirmed post. | An earlier try to schedule it was cut off, so Zernio may or may not hold the post. Ask the `post` skill to list what is scheduled: it looks in Zernio before it sends anything, so it is safe to run again. |
 
-A `warning:` line means a file in `take/` is a link to a raw take that has moved or been deleted. Tell the creator which one, and ask where the file is now. Never copy, move or delete a raw take.
+A `warning:` line about `take/` means a file there is a link to a raw take that has moved or been deleted. Tell the creator which one, and ask where the file is now. Never copy, move or delete a raw take.
+
+A `receipts:` line lists each platform that has a record in `post/`: `scheduled` (Zernio gave the post an id), `unconfirmed` (a send was started and Zernio never confirmed it), `unreadable` (the record is damaged), `cancelled` (the post was taken down) or `gone` (Zernio no longer had it). It says what the kit did, not what Zernio shows now. For that, ask the `post` skill to list the video.
 
 ## Feedback
 

@@ -13,11 +13,16 @@ The clip is one headline page with the character waving and talking: the same in
 a full Reel, in a scratch video folder (work/mini-me-test-clip/). Afterwards everything the script made there is
 deleted unless --keep, and nothing else: a recording kept in that folder stays where it is.
 It should run 5 to 10 seconds; a line much longer or shorter is said anyway, with a note.
+
+Whatever this script prints before its last line is a note for the creator. The build steps print a log of their
+own (the pages, the sound check, the speech gate), which is kept off the screen and shown only when the clip fails.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import shutil
 import sys
@@ -37,7 +42,13 @@ def default_line(profile) -> str:
 
 def make_voice(line: str, recording: Path | None, profile) -> tuple[voice.VO, str]:
     if recording is not None:
-        return voice.from_recording(recording, SLUG), "your recording"
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):  # its own note tells how to keep the pace of a whole Reel's voice-over
+            made = voice.from_recording(recording, SLUG)
+        if said.getvalue().strip():
+            print(f"note: your recording was sped up to {voice.RECORDING_TEMPO:g}x and pauses over {voice.PAUSE_LONGEST:g} s "
+                  f"were cut to {voice.PAUSE_KEEP:g} s, the pace this style runs at.")
+        return made, "your recording"
     if profile.voice_over in ("elevenlabs", "clone") and config.env(voice.KEY_NAME):
         chosen = voice.chosen_voice(profile)
         if profile.voice_over == "clone" and chosen is None:
@@ -85,11 +96,16 @@ def clip(out: Path, *, line: str | None = None, recording: Path | None = None, k
         beats = {"duration": round(seconds, 3),
                  "pages": [{"t": 0.0, "text": HEADLINE, "pose": "wave", "field": "dark", "prop": "none"}]}
         (folder / "beats.json").write_text(json.dumps(beats, indent=1) + "\n", encoding="utf-8")
-        install.install(SLUG)
-        render.render(SLUG)
-        if ship.main([SLUG, "--music", "none"]) != 0:
-            raise KitError("The test clip did not pass its speech check. Listen to work/mini-me-test-clip/build/"
-                           "final.next.mp4, then try again with --keep to look closer.")
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            install.install(SLUG)
+            render.render(SLUG)
+            shipped = ship.main([SLUG, "--music", "none"])
+        if shipped != 0:
+            said = "\n".join(log.getvalue().strip().splitlines()[-6:])
+            raise KitError("The test clip did not pass its checks. What the last step said:\n" + said + "\n"
+                           "Run it again with --keep to leave the scratch files in work/mini-me-test-clip/, "
+                           "where build/final.next.mp4 is the render to listen to.")
         out = Path(out)
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(folder / "final.mp4", out)

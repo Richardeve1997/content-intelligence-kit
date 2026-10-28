@@ -38,6 +38,7 @@ Everything for one video lives in `work/<video>/`:
    - The last point is the close. Start from the closing line in the brief, which comes from the creator's call to action (`profile.cta`): "Comment KEYWORD and I'll send you ..." for a comment CTA, a follow otherwise. Say it the creator's way.
 3. Write the film guide: the standard notes below, plus anything this video needs (a prop, a screen to show, a second location).
    - Film vertical, in 4K if the phone can, at 30 or 60 fps. Lock the phone on a stand.
+   - Turn HDR video off first. On an iPhone: Settings, Camera, Record Video, HDR Video off (if Camera is not in the main list, look under Apps). An HDR take can come out washed out, and the HDR row of the machine check says whether this Mac can fix that.
    - Face a window or a soft light. Avoid a bright window behind you.
    - Frame from the chest up, with a hand's width of room above your head. Your head breaks out of the picture-in-picture, and the cards sit above it.
    - Say each point, then pause for a breath. The pauses are where the cuts go.
@@ -246,6 +247,7 @@ Everything is in `.claude/skills/ui-story/kit/`. Run the scripts with `uv run py
 | `check_static.py` | no split or canvas zone holds still over 3 s |
 | `caption_blink_check.py` | no one-frame hole in the captions |
 | `ig_safe_check.py` | frames as a tall phone crops them |
+| `test_clip.py` | a 5 to 10 second test clip in the creator's brand, made once during setup: a branded card with karaoke captions over their test take, or over a sample card with a scratch voice |
 
 Shared helpers in `kit/`: `kit.transcribe` (word timings), `kit.matte` (the person matte: Robust Video Matting through torch.hub at run time, GPL-3.0 and never stored in the repo; MediaPipe as the fallback), `kit.finish` (speed, bed, loudness), `kit.qa_captions` (the speech gate), `kit.music` (the creator's beds) and `kit.media` (the encoder, heavy-job slots, free disk, `probe`).
 

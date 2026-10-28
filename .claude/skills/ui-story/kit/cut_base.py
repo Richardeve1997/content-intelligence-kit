@@ -10,7 +10,9 @@ of the frame. A top anchor pushes the head down, which keeps the room above it t
 Every later segment is the whole filmed frame at 1.00.
 
 A take that is not 9:16 is cropped to 9:16 first (from the centre, or from the top for a frame taller
-than 9:16). A phone's HDR take (HLG or PQ) is tone-mapped to standard range when ffmpeg can.
+than 9:16). A phone's HDR take (HLG or PQ) is tone-mapped to standard range when ffmpeg can. That needs the
+zscale filter, which Homebrew's plain ffmpeg lacks. Without it the cut still goes ahead, with the HDR frames
+left as they are and one sentence saying that their colours may look washed out and how to fix that.
 
 EDL JSON: {"keep": [[s, e], ...]}, seconds on the raw take, in playback order. A keep entry may also be
 {"raw": "<other take>", "s": s, "e": e} to take that segment from another file.
@@ -41,6 +43,13 @@ RAMP_Z = "1+0.03*(1-pow(1-min(on/180\\,1)\\,3))"
 FACE_ROW = 0.385
 PUNCH_EASE = 0.35
 FULL = "scale=1080:1920:flags=lanczos"
+HDR_TRANSFERS = ("arib-std-b67", "smpte2084")  # HLG (iPhone) and PQ (HDR10)
+# What the creator hears when an HDR take meets an ffmpeg without zscale. The cut goes on without the colour fix.
+NO_ZSCALE = (
+    "This take is HDR and this ffmpeg cannot convert HDR colours (it has no zscale filter), so they may look "
+    "washed out; film again with HDR video turned off on the phone, or install the full ffmpeg (python3 "
+    "bin/doctor.py shows the command), and until then the cut goes on without the colour fix."
+)
 
 
 def ramp():
@@ -73,21 +82,28 @@ def _probe(path):
     return info.width, info.height, out
 
 
+def _filter_listing():
+    """ffmpeg's own list of its filters, or nothing when ffmpeg cannot be asked."""
+    try:
+        return subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _has_filter(name):
-    listing = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
-    return any(line.split()[1:2] == [name] for line in listing.splitlines() if line.strip())
+    return any(line.split()[1:2] == [name] for line in _filter_listing().splitlines() if line.strip())
 
 
 def prefix_for(raw):
     """Filters that make a take 9:16 and standard range before the zooms."""
     width, height, transfer = _probe(raw)
     parts = []
-    if any(t in transfer for t in ("arib-std-b67", "smpte2084")):
+    if any(t in transfer for t in HDR_TRANSFERS):
         if _has_filter("zscale"):
             parts.append("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,"
                          "zscale=t=bt709:m=bt709:r=tv,format=yuv420p")
         else:
-            print("note: this take is HDR and this ffmpeg has no zscale filter, so its colours may look washed out")
+            print(NO_ZSCALE)  # no tone map in the chain: a filter ffmpeg does not have would stop the whole cut
     ratio = width / height if height else 9 / 16
     if ratio > 9 / 16 + 0.01:
         parts.append("crop=trunc(ih*9/16/2)*2:ih")
@@ -96,13 +112,13 @@ def prefix_for(raw):
     return ",".join(parts) + ("," if parts else "")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description="A clean 1080x1920 60 fps base from the keep segments of a take.")
     ap.add_argument("raw")
     ap.add_argument("edl")
     ap.add_argument("out")
     ap.add_argument("--no-hwaccel", action="store_true", help="decode on the CPU (Macs decode in hardware by default)")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     edl = json.loads(Path(a.edl).read_text())
     keep = []

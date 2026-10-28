@@ -45,6 +45,7 @@ from kit import media
 from kit.config import KitError
 
 __all__ = [
+    "NO_SPEECH_MODEL",
     "Word",
     "audio_samples",
     "chunk_text",
@@ -59,6 +60,8 @@ __all__ = [
 SR = 16000
 MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
 FASTER_MODEL = "small"
+# --inexact keeps the other groups: without it uv removes every group the command does not name.
+NO_SPEECH_MODEL = "No speech model is installed. Install the video tools with: uv sync --group video --inexact"
 _FRAME = 0.02  # seconds per energy frame
 _FLOOR_DB = -45.0
 _MIN_GAP = 0.28
@@ -182,7 +185,7 @@ def _asr(samples, *, word_times: bool, language: str | None = None) -> dict:
         try:
             model = _faster_model(os.environ.get("KIT_ASR_MODEL") or FASTER_MODEL)
         except ImportError:
-            raise KitError("No speech model is installed. Install the video tools with: uv sync --group video") from None
+            raise KitError(NO_SPEECH_MODEL) from None
         segments, info = model.transcribe(samples, language=language, word_timestamps=word_times, vad_filter=False,
                                           condition_on_previous_text=False)
         segments = list(segments)

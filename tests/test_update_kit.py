@@ -589,11 +589,13 @@ def test_the_report_lists_what_changed(update_kit, installed, releases, capsys):
 
 def test_changed_dependencies_are_pointed_out(update_kit, installed, releases, tmp_path, capsys):
     code, out, err = check(update_kit, installed, releases.v2, capsys)
-    assert "uv sync, then npm install" in out
+    assert "run: uv sync --group video --group research --inexact, then npm install" in out
+    assert "If you built a mini me character, add --group character to that command." in out
     assert out.index("uv sync") < out.index("Nothing was changed")
 
     code, out, err = apply(update_kit, installed, releases.v2, capsys)
-    assert "Run: uv sync, then npm install." in out
+    assert "Run: uv sync --group video --group research --inexact, then npm install." in out
+    assert "add --group character to that command" in out
     same_dependencies = make_release(
         tmp_path / "v3.tar.gz", "v3", {**V2, "kit/core.py": "VALUE = 3\n"}, links=LINKS, executable=EXECUTABLE
     )

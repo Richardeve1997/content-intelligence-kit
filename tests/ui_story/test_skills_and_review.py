@@ -54,6 +54,14 @@ def test_ui_story_carries_the_house_rules():
     assert "never" in body and "scroll" in body, "no scrolled text recordings"
 
 
+def test_the_plans_film_guide_tells_the_creator_to_turn_hdr_video_off():
+    body = text(SKILLS["ui-story"])
+    plan = body.split("## The plan")[1].split("## The look")[0]
+    guide = plan[plan.index("Write the film guide") :]
+    assert "Turn HDR video off" in guide and "Settings, Camera, Record Video, HDR Video off" in guide
+    assert "washed out" in guide
+
+
 def test_ui_story_names_every_kit_script_and_every_named_script_exists():
     body = text(SKILLS["ui-story"])
     shipped = {p.name for p in KIT.iterdir() if p.is_file()}

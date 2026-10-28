@@ -65,6 +65,11 @@ MANIFEST = ".kit-manifest.json"
 CREATOR_PATHS = ("me", "work", "research", ".env", ".git")
 BACKUP_FOLDER = "kit-backups"
 DEPENDENCY_FILES = ("pyproject.toml", "uv.lock", "package.json", "package-lock.json")
+# What the creator runs after a release that changes the dependencies. --inexact keeps the groups installed earlier,
+# which a sync without it would remove. The video and research groups are in every setup. The character group is
+# there only once a mini me character has been built, so that one is the creator's to add.
+SYNC = "uv sync --group video --group research --inexact"
+SYNC_NOTE = "If you built a mini me character, add --group character to that command."
 FOLDER_PREFIX = "content-intelligence-kit-"  # GitHub names the top folder <repository>-<tag>
 
 TIMEOUT = 30  # seconds to wait on GitHub
@@ -712,7 +717,8 @@ def report_check(plan: Plan, release: Release, shown: str, notes: list[str]) -> 
     lines += ["", "Your me, work and research folders and your .env are never touched."]
     if plan.changes_dependencies():
         lines.append(
-            "This release changes the kit's dependencies, so after you apply it, run: uv sync, then npm install."
+            "This release changes the kit's dependencies, so after you apply it, "
+            f"run: {SYNC}, then npm install. {SYNC_NOTE}"
         )
     lines.append("Nothing was changed. Run this again with --apply to update.")
     print("\n".join(lines))
@@ -741,7 +747,7 @@ def apply_update(root: Path, release: Release, plan: Plan, shown: str, notes: li
     lines += _lists(plan, done=True)
     lines += ["", "Your me, work and research folders and your .env were not touched."]
     if plan.changes_dependencies():
-        lines.append("The kit's dependencies changed. Run: uv sync, then npm install.")
+        lines.append(f"The kit's dependencies changed. Run: {SYNC}, then npm install. {SYNC_NOTE}")
     print("\n".join(lines))
 
 
