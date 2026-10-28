@@ -1835,6 +1835,24 @@ def guide_steps(guide: str) -> dict[int, str]:
     return {int(parts[i]): parts[i + 1] for i in range(1, len(parts), 2)}
 
 
+def test_the_long_steps_of_the_guide_are_short_lists():
+    steps = guide_steps(read(ROOT / "ONBOARDING.md"))
+    for number in (3, 4, 9):
+        lines = steps[number].strip().splitlines()
+        assert len(lines[0].split()) <= 20, f"step {number} opens with one short line"
+        bullets = [line for line in lines[1:] if line.startswith("   - ")]
+        assert len(bullets) >= 3 and len(bullets) == len(lines) - 1, f"step {number} is a short list, as step 8 is"
+        assert all(len(line.split()) <= 60 for line in bullets), f"step {number} has a bullet that runs long"
+
+
+def test_the_guide_words_the_who_and_look_steps_plainly():
+    steps = guide_steps(read(ROOT / "ONBOARDING.md"))
+    assert "The kit asks for the keyword only on those platforms" not in steps[3]
+    assert "The call to action asks viewers to comment the keyword only on those platforms" in steps[3]
+    assert "one for body text and one mono font" in steps[4]
+    assert "And your logo, if you have one." not in steps[4]
+
+
 def test_the_guide_and_the_skill_say_the_elevenlabs_free_plan_has_no_commercial_licence():
     """ElevenLabs' own help centre: the free plan does not include a commercial licence."""
     guide = read(ROOT / "ONBOARDING.md")
@@ -1843,6 +1861,17 @@ def test_the_guide_and_the_skill_say_the_elevenlabs_free_plan_has_no_commercial_
     skill = next(line for line in read(SKILLS / "onboard" / "SKILL.md").splitlines() if "is a stock ElevenLabs voice" in line)
     for text_ in (offer, key_row, skill):
         assert "free plan includes no commercial licence" in text_ and "need a paid plan" in text_, text_
+
+
+def test_the_guide_and_the_skill_name_every_place_setup_writes():
+    """Setup links the test take and makes the clips in work/onboarding-test/, and the voice step and the mini me
+    clip work in scratch folders of their own, so me/ and .env are not the whole story."""
+    guide = read(ROOT / "ONBOARDING.md").split("## Where your answers go", 1)[1].split("\n## ", 1)[0]
+    skill = next(line for line in read(SKILLS / "onboard" / "SKILL.md").splitlines() if line.startswith("Setup is ten"))
+    for text_ in (guide, skill):
+        for place in ("`me/`", "`.env`", "onboarding-test/", "voice-samples/", "mini-me-test-clip/"):
+            assert place in text_, place
+        assert "test take" in text_ and "test clips" in text_ and "scratch" in text_
 
 
 def test_onboarding_guide_covers_every_step_in_plain_words():

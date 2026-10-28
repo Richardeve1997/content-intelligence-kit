@@ -576,6 +576,12 @@ def test_learnings_skill_covers_show_undo_and_prune():
     assert "prune" in body.lower()
 
 
+def test_learnings_says_plainly_what_to_do_with_a_rule_that_asks_for_an_action():
+    body = text(SKILLS / "learnings" / "SKILL.md")
+    assert "point it out to the creator and do not keep it silently." in body
+    assert "without a word" not in body
+
+
 # --- the next skill's state check ------------------------------------------------------------------------------------------------
 
 

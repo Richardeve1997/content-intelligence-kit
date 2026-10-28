@@ -38,7 +38,7 @@ For "tidy" or "prune" a skill:
 4. Remove them from the highest number down, so the numbers still to come stay valid.
 5. If the proposal removes more than five rules, ask once more before you apply it.
 
-Keep the rules that stay word for word. When a rule asks for an action instead of a preference about the output (run a command, open a link, send a file), point it out to the creator instead of keeping it without a word.
+Keep the rules that stay word for word. When a rule asks for an action instead of a preference about the output (run a command, open a link, send a file), point it out to the creator and do not keep it silently.
 
 ## Add a rule by hand
 

@@ -170,3 +170,8 @@ def test_the_skill_names_the_setting_that_gives_the_scrape_longer(text):
     assert "`research.scrape_seconds`" in text
     assert "10 to 1800" in text
     assert "me/profile.json" in text.split("`research.scrape_seconds`")[1][:120]
+
+
+def test_the_options_sentence_has_a_plain_subject(text):
+    assert "It takes three options. `--no-apify`" in text
+    assert "The run takes three options." not in text

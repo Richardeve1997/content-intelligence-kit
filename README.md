@@ -65,7 +65,13 @@ Setup takes care of the rest and asks before each install: Homebrew, ffmpeg, uv 
 
 Before each release:
 
-- A smoke job, `.github/workflows/smoke.yml`, installs the kit on a fresh GitHub macOS runner with an Apple silicon chip and renders a three second card. On the runner it installs ffmpeg with Homebrew, Python 3.11 and the Python tools (yt-dlp among them) with uv, HyperFrames with `npm ci`, Chromium and GSAP, then runs the machine check and the tests.
+- A smoke job, `.github/workflows/smoke.yml`, installs the kit on a fresh GitHub macOS runner with an Apple silicon chip and renders a three second card. On the runner it installs:
+  - ffmpeg, with Homebrew
+  - Python 3.11 and the Python tools, yt-dlp among them, with uv
+  - HyperFrames, with `npm ci`
+  - Chromium and GSAP
+
+  Then it runs the machine check and the tests.
 - The whole kit runs end to end as a made-up creator, in Claude Code and in Codex: onboarding, research, both video styles and a posting dry run.
 
 No run on a clean Mac has tested three standard Homebrew steps that setup relies on: installing Homebrew itself, `brew install uv` and `brew install node`.

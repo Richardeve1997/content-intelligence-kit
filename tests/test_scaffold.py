@@ -279,6 +279,13 @@ def test_readme_says_how_to_get_each_agent_before_the_clone():
     assert '"set me up"' in before_clone and "not into Terminal" in before_clone
 
 
+def test_readme_lists_what_the_smoke_job_installs():
+    section = _readme_section("### How the install is tested")
+    for item in ("  - ffmpeg, with Homebrew\n", "  - HyperFrames, with `npm ci`\n", "  - Chromium and GSAP\n"):
+        assert item in section, item
+    assert "with Homebrew, Python 3.11" not in section, "the installs are a list, one tool and its installer per line"
+
+
 def test_readme_names_the_install_steps_no_clean_mac_has_tested():
     section = _readme_section("### How the install is tested")
     untested = next(line for line in section.splitlines() if "clean Mac has tested" in line)
@@ -289,6 +296,13 @@ def test_readme_names_the_install_steps_no_clean_mac_has_tested():
 def test_readme_costs_say_the_elevenlabs_free_plan_has_no_commercial_licence():
     row = next(line for line in _readme_section("## Costs").splitlines() if line.startswith("| ElevenLabs"))
     assert "free plan includes no commercial licence" in row and "need a paid plan" in row, row
+
+
+def test_third_party_notes_name_both_example_files_and_say_such_as():
+    text = (ROOT / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    intro = text.split("\n## ", 1)[0]
+    assert "a short GIF and the whole Reel it is taken from" in intro
+    assert "such as when one of its downloads fails" in text and ", as when" not in text
 
 
 def test_readme_codex_section_explains_hooks_and_the_sandbox_in_plain_words():

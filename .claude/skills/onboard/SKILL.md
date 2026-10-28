@@ -5,7 +5,7 @@ description: Set up the kit for a creator one topic at a time, saving as it goes
 
 # onboard
 
-Setup is ten short steps. Ask about one topic at a time, show the creator what you wrote when a step ends, and save before you move on. They can close the window at any point and say "set me up" again later, and setup picks up where they left off. Plan for 30 to 45 minutes, longer if the machine check has a lot to download. Everything you write goes into `me/` or `.env`, and nowhere else.
+Setup is ten short steps. Ask about one topic at a time, show the creator what you wrote when a step ends, and save before you move on. They can close the window at any point and say "set me up" again later, and setup picks up where they left off. Plan for 30 to 45 minutes, longer if the machine check has a lot to download. Apart from the tools the machine check installs, everything you write goes into `me/`, `.env` or `work/`, and nowhere else. In `work/`, `onboarding-test/` holds the link to the test take, the test clips and their scratch files, and the voice step and the mini me clip keep their scratch files in `voice-samples/` and `mini-me-test-clip/`.
 
 How to talk during setup:
 
