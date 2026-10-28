@@ -27,7 +27,8 @@ locate() reads the face from the picture rather than from fixed rectangles, so i
    onto other drawings, so the face stays the same in every pose.
 
 make() draws the face board: the head with a coordinate grid, the measured boxes, a line where the head ends,
-and the face states. When a box or the line is in the wrong place, or no face is found, the creator marks the
+the face states, and the same states at the scale the close of a mini me video shows them. When a box or the
+line is in the wrong place, or no face is found, the creator marks the
 eyes, the mouth and the neck row by hand; the marks are kept in the character record and every later step
 uses them.
 """
@@ -55,6 +56,10 @@ EYE_AREA_SHARE = 0.15  # an eye covers at most this share of the face; a bigger 
 AREA_SHARE = 0.25  # below the eyes, a colour covering more than this share fills an area (skin, a beard)
 TRIES = 10  # how many colours down the middle of the head are tried as the skin, longest run first
 LIP_LIGHTER = 12.0  # how much lighter (Lab L) than the mouth's line a colour must be to count as its lip
+STROKE_PER_CELLS = 16  # the teeth and the lower lip are a cell thick on a mouth up to 23 cells wide, two on a wider one
+CLOSE_SCALE = 11  # the close of a mini me video shows the head at this scale, so the board shows the states at it
+STATE_VIEWS = (("Closed", "mouth_closed", "eyes_open"), ("Half open", "mouth_mid", "eyes_open"),
+               ("Open", "mouth_open", "eyes_open"), ("Blink", "mouth_closed", "eyes_closed"))  # fmt: skip
 BOARD = "faces/board.png"
 FIX = (
     "Draw the sheet again with the whole face in view (a smaller hat or none, no hair over the eyes), or mark "
@@ -63,7 +68,8 @@ FIX = (
 )
 
 __all__ = [
-    "Box", "FaceBox", "FaceNotFound", "FaceStates", "FIX", "locate", "face_states", "skin_colours", "skin_ramp",
+    "Box", "FaceBox", "FaceNotFound", "FaceStates", "FIX", "CLOSE_SCALE", "locate", "face_states", "close_up_cells",
+    "skin_colours", "skin_ramp",
     "parse_box", "front_canvas", "measure", "apply_marks", "board_notes", "make",
 ]  # fmt: skip
 
@@ -737,14 +743,40 @@ def _colour_set(rgba: np.ndarray) -> list[tuple[int, int, int]]:
     return [tuple(int(v) for v in c) for c in present]
 
 
+def _mouth_shape(drawn: np.ndarray) -> tuple[int, int, dict[int, int], int, int]:
+    """The drawn mouth's shape: (its first column, its last column, the top row of every column between them, the top
+    row in its middle, the bottom row in its middle). A column with nothing drawn in it, between two that have,
+    takes a top row between its neighbours'."""
+    ys, xs = np.nonzero(drawn)
+    first, last = int(xs.min()), int(xs.max())
+    top: dict[int, int] = {}
+    bottom: dict[int, int] = {}
+    for x in range(first, last + 1):
+        rows = ys[xs == x]
+        if len(rows):
+            top[x], bottom[x] = int(rows.min()), int(rows.max())
+    known = sorted(top)
+    for x in range(first, last + 1):
+        if x not in top:
+            left, right = max(k for k in known if k < x), min(k for k in known if k > x)
+            top[x] = int(round((top[left] * (right - x) + top[right] * (x - left)) / (right - left)))
+    centre = (first + last) / 2
+    middle = [x for x in known if abs(x - centre) <= max(1.0, (last - first + 1) / 4)] or known
+    return first, last, top, int(np.median([top[x] for x in middle])), int(np.median([bottom[x] for x in middle]))
+
+
 def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> FaceStates:
     """Mouth closed, half open and open, eyes open and closed, as patches cut from `sprite` and changed.
 
-    The closed mouth and the open eyes are the sprite as drawn. For the open mouths the drawn mouth is painted
-    over with whatever surrounds it (skin, or a beard) and an opening is drawn on its middle: the inside in the
-    sprite's darkest colour, teeth in its lightest, lips and tongue in the mouth's own colour. For the blink
-    the eyes go back to skin under a lash line. Strokes are as thick as the mouth and the eyes are drawn, and
-    every colour is one the sprite has."""
+    The closed mouth and the open eyes are the sprite as drawn. The open mouths are drawn from the drawn mouth's
+    own shape: it is painted over with whatever surrounds it (skin, or a beard), then its top edge is put back as
+    drawn, tip to tip, and under it the inside is filled in the sprite's darkest colour, deepest in the middle
+    (`open_rows` strokes below the drawn mouth when fully open, about half that half open) and closing to the
+    corners, with the lower lip in the mouth's own colour along the bottom edge. The fully open mouth shows a row
+    of teeth in the lightest colour under the top edge. So the mouth keeps its width and its corners as it
+    opens. For the blink the eyes go back to skin under a lash line. The lash line is as thick as the eyes are
+    drawn, the teeth and the lip a cell thick on a mouth up to 23 cells wide, and every colour is one the sprite
+    has."""
     rgba = _as_rgba(sprite)
     colours = _colour_set(rgba)
     labs = art.lab_of(np.array(colours))
@@ -783,35 +815,35 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     surround = max(set(around), key=around.count)
 
     open_rows = int(np.clip(open_rows, 1, 4))
-    unit = max(1, int(round(m.h / 2)))  # a mouth drawn two cells thick gets strokes two cells thick
+    thick = max(1, int(round(m.h / 2)))  # a box two cells tall holds a line drawn one thick; strokes are followed this far round it
     lash_unit = max(1, int(round(min(face.left_eye.h, face.right_eye.h) / 7)))
-    centre = (m.x + m.x1) // 2
-    top = m.y + max(0, (m.h - 2 * unit) // 2)  # the opening sits on the middle of the drawn mouth
-    half_w = max(unit, int(round(m.w * 0.36)))
     eyes_rect = face.eyes.grown(lash_unit, lash_unit, lash_unit, lash_unit)
-    mouth_rect = _union(m.grown(unit, unit, unit, unit),
-                        _box(centre - half_w - unit, top - unit, centre + half_w + unit, top + (open_rows + 2) * unit))  # fmt: skip
-    # The drawn mouth can reach past its box, as the raised tips of a smile do when the box is marked tighter. Its
-    # strokes, in the colours drawn inside the box, are followed a little way out (inside the face, below the eyes,
-    # above the neck) and the patch grows to hold them, so an open mouth paints all of it over.
+    # The drawn mouth: whatever in the box is neither skin nor what surrounds the mouth, and the strokes in those
+    # colours followed out of the box (the raised tips of a smile marked tighter than it is drawn), inside the face,
+    # below the eyes and above the neck. The open states are drawn from this shape, and the patch grows to hold it.
     inside = rgba[max(0, m.y) : m.y1, max(0, m.x) : m.x1]
-    drawn_inside = ~art.colour_mask(inside, family | {surround}) & (inside[..., 3] > 0)
-    stroke_colours = {tuple(int(v) for v in c) for c in inside[..., :3][drawn_inside]}
-    stroke = np.zeros(rgba.shape[:2], bool)
+    drawn = np.zeros(rgba.shape[:2], bool)
+    drawn[max(0, m.y) : m.y1, max(0, m.x) : m.x1] = ~art.colour_mask(inside, family | {surround}) & (inside[..., 3] > 0)
+    stroke_colours = {tuple(int(v) for v in c) for c in inside[..., :3][drawn[max(0, m.y) : m.y1, max(0, m.x) : m.x1]]}
     if stroke_colours:
-        reach = max(unit, m.w)
+        reach = max(thick, m.w)
         x0, x1 = max(0, min(m.x, max(face.x, m.x - reach))), min(rgba.shape[1], max(m.x1, min(face.x1, m.x1 + reach)))
-        y0, y1 = max(0, m.y - 2 * unit), min(rgba.shape[0], m.y1 + 2 * unit)
+        y0, y1 = max(0, m.y - 2 * thick), min(rgba.shape[0], m.y1 + 2 * thick)
         cells = rgba[y0:y1, x0:x1]
         same = art.colour_mask(cells, stroke_colours) & (cells[..., 3] > 0)
         same[: max(0, min(eyes_rect.y1, m.y) - y0)] = False  # never up into the eyes
         same[max(0, max(face.neck, m.y1) - y0) :] = False  # nor down past the head
         labels, _ = ndimage.label(same, structure=np.ones((3, 3)))
         seeds = labels[max(0, m.y) - y0 : m.y1 - y0, max(0, m.x) - x0 : m.x1 - x0]
-        stroke[y0:y1, x0:x1] = np.isin(labels, seeds[seeds > 0])
-        if stroke.any():
-            ys, xs = np.nonzero(stroke)
-            mouth_rect = _union(mouth_rect, _box(xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
+        drawn[y0:y1, x0:x1] |= np.isin(labels, seeds[seeds > 0])
+    if not drawn.any():  # a mouth with no mark of its own (a line assumed in the skin): the box is its shape
+        drawn[max(0, m.y) : m.y1, max(0, m.x) : m.x1] = True
+    first, last, top, top_mid, base = _mouth_shape(drawn)
+    width = last - first + 1
+    unit = max(1, int(round(width / STROKE_PER_CELLS)))  # the teeth and the lower lip
+    centre, half = (first + last) / 2, width / 2
+    deepest = base + open_rows * unit  # the open mouth's bottom edge in the middle: open_rows strokes under the drawn mouth
+    mouth_rect = _union(m.grown(thick, thick, thick, thick), _box(first, min(top.values()), last + 1, deepest + 1))
     if mouth_rect.y < eyes_rect.y1:  # a small face: the mouth patch starts below the eye patch
         mouth_rect = _box(mouth_rect.x, eyes_rect.y1, mouth_rect.x1, max(mouth_rect.y1, eyes_rect.y1 + 1))
 
@@ -824,35 +856,36 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
             out[sy0 - rect.y : sy1 - rect.y, sx0 - rect.x : sx1 - rect.x] = source[sy0:sy1, sx0:sx1]
         return out
 
-    def band(canvas: np.ndarray, row: int, half: int, colour: tuple[int, int, int]) -> None:
-        """Paint `unit` rows from `row`, `half` cells either side of the mouth's middle, inside the mouth patch."""
-        x0, x1 = max(centre - half, mouth_rect.x, 0), min(centre + half + (m.w % 2), mouth_rect.x1, canvas.shape[1])
-        y0, y1 = max(row, mouth_rect.y, 0), min(row + unit, mouth_rect.y1, canvas.shape[0])
-        if x1 > x0 and y1 > y0:
-            canvas[y0:y1, x0:x1, :3] = colour
-            canvas[y0:y1, x0:x1, 3] = 255
+    def opened(bottom_mid: int, teeth: bool) -> np.ndarray:
+        """The sprite with the drawn mouth painted over with what surrounds it, then drawn again, open: its top edge
+        as drawn, tip to tip; under it the inside in the darkest colour, deepest in the middle (`bottom_mid` is the
+        bottom edge there) and closing to the corners; the lower lip along the bottom edge; and with `teeth`, a row
+        of the lightest colour under the top edge. The mouth never opens past the head, nor outside the figure."""
+        out = rgba.copy()
+        out[..., :3][drawn] = surround
+        lowest = min(rgba.shape[0], face.neck)
+        for x in range(first, last + 1):
+            u = abs(x - centre) / (half + 0.5)
+            depth = int(round((bottom_mid - top_mid) * float(np.sqrt(max(0.0, 1.0 - u * u)))))
+            edge = top[x]
+            if edge >= lowest or not rgba[edge, x, 3]:
+                continue
+            out[edge, x] = rgba[edge, x] if drawn[edge, x] else (*darkest, 255)
+            for y in range(edge + 1, min(lowest, edge + depth + 1)):
+                if rgba[y, x, 3]:
+                    out[y, x, :3] = darkest
+            if depth >= 2 * unit:
+                for y in range(edge + depth - unit + 1, min(lowest, edge + depth + 1)):
+                    if rgba[y, x, 3]:
+                        out[y, x, :3] = lip
+            if teeth and depth >= 3 * unit:
+                for y in range(edge + 1, min(lowest, edge + unit + 1)):
+                    if rgba[y, x, 3]:
+                        out[y, x, :3] = lightest
+        return out
 
-    def unmouthed() -> np.ndarray:
-        """The sprite with the drawn mouth painted over with what surrounds it, the strokes past its box too."""
-        bare = rgba.copy()
-        region = bare[max(0, m.y) : m.y1, max(0, m.x) : m.x1]
-        drawn = ~art.colour_mask(region, family | {surround}) & (region[..., 3] > 0)
-        region[..., :3][drawn] = surround
-        bare[..., :3][stroke] = surround
-        return bare
-
-    narrow = max(1, half_w - unit)
-    mid = unmouthed()
-    band(mid, top, narrow, darkest)
-    band(mid, top + unit, half_w, darkest)
-    band(mid, top + 2 * unit, narrow, lip)
-
-    wide = unmouthed()
-    band(wide, top, narrow, lightest)  # top teeth
-    for row in range(1, open_rows + 1):
-        band(wide, top + row * unit, half_w if row < open_rows else narrow, darkest)
-    band(wide, top + open_rows * unit, max(1, half_w // 2), lip)  # a hint of tongue
-    band(wide, top + (open_rows + 1) * unit, narrow, lip)
+    mid = opened(base + max(1, (open_rows + 1) // 2) * unit, teeth=False)
+    wide = opened(deepest, teeth=True)
 
     shut = rgba.copy()
     for eye in (face.left_eye, face.right_eye):
@@ -879,6 +912,26 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     }
     rects = {name: (mouth_rect if name.startswith("mouth") else eyes_rect) for name in patches}
     return FaceStates(patches, rects)
+
+
+def _state_frame(canvas: np.ndarray, states: FaceStates, mouth: str, eyes: str) -> np.ndarray:
+    """The canvas with one mouth patch and one eye patch pasted where they go."""
+    frame = canvas.copy()
+    for name in (mouth, eyes):
+        rect = states.rects[name]
+        art.paste(frame, states.patches[name], rect.x, rect.y)
+    return frame
+
+
+def close_up_cells(canvas: np.ndarray, states: FaceStates) -> list[tuple[np.ndarray, str, str]]:
+    """The four face states cropped to the eyes and the mouth, as cells for a board at CLOSE_SCALE: the size the
+    end of a mini me video shows them, so the creator judges the mouth at the size they will see it."""
+    eyes, mouth = states.rects["eyes_open"], states.rects["mouth_open"]
+    pad = 3
+    x0, x1 = max(0, min(eyes.x, mouth.x) - pad), min(canvas.shape[1], max(eyes.x1, mouth.x1) + pad)
+    y0, y1 = max(0, min(eyes.y, mouth.y) - pad), min(canvas.shape[0], max(eyes.y1, mouth.y1) + pad)
+    return [(art.flatten(_state_frame(canvas, states, mouth_name, eyes_name)[y0:y1, x0:x1], art.BOARD_BG), label, "")
+            for label, mouth_name, eyes_name in STATE_VIEWS]  # fmt: skip
 
 
 # --- the face board and the faces step ----------------------------------------------------------------------------------
@@ -965,14 +1018,8 @@ def _board(canvas: np.ndarray, face: FaceBox | None, states: FaceStates | None, 
         _neck_line(draw, face.neck, k, (x0, y0), margin, head.width)
     heads = []
     if states is not None:
-        hx0, hy0, hx1, hy1 = x0, y0, x1, y1
-        for label, mouth, eyes in (("Closed", "mouth_closed", "eyes_open"), ("Half open", "mouth_mid", "eyes_open"),
-                                   ("Open", "mouth_open", "eyes_open"), ("Blink", "mouth_closed", "eyes_closed")):  # fmt: skip
-            frame = canvas.copy()
-            for name in (mouth, eyes):
-                rect = states.rects[name]
-                art.paste(frame, states.patches[name], rect.x, rect.y)
-            heads.append((art.flatten(frame[hy0:hy1, hx0:hx1], art.BOARD_BG), label, ""))
+        for label, mouth, eyes in STATE_VIEWS:
+            heads.append((art.flatten(_state_frame(canvas, states, mouth, eyes)[y0:y1, x0:x1], art.BOARD_BG), label, ""))
     lines = board_notes(face, marked=marked, beard=beard) if face is not None else []
     if note:
         lines.append(note)
@@ -982,18 +1029,28 @@ def _board(canvas: np.ndarray, face: FaceBox | None, states: FaceStates | None, 
     title = ("Face check: the eyes, the mouth and the neck line" + (" as marked" if marked else " as measured")
              + ", and the face states" if face is not None else "Face check: the face could not be measured")  # fmt: skip
     states_img = art.board(heads, title="", columns=4, scale=max(2, k // 2)) if heads else None
+    # the same states at the scale the close of a video shows them, under the head
+    close_img = None
+    if states is not None:
+        close_img = art.board(close_up_cells(canvas, states), columns=4, scale=CLOSE_SCALE,
+                              title=f"The same states at the close-up's scale ({CLOSE_SCALE}), the size the end of a video shows them")  # fmt: skip
     measure_text = ImageDraw.Draw(head)
     widest = max([measure_text.textlength(title, font=art.label_font(26))]
                  + [measure_text.textlength(line, font=art.label_font(17)) for line in lines])  # fmt: skip
-    width = int(max(head.width + (states_img.width + 24 if states_img else 0) + 48, widest + 48, 900))
-    height = 70 + max(head.height, states_img.height if states_img else 0) + 30 * len(lines) + 40
+    width = int(max(head.width + (states_img.width + 24 if states_img else 0) + 48, widest + 48, 900,
+                    close_img.width + 48 if close_img else 0))  # fmt: skip
+    upper = max(head.height, states_img.height if states_img else 0)
+    height = 70 + upper + (close_img.height + 16 if close_img else 0) + 30 * len(lines) + 40
     page = Image.new("RGB", (width, height), art.BOARD_BG)
     pen = ImageDraw.Draw(page)
     pen.text((24, 20), title, fill=art.INK, font=art.label_font(26))
     page.paste(head, (24, 64))
     if states_img is not None:
         page.paste(states_img, (24 + head.width + 24, 64))
-    y = 64 + max(head.height, states_img.height if states_img else 0) + 16
+    y = 64 + upper + 16
+    if close_img is not None:
+        page.paste(close_img, (24, y))
+        y += close_img.height + 16
     for line in lines:
         pen.text((24, y), line, fill=art.INK, font=art.label_font(17))
         y += 30
