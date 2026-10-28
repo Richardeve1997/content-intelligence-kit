@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import requests
 
-from kit import config
+from kit import config, transcribe
 from kit.research import common
 
 UTC = timezone.utc
@@ -277,8 +277,8 @@ def test_a_failed_download_leaves_nothing_behind(monkeypatch, tmp_path):
 
 def test_a_kit_error_is_shown_whole_and_without_a_class_name():
     # these are plain sentences written for the creator, so they are never cut and never prefixed
-    sentence = "No speech model is installed. Install the video tools with: uv sync --group video"
-    assert len(sentence) == 81  # one past the 80 characters other reasons are cut to
+    sentence = transcribe.NO_SPEECH_MODEL  # the sentence the speech step really raises
+    assert len(sentence) > 80  # longer than the 80 characters other reasons are cut to
     assert common.why(config.KitError(sentence)) == sentence
     long = "Only 3.2 GB free on this disk, and a heavy job needs at least 5 GB. " * 4
     assert common.why(config.KitError(long)) == long.strip()

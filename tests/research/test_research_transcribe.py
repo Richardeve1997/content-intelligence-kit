@@ -8,11 +8,12 @@ from pathlib import Path
 
 import pytest
 
+from kit import transcribe
 from kit.config import KitError
 from kit.research import common, rank, transcribe_queue as queue
 
 INSTALL = "Speech to text skipped: install the video tools with uv sync --group video --inexact"
-NO_MODEL = "No speech model is installed. Install the video tools with: uv sync --group video"  # as the real kit.transcribe words it
+NO_MODEL = transcribe.NO_SPEECH_MODEL  # as the real kit.transcribe words it
 
 LONG = "Water basil in the morning and never at night because the roots sit in cold water until sunrise"
 
@@ -200,7 +201,7 @@ def test_missing_numpy_is_found_before_anything_is_downloaded(tmp_path, fake_spe
 
 
 def test_a_speech_model_that_is_missing_is_reported_whole_after_one_download(tmp_path, fake_speech, monkeypatch):
-    assert len(NO_MODEL) == 81  # the real sentence is one character past what a reason is cut to
+    assert len(NO_MODEL) > 80  # the real sentence is longer than what a reason is cut to
 
     def words(audio, *, align=True):
         raise KitError(NO_MODEL)
