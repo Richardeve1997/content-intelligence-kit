@@ -170,6 +170,24 @@ def test_check_static_samples_the_frame_at_each_time_it_reports(tmp_path):
         assert abs(float(samples[k].mean()) - grey) < 4, f"the sample at {k / 5}s shows a later frame"
 
 
+def test_check_static_starts_its_samples_at_zero_when_the_picture_starts_late(tmp_path):
+    """In a file whose sound starts before its picture, the first sample is the first frame, not a later one."""
+    import subprocess
+
+    import numpy as np
+
+    static = load("check_static")
+    clip = tmp_path / "late.mov"  # the picture starts 0.3 s after the sound, brighter every frame
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=270x480:r=60:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+           "-filter_complex", "[0:v]geq=lum='16+100*T':cb=128:cr=128,setpts=PTS+0.3/TB[v]", "-map", "[v]",
+           "-map", "1:a", "-t", "2.3", "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", clip)
+    first = subprocess.run(["ffmpeg", "-v", "error", "-i", str(clip), "-map", "0:v", "-frames:v", "1", "-f", "rawvideo",
+                            "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    grey = np.frombuffer(first, np.uint8).astype(np.float32).mean()
+    samples = static.frames(clip, 5)
+    assert abs(float(samples[0].mean()) - grey) < 4, "the sample at 0s shows a later frame"
+
+
 def test_ig_safe_check_writes_the_marked_frames(tmp_path):
     clip = tmp_path / "final.mp4"
     ffmpeg("-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", clip)

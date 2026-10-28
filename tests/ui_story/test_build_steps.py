@@ -297,6 +297,20 @@ def test_measure_crowns_reads_the_crown_at_each_sample_time(tmp_path):
         assert abs(row - (200 + 100 * t)) <= 2, f"the sample at {t}s has the crown of a later frame (row {row})"
 
 
+def test_measure_crowns_starts_its_samples_at_zero_when_the_picture_starts_late(tmp_path):
+    """In a file whose sound starts before its picture, the picture keeps its late start. The first samples are
+    the first frame, standing in for the time before it, not a frame from a sample later."""
+    measure = load("measure_crowns")
+    matte = tmp_path / "late.mov"  # the picture starts 0.3 s after the sound; the head sinks 100 px a second
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=60:d=2", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+           "-filter_complex", "[0:v]geq=lum='if(gte(Y\\,200+100*T)\\,255\\,0)':cb=128:cr=128,setpts=PTS+0.3/TB[v]",
+           "-map", "[v]", "-map", "1:a", "-t", "2.3", "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p",
+           "-c:a", "pcm_s16le", matte)
+    found = dict(measure.crowns(matte, 0.5))
+    assert abs(found[0.0] - 200) <= 2, f"the sample at 0s is a later frame (row {found[0.0]})"
+    assert abs(found[1.0] - 270) <= 2, "the frame shown at 1.0 s was drawn 0.7 s in"
+
+
 def test_every_kit_script_answers_help():
     from uistory_helpers import KIT
 
