@@ -178,9 +178,31 @@ def test_a_dry_run_needs_no_approval_and_sends_nothing(keyed, reel, capsys):
     status, out, _ = say(capsys, "schedule", reel.slug, "--on", "tomorrow", "--time", "18:00", "--dry-run")
     assert status == 0 and keyed.calls() == []
     lines = out.splitlines()
-    assert [line.split(":")[0] for line in lines[:6]] == ["Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"]
-    assert all("dry run" in line and "Would schedule for" in line for line in lines[:6])
+    heads = [line for line in lines if not line.startswith(" ") and "dry run" in line]
+    assert [line.split(":")[0] for line in heads] == ["Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"]
+    assert all("Would schedule for" in line for line in heads)
     assert lines[-1].startswith("Nothing was sent.")
+
+
+def test_a_dry_run_prints_each_post_as_it_would_go_out(keyed, reel, capsys):
+    """Under each platform's line, indented: the request that would be sent, with placeholders for the account
+    and the uploaded video, which only Zernio knows."""
+    status, out, _ = say(capsys, "schedule", reel.slug, "--platforms", "tiktok", "youtube", "--on", "tomorrow",
+                         "--time", "18:00", "--dry-run")
+    assert status == 0 and keyed.calls() == []
+    blocks, current = {}, None
+    for line in out.splitlines():
+        if line.startswith(("TikTok:", "YouTube:")):
+            current = line.split(":")[0]
+            blocks[current] = []
+        elif line.startswith("  ") and current:
+            blocks[current].append(line)
+    tiktok, youtube = (json.loads("\n".join(blocks[name])) for name in ("TikTok", "YouTube"))
+    assert tiktok["tiktokSettings"]["privacy_level"] == "PUBLIC_TO_EVERYONE" and "#basil" in tiktok["content"]
+    assert youtube["platforms"][0]["platformSpecificData"]["title"] == "Why windowsill basil dies in week three"
+    assert youtube["scheduledFor"].endswith("18:00:00+00:00") or "T18:00:00" in youtube["scheduledFor"]
+    assert youtube["platforms"][0]["accountId"] == "<your YouTube account in Zernio>"
+    assert youtube["mediaItems"] == [{"type": "video", "url": "<the video, once it is uploaded>"}]
 
 
 def test_a_failed_platform_makes_the_exit_status_1(keyed, reel, capsys):

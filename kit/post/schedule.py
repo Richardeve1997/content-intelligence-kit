@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -78,6 +78,9 @@ PASSED = (
     "The time you picked has passed or is too close to schedule. Pick a time at least five minutes from now, "
     "because Zernio posts at once when a time has passed."
 )
+# A dry run reads nothing from Zernio, so what only Zernio knows is shown with these.
+ACCOUNT_PLACEHOLDER = "<your {platform} account in Zernio>"
+MEDIA_PLACEHOLDER = "<the video, once it is uploaded>"
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,8 @@ class Result:
     url             the post's address once it is live
     reason          why it was skipped or failed, or a note about the post
     scheduled_for   the time it is set for, in the creator's own time zone
+    payload         in a dry run, the request that would be sent, with placeholders for the account and the
+                    uploaded video. It takes no part in comparing or hashing a Result.
     """
 
     platform: str
@@ -97,6 +102,12 @@ class Result:
     url: str | None = None
     reason: str | None = None
     scheduled_for: str | None = None
+    payload: dict | None = field(default=None, compare=False)
+
+
+def post_title(profile, platform: str, slug: str) -> str:
+    """The title a post is made under in Zernio, and found again by."""
+    return f"{profile.name} {platform} {slug}"
 
 
 # --- times -------------------------------------------------------------------------------------------
@@ -374,7 +385,7 @@ class _Run:
 
     def _schedule(self, platform: str, account: dict) -> Result:
         path = self.post_dir / f"{platform}.json"
-        title = f"{self.profile.name} {platform} {self.slug}"
+        title = post_title(self.profile, platform, self.slug)
         receipt = store.read(path)
 
         if receipt.get("post_id"):
@@ -579,7 +590,17 @@ def schedule(
 
     if dry_run:
         note = f"Would schedule for {describe_time(when)}. Nothing was sent."
-        return [Result(name, "dry run", reason=note, scheduled_for=when.isoformat()) for name in names]
+        seconds = payloads.video_seconds(video) if "facebook" in names else None  # read from the file here
+        return [
+            Result(name, "dry run", reason=note, scheduled_for=when.isoformat(),
+                   payload=payloads.build_body(
+                       name, title=post_title(profile, name, slug), slug=slug, caption=data[name],
+                       account_id=ACCOUNT_PLACEHOLDER.format(platform=captions.display_name(name)),
+                       media_url=MEDIA_PLACEHOLDER, scheduled_for=when.isoformat(), timezone=profile.timezone,
+                       seconds=seconds if name == "facebook" else None,
+                   ))
+            for name in names
+        ]
 
     # Nothing is sent, and no file for posting by hand is written, until the creator has read these exact
     # captions and said yes. Their yes to the TikTok caption is also the preview and consent TikTok asks for.
@@ -622,7 +643,7 @@ def _adopt_interrupted(
     """
     if not receipt.get("create_attempted"):
         return Result(platform, "skipped", reason=f"Nothing is scheduled on {captions.display_name(platform)} for {slug}.")
-    title = receipt.get("title") or f"{profile.name} {platform} {slug}"
+    title = receipt.get("title") or post_title(profile, platform, slug)
     try:
         if _recover(client, receipt, path, title):
             return None

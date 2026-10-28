@@ -334,6 +334,30 @@ def test_dry_run_sends_nothing(reel, stub, when):
     assert not (reel.folder / "post").exists()  # no receipt, no upload record and no lock file
 
 
+def test_a_dry_run_carries_each_platforms_post_as_it_would_go_out(reel, stub, when):
+    """The post each platform would get: the text with its tags, the YouTube title, the TikTok settings and the
+    time. The account and the uploaded video's address only exist in Zernio, so plain placeholders stand in."""
+    results = run(reel, stub, ["instagram", "tiktok", "youtube", "facebook", "linkedin"], when, dry_run=True)
+    assert stub.calls() == []
+    data = json.loads((reel.folder / "captions.json").read_text(encoding="utf-8"))
+    sent = {r.platform: r.payload for r in results}
+    for name, body in sent.items():
+        assert body["content"] == payloads.content_for(data[name], name)
+        assert datetime.fromisoformat(body["scheduledFor"]) == when and body["timezone"] == "Europe/London"
+        assert body["platforms"][0]["accountId"].startswith("<") and body["mediaItems"][0]["url"].startswith("<")
+    assert sent["youtube"]["platforms"][0]["platformSpecificData"]["title"] == "Why windowsill basil dies in week three"
+    assert sent["tiktok"]["tiktokSettings"] == payloads.TIKTOK_SETTINGS
+    assert sent["facebook"]["platforms"][0]["platformSpecificData"] == {"contentType": "reel"}
+    assert "#" not in sent["linkedin"]["content"]
+
+
+def test_a_result_without_a_payload_is_the_same_as_before():
+    plain = post.Result("instagram", "scheduled", post_id="post-1")
+    assert plain.payload is None
+    assert plain == post.Result("instagram", "scheduled", post_id="post-1", payload={"content": "text"})
+    assert hash(post.Result("instagram", "dry run", payload={"content": "text"}))
+
+
 def test_a_dry_run_needs_no_key_and_still_checks_the_captions(reel, when):
     (result,) = post.schedule(reel.slug, ["instagram"], when, dry_run=True)
     assert result.status == "dry run"
@@ -1151,11 +1175,11 @@ def test_the_public_names():
     assert schedule_module.schedule is post.schedule  # the package's `schedule` is the function
 
 
-def test_a_result_is_five_plain_fields_and_a_time():
-    result = post.Result("instagram", "scheduled", "post-1", None, None)
-    assert dataclasses.astuple(result) == ("instagram", "scheduled", "post-1", None, None, None)
+def test_a_result_is_five_plain_fields_a_time_and_an_optional_payload():
+    result = post.Result("instagram", "scheduled", "post-1", None, None)  # positional calls work as they always did
+    assert dataclasses.astuple(result) == ("instagram", "scheduled", "post-1", None, None, None, None)
     assert [f.name for f in dataclasses.fields(result)] == [
-        "platform", "status", "post_id", "url", "reason", "scheduled_for",
+        "platform", "status", "post_id", "url", "reason", "scheduled_for", "payload",
     ]
     with pytest.raises(dataclasses.FrozenInstanceError):
         result.status = "failed"

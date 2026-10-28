@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -68,6 +69,8 @@ def _line(result: post.Result, zone: ZoneInfo) -> str:
 def _print_results(results: list[post.Result], zone: ZoneInfo) -> int:
     for result in results:
         print(_line(result, zone))
+        if result.payload is not None:  # a dry run: the request as it would be sent, indented under its line
+            print(textwrap.indent(json.dumps(result.payload, indent=2, ensure_ascii=False), "  "))
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
