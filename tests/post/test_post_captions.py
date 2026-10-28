@@ -398,9 +398,69 @@ def test_x_counts_each_emoji_once_as_two(emoji):
     assert captions.x_length(emoji * 3) == 6
 
 
-def test_x_counts_a_symbol_that_is_not_an_emoji_as_one():
-    for plain in (chr(0x2764), chr(0x2605), chr(0x2192), "(c)", "1"):
-        assert captions.x_length(plain) == len(plain)
+# X's own counting rules (twitter-text's defaults): a character is 1 inside U+0000 to U+10FF, U+2000 to U+200D,
+# U+2010 to U+201F and U+2032 to U+2037, and 2 anywhere else. These are the edges of those spans, with a few
+# characters people really type: an ellipsis, a bullet, an arrow, the trademark sign, the euro sign, CJK.
+WEIGHT_AT_THE_EDGES = [
+    (0x0041, 1), (0x00A9, 1), (0x00AE, 1), (0x00E9, 1), (0x0400, 1), (0x05D0, 1), (0x0627, 1), (0x10D0, 1),
+    (0x10FF, 1),
+    (0x1100, 2), (0x1161, 2), (0x1FFF, 2),
+    (0x2000, 1), (0x200B, 1), (0x200C, 1), (0x200D, 1), (0x200E, 2), (0x200F, 2),
+    (0x2010, 1), (0x2013, 1), (0x2014, 1), (0x2018, 1), (0x201C, 1), (0x201D, 1), (0x201F, 1), (0x2020, 2),
+    (0x2022, 2), (0x2026, 2), (0x2031, 2),
+    (0x2032, 1), (0x2037, 1), (0x2038, 2),
+    (0x20AC, 2), (0x2122, 2), (0x2190, 2), (0x2192, 2), (0x2605, 2), (0x2764, 2),
+    (0x3042, 2), (0x4E2D, 2), (0xD55C, 2), (0xFF21, 2),
+]
+
+
+@pytest.mark.parametrize("code, weight", WEIGHT_AT_THE_EDGES, ids=[f"U+{c:04X}" for c, _ in WEIGHT_AT_THE_EDGES])
+def test_x_counts_a_character_by_where_it_sits_in_xs_ranges(code, weight):
+    assert captions.x_length(chr(code)) == weight
+    assert captions.x_length("a" + chr(code) + "b") == 2 + weight
+
+
+def test_x_counts_the_ellipsis_character_as_two_but_three_full_stops_as_three():
+    assert captions.x_length("Wait" + chr(0x2026)) == 4 + 2
+    assert captions.x_length("Wait...") == 4 + 3
+
+
+def test_x_counts_a_letter_with_an_accent_once_however_it_is_stored():
+    assert captions.x_length(chr(0x00E9)) == 1  # one character
+    assert captions.x_length("e" + chr(0x0301)) == 1  # a plain e and an accent, which X joins before it counts
+
+
+def test_x_counts_text_in_other_scripts_by_the_same_ranges():
+    def word(*codes):
+        return "".join(map(chr, codes))
+
+    assert captions.x_length(word(0x41F, 0x440, 0x438, 0x432, 0x435, 0x442)) == 6  # Cyrillic is inside the span
+    assert captions.x_length(word(0x5E9, 0x5DC, 0x5D5, 0x5DD)) == 4  # so are Hebrew and Arabic
+    assert captions.x_length(word(0x65E5, 0x672C, 0x8A9E)) == 6  # CJK is outside it
+
+
+def test_copy_in_chinese_runs_out_of_room_at_half_the_characters(captions_set, profile):
+    follow = "\n\nFollow @examplestudio for more."
+    tag_line = "\n\n#balconygarden #basil"
+    fits = (280 - len(follow) - len(tag_line)) // 2
+    chinese = chr(0x4E2D)
+
+    captions_set["twitter"]["body"] = chinese * fits + follow
+    text = payloads.content_for(captions_set["twitter"], "twitter")
+    assert captions.x_length(text) == 280 and len(text) < 200
+    assert problems_for("twitter", captions_set, profile) == []
+
+    captions_set["twitter"]["body"] = chinese * (fits + 1) + follow
+    text = payloads.content_for(captions_set["twitter"], "twitter")
+    assert len(text) < 280 < captions.x_length(text)
+    (found,) = problems_for("twitter", captions_set, profile)
+    assert str(captions.x_length(text)) in found and "emoji as 2" in found and "Chinese character" in found
+
+
+def test_x_counts_a_symbol_outside_its_usual_ranges_as_two_even_when_it_is_not_an_emoji():
+    for symbol in (chr(0x2764), chr(0x2605), chr(0x2192), chr(0x2026), chr(0x2022), chr(0x2122), chr(0x20AC)):
+        assert captions.x_length(symbol) == 2, hex(ord(symbol))
+    assert captions.x_length("(c)") == 3 and captions.x_length("1") == 1
 
 
 def test_x_counts_a_link_as_23_however_long_it_is():

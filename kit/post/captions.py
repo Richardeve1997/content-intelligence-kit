@@ -22,7 +22,8 @@ The rules:
   of the phrases that ask for comments, likes or tags, and the claim inside the first 150 characters,
   which is all that shows before See more.
 * X. The text and the tags together fit in 280 characters as X counts them: each link counts 23, each
-  emoji counts 2 and every other character counts 1.
+  emoji counts 2, and so does each character outside the usual Latin ranges (Chinese, Japanese and Korean
+  characters, the ellipsis character, arrows, bullets, the trademark sign). Every other character counts 1.
 * YouTube. A title of at most 100 characters.
 * No em or en dashes, and no placeholder left in the text.
 """
@@ -32,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -48,6 +50,7 @@ __all__ = [
     "LINKEDIN_VISIBLE",
     "x_length",
     "links_in",
+    "X_WIDE_WEIGHT",
     "display_name",
     "answers_comments",
     "cta_line",
@@ -98,6 +101,12 @@ _LINK_TRAILING = ".,;:!?)]}'\""
 
 X_LINK_WEIGHT = 23  # X counts every link as 23 characters, however long it is
 X_EMOJI_WEIGHT = 2  # and every emoji as 2
+X_WIDE_WEIGHT = 2  # and a character outside the spans below as 2
+# X counts a character as 1 inside these spans of code points (twitter-text's default configuration) and as
+# X_WIDE_WEIGHT anywhere else: U+0000 to U+10FF, which holds the Latin, Greek, Cyrillic, Hebrew and Arabic
+# letters; the spaces and joiners from U+2000 to U+200D; the hyphens, dashes and quotation marks from
+# U+2010 to U+201F; and the primes from U+2032 to U+2037.
+_X_NARROW = ((0x0000, 0x10FF), (0x2000, 0x200D), (0x2010, 0x201F), (0x2032, 0x2037))
 
 
 def _span(*spans: tuple[int, int]) -> str:
@@ -149,12 +158,20 @@ def links_in(text: str) -> list[tuple[int, int, str]]:
     return found
 
 
+def _character_weight(character: str) -> int:
+    code = ord(character)
+    return 1 if any(low <= code <= high for low, high in _X_NARROW) else X_WIDE_WEIGHT
+
+
 def _weigh(text: str) -> int:
-    return len(_EMOJI.sub("", text)) + X_EMOJI_WEIGHT * len(_EMOJI.findall(text))
+    return sum(map(_character_weight, _EMOJI.sub("", text))) + X_EMOJI_WEIGHT * len(_EMOJI.findall(text))
 
 
 def x_length(text: str) -> int:
-    """How long X counts a post: each link 23, each emoji 2 and every other character 1."""
+    """How long X counts a post, by X's own rules: each link 23, each emoji 2, a character outside X's usual
+    Latin ranges (Chinese, Japanese or Korean characters, the ellipsis character, an arrow, a bullet, the
+    trademark sign) 2, and every other character 1. Text is joined into its composed form first, as X does."""
+    text = unicodedata.normalize("NFC", text)
     total, last = 0, 0
     for start, end, _ in links_in(text):
         total += _weigh(text[last:start]) + X_LINK_WEIGHT
@@ -312,7 +329,9 @@ def _check_platform(entry, platform: str, profile) -> list[str]:
         if length > X_LIMIT:
             found.append(
                 f"X: the post counts {length} characters with its hashtags, and X allows {X_LIMIT}. "
-                f"X counts each link as {X_LINK_WEIGHT} and each emoji as {X_EMOJI_WEIGHT}."
+                f"X counts each link as {X_LINK_WEIGHT} and each emoji as {X_EMOJI_WEIGHT}. It also counts a character "
+                f"outside the usual Latin ranges, such as a Chinese character, the ellipsis character or an arrow, "
+                f"as {X_WIDE_WEIGHT}."
             )
     elif platform == "linkedin":
         _check_linkedin(body, name, found)

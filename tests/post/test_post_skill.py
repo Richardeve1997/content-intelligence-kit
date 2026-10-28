@@ -128,7 +128,22 @@ def test_step_8_keeps_the_creator_in_charge_of_what_goes_out():
     assert "never call the python function directly" in step.lower()
     assert "TikTok" in step and "preview and consent" in step  # their yes to that caption is TikTok's consent
     assert "only because the creator approved that caption" in step
+    # and what that yes covers is put in front of them first
+    assert step.index("show the settings their yes covers") < step.index("Then stop and wait")
     assert "`schedule` refuses to send until the creator approves again" in re.search(r"^9\. (.+)$", text(), re.M).group(1)
+
+
+def test_the_tiktok_settings_the_skill_shows_are_the_ones_the_code_sends():
+    step = re.search(r"^8\. (.+)$", text(), re.M).group(1)
+    assert "public to everyone, and comments, duets and stitches are on" in step
+    settings = payloads.TIKTOK_SETTINGS
+    assert settings["privacy_level"] == "PUBLIC_TO_EVERYONE"
+    assert settings["allow_comment"] is True and settings["allow_duet"] is True and settings["allow_stitch"] is True
+    assert settings["content_preview_confirmed"] is True and settings["express_consent_given"] is True
+    # every setting the code sends is one the skill describes: nothing is sent that the creator was not shown
+    assert set(settings) == {
+        "privacy_level", "allow_comment", "allow_duet", "allow_stitch", "content_preview_confirmed", "express_consent_given",
+    }
 
 
 def test_the_skill_claims_no_more_than_the_code_guarantees():
@@ -145,6 +160,9 @@ def test_the_skill_describes_the_caption_rules_the_check_enforces():
     body = text()
     assert "no hashtag in it" in body  # the YouTube title
     assert f"counts each link as {captions.X_LINK_WEIGHT} characters and each emoji as {captions.X_EMOJI_WEIGHT}" in body
+    assert f"outside the usual Latin ranges as {captions.X_WIDE_WEIGHT}" in body
+    for example in ("Chinese character", "ellipsis", "arrow", "bullet", "trademark sign"):
+        assert example in body
     assert "with or without https://" in body
     assert "LinkedIn always ends on a follow line" in body and "cta.comment_platforms" in body
 
