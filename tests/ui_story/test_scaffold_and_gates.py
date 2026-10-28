@@ -90,6 +90,33 @@ def test_check_cues_names_a_cue_that_was_never_spoken(tmp_path):
     assert "WARN 'basil' occurs 2x" in done.stdout
 
 
+def basil_words(tmp_path):
+    words = tmp_path / "words.json"
+    words.write_text(json.dumps({"words": [{"w": w, "s": i, "e": i + 0.5} for i, w in enumerate(
+        "the basil and the basil again".split())]}))
+    return words
+
+
+def test_check_cues_fails_when_the_scenes_have_no_cue_it_can_read(tmp_path):
+    """Cues passed through a helper are invisible to the check. Checking nothing is not a pass."""
+    page = tmp_path / "index.html"
+    page.write_text('<div id="root"><div class="scene" id="s1"></div></div>'
+                    "<script>const at = (p, n) => UIS.snap(C(p, n)); UIS.show(tl, '#s1', at('parsley'));</script>")
+    done = run_kit("check_cues.py", page, basil_words(tmp_path))
+    assert done.returncode == 1
+    assert "no cue" in done.stdout.lower()
+    assert "C(p, n)" in done.stdout, "it names the call that hides the phrases"
+
+
+def test_check_cues_warns_about_a_helper_next_to_cues_it_can_read(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text('<div id="root"><div class="scene" id="s1"></div></div>'
+                    "<script>const at = (p) => C(p); UIS.show(tl, '#s1', C('basil again'));</script>")
+    done = run_kit("check_cues.py", page, basil_words(tmp_path))
+    assert done.returncode == 0
+    assert "WARN" in done.stdout and "C(p)" in done.stdout
+
+
 # --- gates on the finished video --------------------------------------------------------------------------
 
 
