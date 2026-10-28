@@ -1,0 +1,625 @@
+"""Agent wiring: CLAUDE.md, AGENTS.md, the hooks, the skills' shared contract and the adapter check.
+
+Claude Code and Codex both work on this folder. CLAUDE.md is the one set of instructions, AGENTS.md
+points Codex at it, and .agents/skills is a link to .claude/skills so both see the same skills.
+Hooks only run in Claude Code, so each skill's own Feedback section is what records corrections.
+"""
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+from kit import rules
+
+ROOT = Path(__file__).resolve().parent.parent
+SKILLS = ROOT / ".claude" / "skills"
+EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)  # written as code points so this file holds no dash
+MIDDLE_DOT = "·"
+OWN_SKILLS = ["learnings", "next", "update-kit"]
+ROUTED = ["onboard", "research", "ui-story", "mini-me", "review", "post", "learnings", "update-kit", "next"]
+RULES_COMMANDS = {"read", "add", "undo", "remove", "recent"}
+UPDATE_FLAGS = {"--check", "--apply", "--ref", "--from", "--write-manifest"}
+
+# The humanizer is a third party's skill, copied without a change.
+HUMANIZER_SHA = {
+    "SKILL.md": "14fc8a965b6e0a8dc100ba4dffeab55cb94bbac112abbde7e014d5c15a35c202",
+    "LICENSE": "4ac4810254ab36d45419141aeb8e69bf50652cfafe5b2dab947d06d44e5cbf96",
+    "README.md": "d45a4faae168c33c3bce155e9bda14eaafc86a2342d4a9ffac47d35dd7a8a8f0",
+}
+
+
+def text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def settings() -> dict:
+    return json.loads(text(ROOT / ".claude" / "settings.json"))
+
+
+def skill_folders() -> list[Path]:
+    return sorted(p for p in SKILLS.iterdir() if p.is_dir())
+
+
+# --- the link and the third-party skill -----------------------------------------------------------------------
+
+
+def test_agents_skills_is_a_link_to_the_claude_skills():
+    link = ROOT / ".agents" / "skills"
+    assert link.is_symlink()
+    assert os.readlink(link) == "../.claude/skills"
+    assert link.resolve() == SKILLS.resolve()
+
+
+def test_the_humanizer_is_an_unmodified_copy_with_its_licence():
+    for name, expected in HUMANIZER_SHA.items():
+        data = (SKILLS / "humanizer" / name).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == expected, f"{name} was changed"
+    assert text(SKILLS / "humanizer" / "LICENSE").startswith("MIT License")
+    assert re.search(r"^name: humanizer$", text(SKILLS / "humanizer" / "SKILL.md"), re.M)
+
+
+def test_third_party_notes_credit_the_humanizer():
+    notes = text(ROOT / "THIRD_PARTY.md")
+    assert "Humanizer" in notes
+    assert ".claude/skills/humanizer" in notes
+    assert "MIT" in notes
+
+
+# --- the hooks --------------------------------------------------------------------------------------------------
+
+
+def test_settings_run_the_session_start_script():
+    hooks = settings()["hooks"]
+    assert set(hooks) == {"SessionStart", "Stop"}
+    (group,) = hooks["SessionStart"]
+    (hook,) = group["hooks"]
+    assert hook["type"] == "command"
+    assert hook["command"] == 'bash "$CLAUDE_PROJECT_DIR/bin/session_start.sh"'
+    assert hook["timeout"] <= 30
+
+
+def test_settings_have_a_stop_hook_that_records_corrections():
+    (group,) = settings()["hooks"]["Stop"]
+    (hook,) = group["hooks"]
+    assert hook["type"] == "agent"
+    assert hook["async"] is True
+    assert hook["model"] == "claude-haiku-5-5"
+    assert 30 <= hook["timeout"] <= 120
+    prompt = hook["prompt"]
+    assert len(prompt) <= 1500, "the prompt stays short"
+    assert "$ARGUMENTS" in prompt
+    assert "kit.rules add" in prompt
+    assert "Read tool, not Bash" in prompt, "only the rules command is pre-approved for Bash"
+    assert "me/rules/" in prompt and "me/lessons.md" in prompt
+    assert 'finish by answering {"ok": true}' in prompt.lower()
+    assert "never answer false" in prompt.lower(), "a false answer would restart the creator's turn"
+    assert EM_DASH not in prompt and EN_DASH not in prompt
+
+
+def test_the_only_command_the_settings_pre_approve_is_the_rules_command():
+    allowed = settings()["permissions"]
+    assert set(allowed) == {"allow"}
+    assert allowed["allow"], "the hook agent needs this to record anything"
+    for entry in allowed["allow"]:
+        found = re.fullmatch(r"Bash\(uv run python -m kit\.rules (read|add):\*\)", entry)
+        assert found, f"{entry} is broader than the rules command"
+    assert {re.search(r"rules (\w+):", e).group(1) for e in allowed["allow"]} == {"read", "add"}, (
+        "undo and remove delete rules, so they still ask first"
+    )
+
+
+# --- the session start script ---------------------------------------------------------------------------------------
+
+
+START = ROOT / "bin" / "session_start.sh"
+NOT_SET_UP = "This kit is not set up yet. Say: set me up.\n"
+
+
+def start(me: Path | None, cwd=None) -> subprocess.CompletedProcess:
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(cwd or ROOT)}
+    if me is not None:
+        env["KIT_ME"] = str(me)
+    return subprocess.run(["bash", str(START)], env=env, cwd=cwd, capture_output=True, text=True)
+
+
+def test_session_start_is_executable_and_quiet_about_nothing():
+    assert START.stat().st_mode & 0o111
+
+
+@pytest.mark.parametrize("how", ["no folder", "empty folder", "not finished", "unreadable profile"])
+def test_session_start_says_when_the_kit_is_not_set_up(tmp_path, how):
+    me = tmp_path / "me"
+    if how != "no folder":
+        me.mkdir()
+    if how == "not finished":
+        (me / "profile.json").write_text('{"version": 1, "onboarded": false}')
+    if how == "unreadable profile":
+        (me / "profile.json").write_text("not json")
+    done = start(me)
+    assert (done.returncode, done.stdout, done.stderr) == (0, NOT_SET_UP, "")
+
+
+def test_session_start_finds_the_default_me_folder_beside_the_script(tmp_path):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "session_start.sh").write_text(text(START))
+    done = subprocess.run(
+        ["bash", str(tmp_path / "bin" / "session_start.sh")],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert done.stdout == NOT_SET_UP
+    (tmp_path / "me").mkdir()
+    (tmp_path / "me" / "profile.json").write_text('{"onboarded":true}')
+    done = subprocess.run(
+        ["bash", str(tmp_path / "bin" / "session_start.sh")],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert (done.returncode, done.stdout) == (0, "")
+
+
+def test_session_start_is_silent_when_set_up_and_nothing_has_been_learned(example_me):
+    done = start(example_me)
+    assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+
+
+def test_session_start_shows_the_last_five_lessons(example_me, monkeypatch):
+    for day in range(1, 8):
+        monkeypatch.setattr(rules, "_now", lambda day=day: datetime(2026, 10, day, 9, 30))
+        rules.add("post", f"Rule number {day}. It has a second sentence.")
+
+    done = start(example_me)
+
+    assert done.returncode == 0 and done.stderr == ""
+    lines = done.stdout.splitlines()
+    assert lines[0] == "Recent lessons from the creator's corrections:"
+    assert lines[1:] == [f"- 2026-10-0{day} 09:30 {MIDDLE_DOT} Rule number {day}." for day in (3, 4, 5, 6, 7)]
+
+
+def test_session_start_skips_lessons_that_were_taken_back(example_me, monkeypatch):
+    for day in range(1, 5):
+        monkeypatch.setattr(rules, "_now", lambda day=day: datetime(2026, 10, day, 9, 30))
+        rules.add("post", f"Rule number {day}.")
+    rules.undo("post")  # takes back rule 4
+
+    done = start(example_me)
+
+    assert [line for line in done.stdout.splitlines()[1:]] == [
+        f"- 2026-10-0{day} 09:30 {MIDDLE_DOT} Rule number {day}." for day in (1, 2, 3)
+    ]
+
+
+# --- the adapter check --------------------------------------------------------------------------------------------------
+
+CHECK = ROOT / "bin" / "check_adapters.sh"
+
+SKILL_TEXT = """---
+name: {name}
+description: Does one job for the creator. Use when they ask for it.
+---
+
+# {name}
+
+1. Read the creator's rules with `kit.rules.read("{name}")`.
+
+## Feedback
+
+Record a correction with `kit.rules.add("{name}", "<rule>")`.
+"""
+
+
+def tree(root: Path, skills: dict, *, link: str | None = "../.claude/skills") -> Path:
+    for name, body in skills.items():
+        folder = root / ".claude" / "skills" / name
+        folder.mkdir(parents=True)
+        if body is not None:
+            (folder / "SKILL.md").write_text(body.replace("{name}", name))
+    (root / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
+    if link is not None:
+        (root / ".agents").mkdir()
+        (root / ".agents" / "skills").symlink_to(link)
+    return root
+
+
+def adapters(root: Path) -> tuple[int, str]:
+    done = subprocess.run(["bash", str(CHECK), str(root)], capture_output=True, text=True)
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_the_adapter_check_passes_on_a_good_tree(tmp_path):
+    root = tree(tmp_path, {"alpha": SKILL_TEXT, "beta": SKILL_TEXT})
+    code, out = adapters(root)
+    assert (code, out) == (0, "Adapters look right: .agents/skills leads to .claude/skills, and 2 skills are set up alike.\n")
+
+
+def test_the_adapter_check_passes_on_this_repo():
+    code, out = adapters(ROOT)
+    assert code == 0, out
+    done = subprocess.run(["bash", str(CHECK)], cwd=ROOT, capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_block_description_counts(tmp_path):
+    block = "---\nname: alpha\ndescription: |\n  Two lines\n  of description.\nlicense: MIT\n---\n"
+    body = block + "\n`kit.rules.read(\"alpha\")`\n\n## Feedback\n"
+    code, out = adapters(tree(tmp_path, {"alpha": body}))
+    assert code == 0, out
+
+
+def test_the_humanizer_is_exempt_from_the_rules_and_feedback_checks(tmp_path):
+    plain_skill = "---\nname: humanizer\ndescription: Rewrites text.\n---\n\n# Humanizer\n"
+    code, out = adapters(tree(tmp_path, {"humanizer": plain_skill, "alpha": SKILL_TEXT}))
+    assert code == 0, out
+
+
+def test_a_missing_link_is_reported(tmp_path):
+    code, out = adapters(tree(tmp_path, {"alpha": SKILL_TEXT}, link=None))
+    assert code == 1
+    assert ".agents/skills is missing" in out and "ln -s ../.claude/skills .agents/skills" in out
+
+
+def test_a_link_to_the_wrong_place_is_reported(tmp_path):
+    (tmp_path / "elsewhere").mkdir()
+    code, out = adapters(tree(tmp_path, {"alpha": SKILL_TEXT}, link="../elsewhere"))
+    assert code == 1 and ".agents/skills does not lead to .claude/skills" in out
+
+
+def test_a_copy_instead_of_a_link_is_reported(tmp_path):
+    root = tree(tmp_path, {"alpha": SKILL_TEXT}, link=None)
+    (root / ".agents" / "skills").mkdir(parents=True)
+    code, out = adapters(root)
+    assert code == 1 and ".agents/skills is a folder, not a link" in out
+
+
+def test_a_skill_folder_without_a_skill_file_is_reported(tmp_path):
+    code, out = adapters(tree(tmp_path, {"alpha": SKILL_TEXT, "empty": None}))
+    assert code == 1 and ".claude/skills/empty has no SKILL.md" in out
+
+
+BROKEN = {
+    "no frontmatter": ("# alpha\n\n`kit.rules.read(\"alpha\")`\n\n## Feedback\n", "has no frontmatter"),
+    "never closed": ("---\nname: alpha\ndescription: x\n\n`kit.rules.read(`\n## Feedback\n", "never closes"),
+    "no name": ("---\ndescription: x\n---\n`kit.rules.read(`\n## Feedback\n", "has no name"),
+    "empty name": ("---\nname:\ndescription: x\n---\n`kit.rules.read(`\n## Feedback\n", "has no name"),
+    "no description": ("---\nname: alpha\n---\n`kit.rules.read(`\n## Feedback\n", "has no description"),
+    "empty description": ("---\nname: alpha\ndescription:\n---\n`kit.rules.read(`\n## Feedback\n", "has no description"),
+    "empty block description": (
+        "---\nname: alpha\ndescription: |\nlicense: MIT\n---\n`kit.rules.read(`\n## Feedback\n",
+        "has no description",
+    ),
+    "never reads the rules": ("---\nname: alpha\ndescription: x\n---\n\n## Feedback\n", "kit.rules.read("),
+    "no feedback heading": ("---\nname: alpha\ndescription: x\n---\n\n`kit.rules.read(`\n\nFeedback is welcome.\n", "Feedback section"),
+}
+
+
+@pytest.mark.parametrize("name", list(BROKEN))
+def test_each_skill_problem_is_reported_and_fails_the_check(tmp_path, name):
+    body, words = BROKEN[name]
+    code, out = adapters(tree(tmp_path, {"alpha": body}))
+    assert code == 1
+    assert ".claude/skills/alpha/SKILL.md" in out and words in out
+    assert out.splitlines()[0] == "Found 1 problem:"
+
+
+def test_all_the_problems_are_listed_not_just_the_first(tmp_path):
+    root = tree(
+        tmp_path,
+        {"alpha": BROKEN["no name"][0], "beta": BROKEN["no feedback heading"][0], "empty": None, "ok": SKILL_TEXT},
+        link=None,
+    )
+    code, out = adapters(root)
+    assert code == 1
+    lines = out.splitlines()
+    assert lines[0] == "Found 4 problems:"
+    assert len([line for line in lines if line.startswith("- ")]) == 4
+    for words in (".agents/skills is missing", "alpha/SKILL.md has no name", "beta/SKILL.md has no Feedback section", "empty has no SKILL.md"):
+        assert words in out
+
+
+def test_a_feedback_heading_can_be_at_any_level(tmp_path):
+    body = "---\nname: alpha\ndescription: x\n---\n`kit.rules.read(`\n\n### Feedback and rules\n"
+    assert adapters(tree(tmp_path, {"alpha": body}))[0] == 0
+
+
+# --- the files that tell an agent what to do ----------------------------------------------------------------------------
+
+
+def test_claude_md_covers_what_the_kit_is_and_the_first_run_rule():
+    claude = text(ROOT / "CLAUDE.md")
+    assert claude.startswith("# Content Intelligence Kit")
+    assert "kit.config.load_profile()" in claude and "NotOnboarded" in claude
+    assert 'say: "set me up"' in claude.lower()
+    assert "offer onboarding before anything else" in claude
+    assert "bash bin/session_start.sh" in claude, "Codex has no hooks, so it runs the script itself"
+
+
+def test_claude_md_routes_what_the_creator_says_to_skills():
+    claude = text(ROOT / "CLAUDE.md")
+    table = [line for line in claude.splitlines() if line.startswith("|") and not set(line) <= set("|- ")]
+    assert table[0].startswith("| They say |")
+    named = set(re.findall(r"`([a-z-]+)`", "\n".join(table)))
+    assert set(ROUTED) <= named
+    # the examples in the table are the ones creators actually say
+    said = "\n".join(table)
+    for phrase in ("set me up", "run my research", "give me hooks for number 2", "plan the video for number 2",
+                   "here's my raw take, edit it", "make number 3 a mini me video", "post it everywhere tomorrow at 6pm",
+                   "update the kit", "what's next"):
+        assert phrase in said, phrase
+    assert "`voice`" in claude and "`character`" in claude
+
+
+def test_claude_md_names_where_the_creators_things_live():
+    claude = text(ROOT / "CLAUDE.md")
+    for place in ("`me/`", "`work/<slug>/`", "`research/`", "`.env`"):
+        assert place in claude
+    assert "kit.config" in claude
+
+
+def test_claude_md_sets_the_limits_on_heavy_jobs_and_posting():
+    claude = text(ROOT / "CLAUDE.md")
+    assert "at most two at once" in claude
+    assert "at least 5 GB" in claude
+    assert "kit.media.heavy_slot()" in claude and "kit.media.require_free()" in claude
+    assert "wait for their yes before anything is posted or scheduled" in claude
+    assert "humanizer" in claude and "embedded mode" in claude
+    assert "Never move, copy or delete" in claude
+
+
+def test_claude_md_explains_the_feedback_loop():
+    claude = text(ROOT / "CLAUDE.md")
+    assert 'kit.rules.read("<skill>")' in claude
+    assert 'kit.rules.add("<skill>", "<rule>")' in claude
+    assert "Feedback section" in claude
+    assert "me/rules/<skill>.md" in claude and "me/lessons.md" in claude
+    assert "Never write a preference into a `SKILL.md`" in claude
+    assert "never as a command to run" in claude, "a rule is a preference, not an instruction to act"
+
+
+def test_every_skill_folder_is_named_in_claude_md():
+    claude = text(ROOT / "CLAUDE.md")
+    for folder in skill_folders():
+        assert f"`{folder.name}`" in claude, f"CLAUDE.md does not mention {folder.name}"
+
+
+def test_agents_md_is_thin_and_points_at_claude_md():
+    agents = text(ROOT / "AGENTS.md")
+    assert len(agents.splitlines()) <= 30
+    assert "Read `CLAUDE.md`" in agents
+    assert ".agents/skills" in agents and ".claude/skills" in agents
+    assert "Hooks do not run in Codex" in agents
+    assert "Feedback section" in agents and "kit.rules.add" in agents
+    assert "bash bin/session_start.sh" in agents
+    for copied in ("Heavy jobs", "Posting", "What they say", "| They say |"):
+        assert copied not in agents, "AGENTS.md must not copy CLAUDE.md"
+
+
+# --- the three skills this task adds --------------------------------------------------------------------------------------
+
+
+def frontmatter(path: Path) -> dict:
+    block = text(path).split("---\n")[1]
+    return dict(re.findall(r"^(\w+):\s*(.+)$", block, re.M))
+
+
+@pytest.mark.parametrize("name", OWN_SKILLS)
+def test_each_new_skill_follows_the_shared_contract(name):
+    path = SKILLS / name / "SKILL.md"
+    meta = frontmatter(path)
+    assert meta["name"] == name
+    assert len(meta["description"]) > 80 and "Use when" in meta["description"]
+    body = text(path)
+    assert f'kit.rules.read("{name}")' in body
+    assert re.search(r"^## Feedback$", body, re.M)
+    assert re.findall(r"^## (.+)$", body, re.M)[-1] == "Feedback", "Feedback is the last section"
+    # reading the creator's rules is the first numbered step
+    first_step = re.search(r"^1\. (.+)$", body, re.M).group(1)
+    assert "kit.rules.read" in first_step
+    feedback = body[body.index("## Feedback") :]
+    assert f'kit.rules.add("{name}"' in feedback and f"python -m kit.rules add {name}" in feedback
+
+
+def test_every_skill_folder_name_matches_its_name_field():
+    for folder in skill_folders():
+        assert frontmatter(folder / "SKILL.md")["name"] == folder.name
+
+
+def test_every_rules_command_named_in_the_docs_exists():
+    sources = [ROOT / "CLAUDE.md", ROOT / "AGENTS.md", *[f / "SKILL.md" for f in skill_folders() if f.name != "humanizer"]]
+    seen = set()
+    for source in sources:
+        for command in re.findall(r"python -m kit\.rules (\w+)", text(source)):
+            assert command in RULES_COMMANDS, f"{source.name} names a rules command that does not exist: {command}"
+            seen.add(command)
+    assert {"read", "add", "undo", "remove", "recent"} <= seen
+
+
+def test_every_update_option_named_in_the_docs_exists():
+    sources = [ROOT / "CLAUDE.md", *[f / "SKILL.md" for f in skill_folders() if f.name != "humanizer"]]
+    for source in sources:
+        for line in text(source).splitlines():
+            if "update_kit.py" in line:
+                for flag in re.findall(r"--[a-z-]+", line):
+                    assert flag in UPDATE_FLAGS, f"{source.name} names an update option that does not exist: {flag}"
+
+
+def test_update_kit_skill_runs_the_script_in_check_then_apply_order():
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    assert body.index("uv run python bin/update_kit.py\n") < body.index("uv run python bin/update_kit.py --apply")
+    for words in ("me/kit-backups/", "--from", "--ref", "bash bin/check_adapters.sh", "uv sync"):
+        assert words in body
+
+
+def test_learnings_skill_covers_show_undo_and_prune():
+    body = text(SKILLS / "learnings" / "SKILL.md")
+    for words in ("read <skill> --numbered", "recent 10", "undo <skill>", "remove <skill> <number>",
+                  "highest number down", "more than five rules", "The entry stays"):
+        assert words in body, words
+    for heading in ("## Show", "## Undo", "## Remove or tidy", "## Add a rule by hand"):
+        assert heading in body, heading
+    assert "prune" in body.lower()
+
+
+# --- the next skill's state check ------------------------------------------------------------------------------------------------
+
+
+def next_snippet() -> str:
+    blocks = re.findall(r"```python\n(.*?)\n```", text(SKILLS / "next" / "SKILL.md"), re.S)
+    assert len(blocks) == 1, "the skill carries exactly one script"
+    return blocks[0]
+
+
+def look(root: Path, **env) -> dict:
+    done = subprocess.run(
+        [sys.executable, "-I", "-W", "error", "-c", next_snippet()],
+        cwd=root,
+        env={"PATH": "/usr/bin:/bin", **env},
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    found = {}
+    for line in done.stdout.splitlines():
+        key, _, value = line.partition(": ")
+        found.setdefault(key, []).append(value)
+    return {key: (values if key == "warning" else values[0]) for key, values in found.items()}
+
+
+def make_video(root: Path, slug: str, entries: list[str]) -> Path:
+    folder = root / "work" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    for entry in entries:
+        if entry.endswith("/"):
+            (folder / entry).mkdir(parents=True, exist_ok=True)
+        elif entry.startswith("take/"):
+            (folder / "take").mkdir(exist_ok=True)
+            source = root / "raw.mov"
+            source.write_bytes(b"raw")
+            (folder / entry).symlink_to(source)
+        else:
+            (folder / entry).write_text("{}")
+    return folder
+
+
+STATES = [
+    ([], "no_idea", "nothing"),
+    (["idea.json"], "needs_plan", "idea.json"),
+    (["idea.json", "plan.md"], "needs_take", "idea.json, plan.md"),
+    (["idea.json", "plan.md", "take/"], "needs_take", "idea.json, plan.md, take"),
+    (["idea.json", "plan.md", "take/take-01.mov"], "take_ready", "idea.json, plan.md, take"),
+    (["idea.json", "script.md"], "mini_me_in_progress", "idea.json, script.md"),
+    (["idea.json", "plan.md", "take/take-01.mov", "final.mp4"], "final_ready", "idea.json, plan.md, take, final.mp4"),
+    (["idea.json", "script.md", "final.mp4"], "final_ready", "idea.json, script.md, final.mp4"),
+    (["idea.json", "script.md", "final.mp4", "captions.json"], "captions_ready", "idea.json, script.md, final.mp4, captions.json"),
+    (
+        ["idea.json", "script.md", "final.mp4", "captions.json", "post/"],
+        "posted",
+        "idea.json, script.md, final.mp4, captions.json, post",
+    ),
+]
+
+
+@pytest.mark.parametrize("entries, state, found", STATES, ids=[s[1] + ":" + str(len(s[0])) for s in STATES])
+def test_next_names_the_state_from_what_exists(tmp_path, entries, state, found):
+    make_video(tmp_path, "example-reel", entries)
+    seen = look(tmp_path)
+    assert (seen["video"], seen["state"], seen["found"]) == ("example-reel", state, found)
+
+
+def test_next_with_no_videos_and_no_research(tmp_path):
+    assert look(tmp_path) == {"video": "none", "state": "no_video", "found": "nothing"}
+    (tmp_path / "work").mkdir()
+    assert look(tmp_path)["state"] == "no_video"
+
+
+def test_next_counts_the_ideas_in_the_latest_research_run(tmp_path):
+    for day, count in (("2026-10-27", 3), ("2026-10-28", 4)):
+        run = tmp_path / "research" / "runs" / day
+        run.mkdir(parents=True)
+        (run / "ideas.json").write_text(json.dumps([{"n": n} for n in range(1, count + 1)]))
+    assert look(tmp_path)["ideas"] == "4 in research/runs/2026-10-28"
+
+    (tmp_path / "research" / "runs" / "2026-10-29").mkdir()
+    (tmp_path / "research" / "runs" / "2026-10-29" / "ideas.json").write_text("not json")
+    assert "ideas" not in look(tmp_path)
+
+
+def test_next_reads_the_idea_when_it_can(tmp_path):
+    folder = make_video(tmp_path, "example-reel", [])
+    (folder / "idea.json").write_text(json.dumps({"n": 2, "title": "Why windowsill basil dies"}))
+    seen = look(tmp_path)
+    assert seen["idea"] == "2, Why windowsill basil dies"
+    (folder / "idea.json").write_text("not json")
+    assert "idea" not in look(tmp_path)
+
+
+def test_next_looks_at_the_video_touched_most_recently(tmp_path):
+    older = make_video(tmp_path, "older-reel", ["idea.json"])
+    newer = make_video(tmp_path, "newer-reel", ["idea.json", "plan.md"])
+    (tmp_path / "work" / ".slots").mkdir()
+    for path, when in ((older, 1_700_000_000), (newer, 1_700_100_000)):
+        for item in [path, *path.iterdir()]:
+            os.utime(item, (when, when))
+    os.utime(tmp_path / "work" / ".slots", (1_800_000_000, 1_800_000_000))
+    assert look(tmp_path)["video"] == "newer-reel"
+
+    # touching a file inside the other folder makes that one the newest
+    os.utime(older / "idea.json", (1_700_200_000, 1_700_200_000))
+    assert look(tmp_path)["video"] == "older-reel"
+
+
+def test_next_can_be_pointed_at_another_video(tmp_path):
+    make_video(tmp_path, "older-reel", ["idea.json"])
+    make_video(tmp_path, "newer-reel", ["idea.json", "plan.md"])
+    assert look(tmp_path, SLUG="older-reel")["state"] == "needs_plan"
+    seen = look(tmp_path, SLUG="nothing-by-that-name")
+    assert (seen["video"], seen["state"]) == ("nothing-by-that-name", "no_such_video")
+
+
+def test_next_warns_about_a_take_link_that_points_nowhere(tmp_path):
+    folder = make_video(tmp_path, "example-reel", ["idea.json", "plan.md"])
+    (folder / "take").mkdir()
+    (folder / "take" / "take-01.mov").symlink_to(tmp_path / "moved-away.mov")
+    seen = look(tmp_path)
+    assert seen["state"] == "take_ready"
+    assert seen["warning"] == ["take/take-01.mov points to a file that is not there any more"]
+
+
+# --- the kit's own prose ---------------------------------------------------------------------------------------------------------
+
+
+INTERNAL_WORDS = ["rul" + "ing", "contro" + "ller", "release " + "scan", "house " + "brand", "plan " + "task"]
+MINE = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".claude/settings.json",
+    ".claude/skills/learnings/SKILL.md",
+    ".claude/skills/next/SKILL.md",
+    ".claude/skills/update-kit/SKILL.md",
+    "bin/session_start.sh",
+    "bin/check_adapters.sh",
+    "bin/update_kit.py",
+    "kit/rules.py",
+]
+
+
+@pytest.mark.parametrize("path", MINE)
+def test_authored_files_have_no_em_or_en_dash_and_no_machine_path(path):
+    content = text(ROOT / path)
+    assert EM_DASH not in content and EN_DASH not in content
+    assert "/" + "Users" + "/" not in content
+
+
+@pytest.mark.parametrize("path", MINE)
+def test_authored_files_have_no_internal_process_words(path):
+    content = text(ROOT / path).lower()
+    for word in INTERNAL_WORDS:
+        assert word not in content, f"{path} contains {word!r}"

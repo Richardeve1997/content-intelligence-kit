@@ -23,3 +23,9 @@ The kit ships three variable fonts in `kit/fonts/`. Each sits in its own folder 
 | JetBrains Mono | `kit/fonts/jetbrains-mono/` | 100 to 800 | The JetBrains Mono Project Authors |
 
 The files are unmodified copies from the official Google Fonts repository, https://github.com/google/fonts, in the `ofl/` folder, taken at commit `ddf386ba1b9fbc6b2c818f1ddcd9148f54ced94b`. Only the file names changed, to drop the square brackets of the upstream names. `kit/fonts/fonts.json` records each file's upstream path and SHA-256, and a test checks both.
+
+## Humanizer
+
+`.claude/skills/humanizer/` is a copy of the humanizer skill, which rewrites AI-sounding prose so it reads naturally. It is licensed under MIT, copyright 2025 Siqi Chen: https://github.com/blader/humanizer.
+
+The kit ships version 2.11.2 as it came, with its own `LICENSE` and `README.md` beside it. A test checks the three files against their SHA-256, so a change to them has to be deliberate.

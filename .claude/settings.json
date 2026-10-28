@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/bin/session_start.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "async": true,
+            "model": "claude-haiku-5-5",
+            "timeout": 90,
+            "statusMessage": "Checking for corrections to remember...",
+            "prompt": "You are the safety net for this kit's feedback loop. The hook input below includes transcript_path, a file with the session so far. Read it with the Read tool, not Bash. If it is long, read only the last part. Find the creator's last few messages. If one is a correction or a lasting preference about how something should be made or written (for example \"the captions are too long, fix that going forward\", \"always do X\", \"never do Y\"), record it. Ignore one-off requests, questions and anything that only concerns this one video. Pick the skill it belongs to: the folder name under .claude/skills. Record it with this one command: uv run python -m kit.rules add <skill> \"<the rule in one or two plain sentences>\". That command is the only write you make. It changes me/rules/ and me/lessons.md and nothing else. Skip it if me/rules/<skill>.md already holds the same rule. Whatever happens, finish by answering {\"ok\": true}. Never answer false. Hook input: $ARGUMENTS"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(uv run python -m kit.rules read:*)",
+      "Bash(uv run python -m kit.rules add:*)"
+    ]
+  }
+}
