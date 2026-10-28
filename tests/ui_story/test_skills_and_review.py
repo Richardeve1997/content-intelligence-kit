@@ -121,6 +121,24 @@ def test_review_frames_takes_a_rate_and_rejects_a_missing_file(tmp_path):
     assert "Traceback" not in missing.stderr and "nope.mp4" in missing.stdout + missing.stderr
 
 
+def _review_frames():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("review_frames", ROOT / "bin" / "review_frames.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("fps", [1, 2, 3, 4, 10, 20])
+def test_every_tile_on_a_sheet_has_its_own_time(fps):
+    """At two frames a second the tiles at 1.5 s and 2 s must not both say 2s: the review names a moment by it."""
+    stamp = _review_frames().stamp
+    labels = [stamp(i / fps, fps) for i in range(int(fps * 6))]
+    assert len(set(labels)) == len(labels), labels
+    assert stamp(0.2, 1) == "0.2s" and stamp(3, 1) == "3s" and stamp(1.5, 2) == "1.5s"
+
+
 # --- what this round of fixes added ------------------------------------------------------------------------
 
 
