@@ -330,6 +330,8 @@ def test_a_speech_model_not_here_yet_is_downloaded_once_with_one_sentence(monkey
     assert seen["model"] == downloaded and seen["lookups"] == [True, False]
     out = capsys.readouterr().out
     assert out.count("\n") == 1 and "speech model" in out and "once" in out
+    # a note, so on a first run it never takes the place of the line that says which step stopped
+    assert out.startswith("note: ")
 
 
 def test_a_download_that_stopped_halfway_is_finished_not_used(monkeypatch, request, tmp_path, capsys):
@@ -338,7 +340,8 @@ def test_a_download_that_stopped_halfway_is_finished_not_used(monkeypatch, reque
     seen, _, downloaded = _stand_in_models(monkeypatch, request, tmp_path, "half")
     _listen_once()
     assert seen["model"] == downloaded and seen["lookups"] == [True, False]
-    assert "speech model" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "speech model" in out and out.startswith("note: ")
 
 
 def test_words_writes_the_shape_the_kit_reads(tmp_path, monkeypatch):

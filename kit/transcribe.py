@@ -68,7 +68,8 @@ MLX_MODEL = "mlx-community/whisper-large-v3-turbo"
 FASTER_MODEL = "small"
 # --inexact keeps the other groups: without it uv removes every group the command does not name.
 NO_SPEECH_MODEL = "No speech model is installed. Install the video tools with: uv sync --group video --inexact"
-DOWNLOADING = "Downloading the speech model. This happens once, and the model is large, so it can take a few minutes."
+# A note, so on a first run it never takes the place of the line that says which step stopped.
+DOWNLOADING = "note: downloading the speech model. This happens once, and the model is large, so it can take a few minutes."
 _FRAME = 0.02  # seconds per energy frame
 # A word has a letter or a digit, in any script. A rustle or a breath can come back from the speech model as a
 # lone "." or "...", and that is not something anyone said.
