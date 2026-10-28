@@ -6,7 +6,8 @@ Everything sits in me/character/:
                    and for the sheet, each pose and each move its round, its raw picture and whether the
                    creator approved it
   photos/          the creator's reference photos, if they gave some
-  inbox/           prompts waiting to be pasted by hand, and the pictures dropped back in
+  inbox/           prompts waiting to be pasted by hand, copies of the pictures to attach to them (deleted
+                   once the picture is back), and the pictures dropped back in
   raw/             every picture an image tool returned, untouched
   sheet/ poses/ faces/ moves/   the snapped and fixed results, each with a board to look at
   strips/ manifest.json manifest.js   what the pack step writes for the runtime

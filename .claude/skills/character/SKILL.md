@@ -24,7 +24,7 @@ The creator picked an image tool during setup (`image_provider` in `me/profile.j
 1. Read the creator's rules for this skill with `kit.rules.read("character")`. In a shell: `uv run python -m kit.rules read character`. Follow them.
 2. See where things stand: `uv run python -m kit.character status`. It names the image tool it will use and how far the character has got. If it prints "No image tool found, so I'll give you the prompts to paste into ChatGPT or Gemini.", tell the creator exactly that and carry on with the manual tool. If a character already exists, pick up at the step it names.
 3. Collect what the character is drawn from, one question at a time:
-   - Photos, if they want a likeness: 3 to 5 photos of themselves only, face clearly visible, from a few angles. Never use a photo of anyone else. Tell them the photos go to the image tool they chose and are kept only in `me/character/photos/`.
+   - Photos, if they want a likeness: 3 to 5 photos of themselves only, face clearly visible, from a few angles. Never use a photo of anyone else. Tell them the photos go to the image tool they chose and are kept in `me/character/photos/`. With the manual tool, copies also sit in `me/character/inbox/` for attaching, and the kit deletes them once the picture is back.
    - A description in their own words: hair, skin tone, glasses, build, roughly how old they look, and anything else that makes it them. Without photos, this is all the image tool has, so ask for a little more detail.
    - The outfit: what the character wears in every video.
 
@@ -42,12 +42,21 @@ The creator picked an image tool during setup (`image_provider` in `me/profile.j
    WORDS
    ```
 
-   The same works for `describe` and for a redraw `--note`, one value per command.
+   The same works for `describe` and for a redraw `--note`, one value per command. When the description and the outfit both have an apostrophe, give `start` the description on standard input and a stand-in outfit, then put the real outfit in with `describe`, also on standard input, before the sheet is drawn:
+
+   ```bash
+   uv run python -m kit.character start --outfit 'to follow' --description - <<'WORDS'
+   <their words, apostrophes and all>
+   WORDS
+   uv run python -m kit.character describe --outfit - <<'WORDS'
+   <the outfit, apostrophes and all>
+   WORDS
+   ```
 4. Draw the sheet: `uv run python -m kit.character sheet`. It writes two boards, and you look at both yourself before you show them:
    - `me/character/sheet/board.png`: the picture the tool drew, the front view snapped to pixels on a light and a dark background, the whole sheet, and the palette. Ask whether it looks like them. When they want changes, put the changes into their description or outfit with `uv run python -m kit.character describe --description '<new words>'` (or `--outfit`), then run `sheet` again. It draws from the last sheet and asks the image tool to change only what the description changed.
-   - `me/character/faces/board.png`, the face check: the head on a numbered grid with a box round the eyes and a box round the mouth, beside the mouth closed, half open and open, and a blink. These are what will move in every video, so check them now, before any pose is paid for.
+   - `me/character/faces/board.png`, the face check: the head on a numbered grid with a box round the eyes, a box round the mouth and a line where the head ends, beside the mouth closed, half open and open, and a blink. These are what will move in every video, so check them now, before any pose is paid for.
 
-   When a box sits in the wrong place, or the mouth or the blink looks wrong on that board, mark the face by hand. Read the boxes off the grid as x,y,w,h (left, top, width and height, in the grid's numbers; one box goes round both eyes) and run `uv run python -m kit.character faces --eyes x,y,w,h --mouth x,y,w,h`. Either can be given alone. The marks are kept in the character record and every later step uses them; `uv run python -m kit.character faces --clear` drops them. When the sheet step says the face could not be measured, draw the sheet again with the whole face in view (a smaller hat or none, no hair over the eyes), or mark both boxes by hand the same way.
+   When a box sits in the wrong place, or the mouth or the blink looks wrong on that board, mark the face by hand. Read the boxes off the grid as x,y,w,h (left, top, width and height, in the grid's numbers; one box goes round both eyes) and run `uv run python -m kit.character faces --eyes x,y,w,h --mouth x,y,w,h`. The neck line should sit just under the chin, where the neck or a collar starts: everything above it is the head that the kit copies onto every pose. When it sits anywhere else (on the top, on the shoulders or across the face), read the first row under the chin off the grid and run `uv run python -m kit.character faces --neck <row>`. Each mark can be given alone. The marks are kept in the character record and every later step uses them; `uv run python -m kit.character faces --clear` drops them. When the sheet step says the face could not be measured, draw the sheet again with the whole face in view (a smaller hat or none, no hair over the eyes), or mark both boxes by hand the same way.
 5. When they are happy with both boards, approve the sheet: `uv run python -m kit.character approve sheet`. This locks the palette, stands the front view on the canvas as the idle pose and builds the face states from the face as measured or marked. The idle pose is approved with the sheet, so 13 poses are left to draw, 14 in all. A sheet whose face is neither measured nor marked is not approved, and the message says what to do.
 6. Draw the other 13 poses: `uv run python -m kit.character poses`. Open `me/character/poses/board.png`, look at it, and show it. Ask which poses to keep.
    - Approve the good ones by name, for example `uv run python -m kit.character approve poses talking wave thumbs_up`, or all of them with `approve poses all`.
@@ -66,11 +75,11 @@ The pictures the image tool drew stay in `me/character/raw/`. The sheet, any pos
 
 ## With the manual tool
 
-A drawing command that is waiting for a picture exits with status 3 and prints, for each picture, the prompt file in `me/character/inbox/`, the pictures to attach in order, and the name to save the result under. The pictures to attach are copied into the inbox beside the prompt as `<name>.attach-1.png` and so on, and for a sheet drawn from photos those copies are the creator's photos. Pass that on in plain words: paste the prompt into ChatGPT or Gemini, attach the pictures in that order, download the picture it makes and save it with that name in `me/character/inbox/` (a .png, .jpg or .webp file is fine). When they say done, run the same command again. For the poses there are four prompts at once, and they can do all four before saying done.
+A drawing command that is waiting for a picture exits with status 3 and prints, for each picture, the prompt file in `me/character/inbox/`, the pictures to attach in order, and the name to save the result under. Copies of the pictures to attach wait in the inbox beside the prompt as `<name>.attach-1.png`, `<name>.attach-2.jpg` and so on, each keeping its own file type. For a sheet drawn from photos, those copies are the creator's photos. The kit deletes the copies once the picture is back. Pass that on in plain words: paste the prompt into ChatGPT or Gemini, attach the pictures in that order, download the picture it makes and save it with that name in `me/character/inbox/` (a .png, .jpg or .webp file is fine). When they say done, run the same command again. For the poses there are four prompts at once, and they can do all four before saying done.
 
 ## Things to keep
 
-- The photos stay in `me/character/photos/`. Never copy them anywhere else or send them to any tool other than the one the creator chose.
+- The photos stay in `me/character/photos/`. The kit's only other copies are the manual tool's attachments in `me/character/inbox/`, which it deletes once the picture is back. Never copy the photos anywhere else or send them to any tool other than the one the creator chose.
 - Never edit the files in `me/character/` by hand. Redraw, approve and pack again instead.
 - The canvas size, the feet row and the 14 pose names are what the mini me style builds on. Do not rename or drop a pose.
 - Prompts live in `kit/character/prompts/` and only fill in the creator's own words. The creator's changes go into their description, their outfit or a redraw note, never into the prompt files.

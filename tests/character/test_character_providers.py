@@ -91,6 +91,28 @@ def test_manual_provider_takes_a_jpeg_or_webp_saved_under_the_same_name(me):
     assert image_format(out) == "PNG"
 
 
+def test_the_manual_tools_copies_keep_their_type_and_go_once_the_picture_is_back(me, tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    photo = tmp_path / "Holiday.JPG"
+    Image.new("RGB", (8, 8), (200, 150, 120)).save(photo, format="JPEG")
+    front = tmp_path / "front.png"
+    front.write_bytes(_png_bytes())
+    tool = providers.get("manual")
+    out = me / "raw" / "sheet-r1.png"
+    with pytest.raises(providers.WaitingForImage):
+        tool.generate("Draw the character sheet.", [photo, front], out)
+    inbox = me / "inbox"
+    assert sorted(p.name for p in inbox.glob("sheet-r1.attach-*")) == ["sheet-r1.attach-1.jpg", "sheet-r1.attach-2.png"]
+    assert (inbox / "sheet-r1.attach-1.jpg").read_bytes() == photo.read_bytes()
+
+    (inbox / "sheet-r1.png").write_bytes(_png_bytes((12, 9)))
+    assert tool.generate("Draw the character sheet.", [photo, front], out) == out
+    assert not list(inbox.glob("sheet-r1.attach-*")), "the copies were only there to be attached"
+    assert photo.is_file() and front.is_file(), "the pictures they were copied from stay"
+
+
 # --- choosing a tool -----------------------------------------------------------------------------------
 
 

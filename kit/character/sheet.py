@@ -63,8 +63,9 @@ def start(
 ) -> dict[str, Any]:
     """Begin a character in `folder` from the creator's words and, optionally, 3 to 5 photos of themselves.
 
-    The photos are copied into the folder's photos/ and nowhere else. A character whose sheet is already
-    approved is never overwritten: move the folder aside to start a new one."""
+    The photos are copied into the folder's photos/. The only other copies are the manual tool's, in inbox/
+    for the creator to attach, and it deletes them once the picture is back. A character whose sheet is
+    already approved is never overwritten: move the folder aside to start a new one."""
     description, outfit = " ".join(str(description).split()), " ".join(str(outfit).split())
     if not description:
         raise KitError("Describe the character in a sentence or two first: who they are and how they look.")

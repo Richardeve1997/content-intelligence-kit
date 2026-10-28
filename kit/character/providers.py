@@ -3,9 +3,9 @@
 Every tool has the same one call, `generate(prompt, refs, out) -> out`: draw what the prompt asks for,
 showing the tool the reference pictures in `refs` (in that order), and save the picture as a PNG at `out`.
 
-  manual   the creator pastes the prompt into ChatGPT or Gemini themselves. The prompt and the pictures to
-           attach go to me/character/inbox/, and the call raises WaitingForImage until the picture they
-           save there as <name>.png (or .jpg or .webp) exists. Free.
+  manual   the creator pastes the prompt into ChatGPT or Gemini themselves. The prompt and copies of the
+           pictures to attach go to me/character/inbox/, and the call raises WaitingForImage until the picture
+           they save there as <name>.png (or .jpg or .webp) exists. Then the copies are deleted. Free.
   codex    a signed-in Codex CLI, run once per picture through `codex exec` with its image tool.
   openai   the OpenAI Images API, with OPENAI_API_KEY in .env.
   gemini   the Gemini API, with GEMINI_API_KEY in .env.
@@ -124,7 +124,11 @@ def _save_png(data: bytes, out: Path) -> Path:
 
 
 class ManualProvider:
-    """The creator makes each picture by hand in ChatGPT or Gemini and drops it in the inbox."""
+    """The creator makes each picture by hand in ChatGPT or Gemini and drops it in the inbox.
+
+    While it waits, the inbox holds the prompt and a copy of each picture to attach, named <name>.attach-1,
+    <name>.attach-2 and so on, each keeping its own file type (for a sheet drawn from photos, these are copies
+    of the creator's photos). The copies are deleted once the picture is back."""
 
     name = "manual"
 
@@ -138,7 +142,10 @@ class ManualProvider:
         for suffix in IMAGE_SUFFIXES:
             dropped = inbox / f"{name}{suffix}"
             if dropped.is_file():
-                return _save_png(dropped.read_bytes(), Path(out))
+                saved = _save_png(dropped.read_bytes(), Path(out))
+                for copy in inbox.glob(f"{name}.attach-*"):
+                    copy.unlink(missing_ok=True)  # only there to be attached, and the picture is back
+                return saved
         inbox.mkdir(parents=True, exist_ok=True)
         prompt_file = inbox / f"{name}.prompt.txt"
         prompt_file.write_text(prompt.rstrip("\n") + "\n", encoding="utf-8")

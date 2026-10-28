@@ -42,13 +42,16 @@ def test_the_skill_follows_the_shared_contract():
 def test_the_skill_walks_every_approval_and_names_its_commands():
     body = SKILL.read_text(encoding="utf-8")
     for command in ("status", "start", "sheet", "approve sheet", "poses", "approve poses", "redraw", "faces",
-                    "faces --eyes", "faces --clear", "moves", "pack"):  # fmt: skip
+                    "faces --eyes", "faces --neck", "faces --clear", "describe --outfit -", "moves", "pack"):  # fmt: skip
         assert f"uv run python -m kit.character {command}" in body, command
     assert body.index("kit.character sheet") < body.index("kit.character faces --eyes") < body.index("approve sheet")
     assert body.index("approve sheet") < body.index("approve poses"), "the face is checked before the sheet is approved"
     for words in ("--numbered", "remove character <number>", "13 poses are left to draw, 14 in all", ".attach-1.png",
-                  "--description - <<'WORDS'", "smaller hat"):  # fmt: skip
+                  "--description - <<'WORDS'", "smaller hat", "each keeping its own file type",
+                  "deletes the copies once the picture is back", "a line where the head ends"):  # fmt: skip
         assert words in body, words
+    for stale in ("kept only in", "Never copy them anywhere else"):  # the manual tool does copy photos, for a while
+        assert stale not in body, stale
     assert "No image tool found, so I'll give you the prompts to paste into ChatGPT or Gemini" in body
     assert "test_state.mjs" in body
     assert "3 to 5 photos" in body
