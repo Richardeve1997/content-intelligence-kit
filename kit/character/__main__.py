@@ -89,6 +89,20 @@ def _face_lines(folder: Path, note: str | None = None) -> None:
               "and the neck line just under the chin.")  # fmt: skip
 
 
+def _pack_again(folder: Path) -> None:
+    """Pack again after the face changed. The pack holds each face patch's size and its place on every drawing, so
+    an older pack would draw the new face stretched and out of place."""
+    from kit.character import pack
+
+    try:
+        manifest = pack(folder)
+    except KitError as problem:
+        print(f"The packed character still has the old face, and it cannot be packed again yet. {problem} "
+              "Then run: uv run python -m kit.character pack")  # fmt: skip
+        return
+    print(f"Packed the character again, so the videos use the new face: {_shown(manifest)}")
+
+
 def _status(folder: Path) -> int:
     from kit.character.poses import MOVE_NAMES, POSE_NAMES
 
@@ -165,6 +179,8 @@ def _run(args: argparse.Namespace) -> int:
         store.save(folder, state)
         how = "marked by hand" if state.get("face_marks") else "as measured"
         print(f"The face is ready ({how}). Look at the boxes, the neck line and the face states here: {_shown(board)}")
+        if (folder / "manifest.json").is_file():
+            _pack_again(folder)
         return 0
     if args.command == "approve":
         if args.what == "sheet":

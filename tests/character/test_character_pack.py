@@ -205,6 +205,44 @@ def test_the_redraw_note_reaches_the_prompt(built, tmp_path):
     assert "1. wave: " in seen["prompt"] and "Open the hand wider." in seen["prompt"]
 
 
+def _packed_creator(built, tmp_path, monkeypatch) -> Path:
+    folder, _, _ = built
+    me = tmp_path / "me"
+    shutil.copytree(folder, me / "character")
+    monkeypatch.setenv("KIT_ME", str(me))
+    return me / "character"
+
+
+def test_a_face_change_after_packing_packs_the_character_again(built, tmp_path, monkeypatch, capsys):
+    # The pack holds each face patch's size and where it sits on every drawing, and the runtime stretches the
+    # patch to that size. A face changed after packing would otherwise be drawn stretched and out of place.
+    from kit.character import __main__ as cli
+
+    copy = _packed_creator(built, tmp_path, monkeypatch)
+    before = json.loads((copy / "manifest.json").read_text())["faces"]
+    rows = json.loads((copy / "faces" / "faces.json").read_text())["open_rows"]
+    assert cli.main(["faces", "--open", "4" if rows != 4 else "2"]) == 0
+    said = capsys.readouterr().out
+    patches = json.loads((copy / "faces" / "faces.json").read_text())["patches"]
+    packed = json.loads((copy / "manifest.json").read_text())["faces"]
+    assert packed == {name: [r["w"], r["h"]] for name, r in patches.items()}
+    assert packed != before, "the new face reached the pack"
+    assert "Packed the character again" in said
+
+
+def test_a_face_change_on_a_character_that_cannot_be_packed_now_says_the_pack_is_old(built, tmp_path, monkeypatch, capsys):
+    from kit.character import __main__ as cli
+
+    copy = _packed_creator(built, tmp_path, monkeypatch)
+    poses.redraw(copy, "shrug", note="Raise both hands a little higher.")
+    stale = (copy / "manifest.json").read_text()
+    rows = json.loads((copy / "faces" / "faces.json").read_text())["open_rows"]
+    assert cli.main(["faces", "--open", "4" if rows != 4 else "2"]) == 0
+    said = capsys.readouterr().out
+    assert "still has the old face" in said and "shrug" in said and "kit.character pack" in said
+    assert (copy / "manifest.json").read_text() == stale
+
+
 def test_pack_says_what_is_missing_on_a_new_character(tmp_path):
     folder = tmp_path / "character"
     sheet.start(folder, description="someone", outfit="something", colours=16)
