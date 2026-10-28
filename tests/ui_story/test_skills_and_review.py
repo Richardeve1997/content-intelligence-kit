@@ -314,3 +314,16 @@ def test_the_number_rule_reads_the_same_in_the_checklist_and_the_rubric():
     for line in (checklist, item6):
         assert "is the one the creator says" in line and "no number for shows the sourced one" in line, line
     assert "matches the spoken one" not in ui and "matches the number spoken" not in review
+
+
+def test_a_skipped_proof_card_is_allowed_by_the_skill_and_the_rubric():
+    """The proof card has about 1.5 s before the subject card, and seven words need about 3 s to read, so the
+    skill lets it go. The rubric's first item must not then send the open back for lacking one."""
+    ui, review = text(SKILLS["ui-story"]), text(SKILLS["review"])
+    proof = next(line for line in ui.split("### The open")[1].splitlines() if "one proof card" in line)
+    assert "skip it" in proof and "no fact makes the idea clearer" in proof, proof
+    assert "long enough to read" in proof, "a proof card that cannot be read in time is skipped too"
+    rubric = review.split("## The rubric")[1].split("## Common mistakes")[0]
+    item1 = next(line for line in rubric.splitlines() if line.startswith("1. "))
+    assert "no proof card passes" in item1 and "skips" in item1, item1
+    assert "no fact makes the idea clearer" in item1 and "long enough to read" in item1, item1

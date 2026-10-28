@@ -80,7 +80,7 @@ Layouts switch with a hard cut on the start of a phrase. Split is the spine. Fac
 The first four seconds make the topic clear with the sound off. Three beats:
 
 1. 0 to about 2.5 s: a motion graphic of the problem or idea of THIS video. Frame 0 is already moving. Almost no text, no logo card. It pictures the hook's own noun (the product's real page, the set of things the hook names) and carries the subject's real mark at its centre.
-2. About 2.5 to 3 s: one proof card. A real, sourced fact in about seven words or fewer (a loss, a number, a headline), designed rather than recorded, with its source as one small pill. It backs the first claim the creator says. If no fact makes the idea clearer, skip it and go straight to the subject card.
+2. About 2.5 to 3 s: one proof card. A real, sourced fact in about seven words or fewer (a loss, a number, a headline), designed rather than recorded, with its source as one small pill. It backs the first claim the creator says. If no fact makes the idea clearer, or the card cannot stay up long enough to read (0.35 s a word plus 0.6 s) before the subject card, skip it and go straight to the subject card.
 3. About 4.5 s: the subject card above the creator. Its logo, its name, one plain-language line, and badges with social proof (stars, users), held long enough to read.
 
 The first real footage lands early: by the subject card at the latest, the viewer has seen the real thing (its UI, its site, footage of it in use), not only drawings of it.
