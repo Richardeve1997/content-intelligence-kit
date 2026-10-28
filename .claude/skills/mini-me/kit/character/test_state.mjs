@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -31,25 +32,32 @@ const ok = (c, m) => { if (!c) { fails++; console.log("FAIL", m); } else console
 function node() {
   return { style: {}, children: [], appendChild(c) { this.children.push(c); return c; }, setAttribute() {}, className: "" };
 }
-function load(manifest) {
+function load(manifest, gsapLib) {
   const win = { CHARACTER_MANIFEST: manifest };
   const doc = { createElement: node, querySelector: () => node() };
   const ctx = vm.createContext({ window: win, document: doc, Image: function () {}, Promise, Math, Object, Array, JSON,
-    Infinity, isFinite, String, Number, Error });
+    Infinity, isFinite, String, Number, Error, gsap: gsapLib || standInGsap });
   vm.runInContext(fs.readFileSync(path.join(here, "character.js"), "utf8"), ctx);
   return win.Character;
 }
+// A stand-in timeline with GSAP's shape: tl.to() hands back the timeline, and duration(d) on a timeline changes
+// its speed. tl.add() takes a tween made by gsap.to().
 function timeline() {
   const tweens = [];
-  return {
+  const tl = {
     tweens,
-    to(target, vars) {
-      const tw = { vars, at: 0, length: vars.duration, duration(d) { this.length = d; return this; }, time() { return this.at; } };
-      tweens.push(tw);
-      return tw;
-    },
+    rescaled: 0,
+    to(target, vars) { tweens.push(tween(vars)); return tl; },
+    add(tw) { tweens.push(tw); return tl; },
+    duration() { tl.rescaled++; return tl; },
   };
+  return tl;
 }
+function tween(vars) {
+  return { vars, at: 0, length: vars.duration, duration(d) { if (d === undefined) return this.length; this.length = d; return this; },
+    time() { return this.at; } };
+}
+const standInGsap = { to(target, vars) { return tween(vars); } };
 function seek(tl, t) { tl.tweens.forEach((tw) => { tw.at = t; tw.vars.onUpdate.call(tw); }); }
 
 // ---- the manifest ---------------------------------------------------------------------------------------------------
@@ -163,6 +171,8 @@ const ch = C.mount(node(), { scale: 2, x: 300, y: 1430 });
 C.script(tl, [{ t: 0, move: "talking", dur: 2 }, { t: 2, move: "point_right", hold: 0.5 }, { t: 4, move: "pose:wave" }], { character: ch, until: 6 });
 C.speak(tl, { envelope: env, fps: 24, t0: 0 }, ch);
 ok(tl.tweens.length === 1 && tl.tweens[0].length >= 6, "one paused driver tween per character, as long as the composition");
+ok(tl.rescaled === 0, "script then speak never resize the host timeline (" + tl.rescaled + " resizes)");
+ok(ch.driver === tl.tweens[0] && ch.driver.length >= 6, "the driver is the tween itself, not the timeline");
 seek(tl, 0.5);
 const shown = Object.keys(ch.divs).filter((k) => ch.divs[k].style.display === "block");
 ok(shown.length === 1 && shown[0] === "talking", "only the playing move's strip is shown (" + shown.join(", ") + ")");
@@ -181,6 +191,28 @@ ok(ch.divs["pose:wave"].style.display === "block" && ch.divs.talking.style.displ
 const left = ch.root.style.left;
 seek(tl, 4.6);
 ok(ch.root.style.left === left, "a held pose does not move: no breathing or bobbing");
+
+// ---- the same two binds on a real GSAP timeline, when bin/fetch_gsap.sh has fetched it ---------------------------------
+const gsapFile = path.join(here, "..", "..", "..", "..", "..", "kit", "vendor", "gsap.min.js");
+if (fs.existsSync(gsapFile)) {
+  const loaded = createRequire(import.meta.url)(gsapFile);
+  const real = loaded.gsap || loaded.default || loaded;
+  const R = load(M, real);
+  const host = real.timeline({ paused: true });
+  host.to({ v: 0 }, { v: 1, duration: 12, ease: "none" }, 0);          // the composition's own 12 s
+  const mounted = R.mount(node(), { scale: 2, x: 300, y: 1430 });
+  R.script(host, [{ t: 0, move: "talking", dur: 2 }], { character: mounted, until: 10 });
+  const first = mounted.driver.duration();
+  R.speak(host, { envelope: env, fps: 24, t0: 0, until: 10.5 }, mounted);
+  ok(host.timeScale() === 1 && Math.abs(host.duration() - 12) < 1e-9,
+    "script then speak leave a real timeline's speed and length alone (timeScale " + host.timeScale() + ")");
+  ok(Math.abs(first - 10) < 1e-9 && mounted.driver.duration() >= 10.5 - 1e-9, "the driver grows with the later bind (" +
+    first + " s, then " + mounted.driver.duration().toFixed(2) + " s)");
+  host.seek(6.5, false);
+  ok(R.stateAt(mounted, 6.5).tick === Math.floor(6.5 * 24 + 1e-6), "a seek on the host timeline lands the driver on the same time");
+} else {
+  console.log("skip  the real GSAP check (run bin/fetch_gsap.sh to include it)");
+}
 
 console.log(fails ? fails + " FAILED" : "all passed");
 process.exit(fails ? 1 : 0);

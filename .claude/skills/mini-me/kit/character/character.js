@@ -311,8 +311,11 @@
     var D = Math.max(inst.until, 0.05);
     if (!inst.driver) {
       var proxy = { p: 0 };
-      inst.driver = tl.to(proxy, { p: 1, duration: D, ease: "none", onUpdate: function () { render(inst, this.time()); } }, 0);
-    } else {
+      // gsap.to() hands back the tween itself; tl.to() would hand back the whole timeline, and stretching that
+      // later would change the speed of everything on it. Keep the tween, so a later bind stretches only it.
+      inst.driver = gsap.to(proxy, { p: 1, duration: D, ease: "none", onUpdate: function () { render(inst, this.time()); } });
+      tl.add(inst.driver, 0);
+    } else if (inst.driver.duration() < D) {
       inst.driver.duration(D);
     }
     render(inst, 0);
