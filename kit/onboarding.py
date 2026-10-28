@@ -154,7 +154,7 @@ def _save_problem(exc: OSError, what: str) -> str:
         )
     if exc.errno == errno.ENOSPC:
         return f"Setup could not save {what} ({_reason(exc)}). Free some disk space and try again."
-    return f"Setup could not save {what} ({_reason(exc)}). Try again, and tell your agent if it keeps failing."
+    return f"Setup could not save {what} ({_reason(exc)}). Try again. If it fails the same way, that reason is what to fix."
 
 
 def _temp_beside(path: Path) -> Path:
@@ -647,17 +647,25 @@ _CLIPS = {
     "ui-story": ("UI story", ".claude/skills/ui-story/kit/test_clip.py"),
     "mini-me": ("mini me", ".claude/skills/mini-me/kit/test_clip.py"),
 }
-_LAST_LINES = 6  # how much of the end of what a script said is passed on when it fails
+# How much of the end of what a script said is passed on when it fails. The mini me clip's failure text is eight
+# lines: what it says stopped, up to six lines of the step's own log, and what to do next.
+_LAST_LINES = 8
 
 
 def _lines(text: str | None) -> list[str]:
     return [line.rstrip() for line in (text or "").splitlines() if line.strip()]
 
 
+def _is_note(line: str) -> bool:
+    return line.lower().startswith("note:")
+
+
 def _what_it_said(done: subprocess.CompletedProcess) -> str:
     """The reason a clip script gave, as plain sentences. A crash gives its last line and no stack.
 
-    The first line stays with the last few, because it is the one that says which step stopped.
+    A script says what stopped it in a few lines at the end, so the last few are kept. The first line that is
+    not a note stays with them, because it is the one that says which step stopped. The notes before it were
+    for the creator on the way, and the failure is what matters now.
     """
     err = (done.stderr or "").strip()
     if "Traceback" in err:
@@ -666,8 +674,10 @@ def _what_it_said(done: subprocess.CompletedProcess) -> str:
             "Try the clip again. If it stops the same way, that error is the reason."
         )
     lines = _lines(done.stdout) or _lines(done.stderr)  # a script that never got as far as a sentence wrote to stderr
-    if len(lines) > _LAST_LINES + 1:
-        lines = [lines[0], *lines[-_LAST_LINES:]]
+    if len(lines) > _LAST_LINES:
+        start = len(lines) - _LAST_LINES
+        head = next((i for i, line in enumerate(lines) if not _is_note(line)), 0)
+        lines = lines[start:] if head >= start else [lines[head], *lines[start:]]
     return "It said:\n" + "\n".join("  " + line for line in lines) if lines else "It gave no reason."
 
 

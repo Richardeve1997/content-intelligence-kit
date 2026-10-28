@@ -21,7 +21,7 @@ picture-in-picture instead of breaking out above it. A real edit makes the matte
 The whole run holds one heavy-job slot and checks for 5 GB of free disk first. The scratch files go in a folder of
 their own, <work>/test-clip-build/, which is cleared before a run and deleted after it unless --keep is given.
 Nothing else in <work> is touched, and the take is only read. Whatever the script prints before its last line is a
-note for the creator, which is why the finish's own loudness report is kept off the screen.
+note for the creator, and starts with "note:", which is why the finish's own loudness report is kept off the screen.
 """
 
 from __future__ import annotations
@@ -299,7 +299,7 @@ def cut_take(take: Path, window: tuple[float, float], build: Path) -> Path:
     said = run("cutting the take", [sys.executable, KIT / "cut_base.py", take, edl, base])
     for sentence in said.splitlines():
         if "HDR" in sentence:  # the cut goes on without the colour fix, and the creator should hear why
-            print(sentence)
+            print(f"note: {sentence[:1].lower()}{sentence[1:]}")
     return base
 
 
@@ -330,7 +330,7 @@ def clip(out: Path, *, take: Path | None = None, line: str | None = None, work: 
     build = folder / SCRATCH
     source, note = find_take(folder, take)
     if note:
-        print(note)
+        print(f"note: {note}")
     with media.heavy_slot(label="ui story test clip"):
         shutil.rmtree(build, ignore_errors=True)
         build.mkdir(parents=True)
@@ -349,7 +349,7 @@ def _build(profile, build: Path, out: Path, take: Path | None, line: str | None)
         heard = transcribe.words(take)
         window = pick_window(heard, media.probe(take).duration)
         if window is None:
-            print("Nothing can be heard in the take, so the clip uses the sample card.")
+            print("note: nothing can be heard in the take, so the clip uses the sample card.")
             take = None
         else:
             words = window_words(heard, *window)

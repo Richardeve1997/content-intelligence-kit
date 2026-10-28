@@ -177,10 +177,10 @@ UI story needs nothing generated. Give them the filming tips:
 ```bash
 mkdir -p work/onboarding-test/take
 ln -s "<the path they gave you>" work/onboarding-test/take/
-ls -L work/onboarding-test/take/
+ls -L work/onboarding-test/take/*
 ```
 
-The last command checks the link: it lists the take, and prints an error for a link that points nowhere. Then the path they gave you has a typo, so ask for it again and make the link again.
+The last command checks the link. It lists the take, and prints an error for a link that points nowhere or for no link at all (the `/*` matters: `ls -L` on the folder alone lists a broken link without a word). Then the path they gave you has a typo, so ask for it again and make the link again.
 
 If they skip the take, the test clip uses a sample card and a scratch voice instead.
 

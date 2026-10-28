@@ -32,6 +32,7 @@ from kit import config, media, voice
 from kit.config import KitError
 
 SLUG = "mini-me-test-clip"
+SCRIPT = ".claude/skills/mini-me/kit/test_clip.py"  # from the kit folder, for the sentence that says how to run it by hand
 HEADLINE = "MEET MY MINI ME"
 MADE = ("build", "review", "vo.m4a", "vo.json", "words.json", "beats.json", "script.md", "final.mp4")
 
@@ -103,8 +104,10 @@ def clip(out: Path, *, line: str | None = None, recording: Path | None = None, k
             shipped = ship.main([SLUG, "--music", "none"])
         if shipped != 0:
             said = "\n".join(log.getvalue().strip().splitlines()[-6:])
+            # Onboarding runs this script without --keep and cannot pass it, so say how to run it by hand.
             raise KitError("The test clip did not pass its checks. What the last step said:\n" + said + "\n"
-                           "Run it again with --keep to leave the scratch files in work/mini-me-test-clip/, "
+                           f"To look closer, run the script by hand with --keep: uv run python {SCRIPT} --out <a file name> --keep. "
+                           "It leaves the scratch files in work/mini-me-test-clip/, "
                            "where build/final.next.mp4 is the render to listen to.")
         out = Path(out)
         out.parent.mkdir(parents=True, exist_ok=True)

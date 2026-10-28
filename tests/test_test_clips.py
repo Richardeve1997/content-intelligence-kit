@@ -422,7 +422,7 @@ def test_a_take_with_nothing_said_falls_back_to_the_sample_card(clip, stand_ins,
 
     monkeypatch.setattr(clip.transcribe, "words", words)
     clip.clip(tmp_path / "o.mp4", work=stand_ins.work)
-    assert "Nothing can be heard in the take" in capsys.readouterr().out
+    assert "note: nothing can be heard in the take" in capsys.readouterr().out
     assert stand_ins.spoken == [clip.SAMPLE_LINE]
     assert calls == ["take-01.mov", "clean.wav"]
 
@@ -432,7 +432,7 @@ def test_an_hdr_sentence_from_the_base_cut_reaches_the_creator(clip, stand_ins, 
     stand_ins.said_by_cut_base = "[cut_base] 1 segments\nThis take is HDR and this ffmpeg has no zscale filter, so its colours may look washed out.\n"
     clip.clip(tmp_path / "o.mp4", work=stand_ins.work)
     printed = capsys.readouterr().out
-    assert "This take is HDR" in printed and "[cut_base]" not in printed
+    assert "note: this take is HDR" in printed and "[cut_base]" not in printed
 
 
 def test_a_take_link_that_points_nowhere_is_said_once_and_the_sample_card_is_made(clip, stand_ins, tmp_path, capsys):
@@ -441,6 +441,7 @@ def test_a_take_link_that_points_nowhere_is_said_once_and_the_sample_card_is_mad
     clip.clip(tmp_path / "o.mp4", work=stand_ins.work)
     printed = capsys.readouterr().out
     assert printed.count("points to a file that is not there any more") == 1
+    assert "note: take/take-01.mov points to a file that is not there any more" in printed
     assert stand_ins.spoken == [clip.SAMPLE_LINE]
 
 
@@ -507,6 +508,13 @@ FAILS_LONG = (
     'print("The test clip stopped while cutting the take (exit 1). What it said:"); '
     '[print("detail " + str(n)) for n in range(1, 10)]; sys.exit(1)'
 )
+# The mini me script's failure text: a first line, up to six lines of what the last step said, and a closing line.
+EIGHT_LINES = (
+    'print("The test clip did not pass its checks. What the last step said:"); '
+    '[print("log " + str(n)) for n in range(1, 7)]; '
+    'print("To look closer, run the script by hand with --keep."); sys.exit(1)'
+)
+NOTE = 'print("note: the line runs 4.0 s; a test clip is best at 5 to 10 s."); '
 CRASHES = 'raise RuntimeError("boom")'
 
 
@@ -673,8 +681,49 @@ def test_a_failure_keeps_the_line_that_says_which_step_stopped_and_the_last_line
     code, out, err = clips(capsys)
     assert code == 1
     assert "The test clip stopped while cutting the take (exit 1). What it said:" in out, "the first line stays"
-    assert "detail 9" in out and "detail 4" in out, "and so do the last six"
-    assert "detail 3" not in out and "detail 1\n" not in out, "the middle is left out"
+    assert "detail 9" in out and "detail 2" in out, "and so do the last eight lines"
+    assert "detail 1\n" not in out, "the middle is left out"
+
+
+def test_a_note_before_a_failure_does_not_take_the_place_of_the_line_that_says_which_step_stopped(kit_folder, capsys):
+    kit_folder.script("ui-story", NOTE + FAILS_LONG)
+    code, out, err = clips(capsys)
+    assert code == 1
+    assert "The test clip stopped while cutting the take (exit 1). What it said:" in out, "the first line that is not a note"
+    assert "detail 9" in out and "detail 2" in out
+    assert "detail 1\n" not in out
+    assert "the line runs 4.0 s" not in out, "a note is not the head of a failure"
+
+
+def test_a_failure_text_of_eight_lines_is_shown_whole(kit_folder, capsys):
+    kit_folder.script("mini-me", EIGHT_LINES)
+    kit_folder.built()
+    code, out, err = clips(capsys)
+    assert code == 1
+    for line in ["The test clip did not pass its checks.", *[f"log {n}" for n in range(1, 7)], "To look closer"]:
+        assert line in out, line
+
+
+def test_a_note_before_eight_lines_leaves_all_eight(kit_folder, capsys):
+    kit_folder.script("mini-me", NOTE + EIGHT_LINES)
+    kit_folder.built()
+    code, out, err = clips(capsys)
+    for line in ["The test clip did not pass its checks.", *[f"log {n}" for n in range(1, 7)], "To look closer"]:
+        assert line in out, line
+
+
+def test_several_notes_before_a_long_failure_still_leave_its_first_line(kit_folder, capsys):
+    notes = 'print("note: one"); print("note: two"); print("note: three"); '
+    kit_folder.script("ui-story", notes + FAILS_LONG)
+    code, out, err = clips(capsys)
+    assert "The test clip stopped while cutting the take (exit 1)." in out
+    assert "detail 9" in out and "note: one" not in out
+
+
+def test_a_failure_that_is_all_notes_still_says_something(kit_folder, capsys):
+    kit_folder.script("ui-story", NOTE + 'sys.exit(1)')
+    code, out, err = clips(capsys)
+    assert code == 1 and "the line runs 4.0 s" in out
 
 
 def test_a_script_that_only_wrote_to_the_error_stream_still_gets_to_say_why(kit_folder, capsys):

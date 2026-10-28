@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -710,8 +711,9 @@ def test_another_failure_to_write_is_named_and_not_called_a_full_disk(me, monkey
         with pytest.raises(KitError) as caught:
             state.finish()
     assert str(caught.value) == (
-        "Setup could not save your files (Input/output error). Try again, and tell your agent if it keeps failing."
+        "Setup could not save your files (Input/output error). Try again. If it fails the same way, that reason is what to fix."
     )
+    assert "agent" not in str(caught.value), "words for the creator, who may be reading this in a terminal"
 
 
 # --- platform names ------------------------------------------------------------------------------------------
@@ -1571,8 +1573,51 @@ def test_the_styles_step_has_the_hdr_tip_and_links_the_test_take():
     assert "Settings, Camera, Record Video, HDR Video off" in styles
     assert "work/onboarding-test/take" in styles and "ln -s" in styles
     assert "Never copy or move it" in styles
-    assert "ls -L work/onboarding-test/take/" in styles, "a link that points nowhere is found right after it is made"
-    assert styles.index("ln -s") < styles.index("ls -L work/onboarding-test/take/")
+    assert "ls -L work/onboarding-test/take/*" in styles, "a link that points nowhere is found right after it is made"
+    assert styles.index("ln -s") < styles.index("ls -L work/onboarding-test/take/*")
+
+
+def link_check_command() -> str:
+    """The check the skill gives for the take link, as the line in its code block."""
+    styles = step_sections(read(SKILLS / "onboard" / "SKILL.md"))[8][1]
+    found = re.findall(r"^(ls -L work/onboarding-test/take/\S*)$", styles, re.M)
+    assert len(found) == 1, found
+    return found[0]
+
+
+@pytest.mark.parametrize("shell", ["sh", "zsh"])
+def test_the_take_link_check_says_so_when_the_link_points_nowhere(tmp_path, shell):
+    """`ls -L` on the folder lists a broken link without a word on macOS. The check has to fail on one."""
+    if shutil.which(shell) is None:
+        pytest.skip(f"no {shell} here")
+    folder = tmp_path / "work" / "onboarding-test" / "take"
+    folder.mkdir(parents=True)
+    run_check = lambda: subprocess.run([shell, "-c", link_check_command()], cwd=tmp_path, capture_output=True, text=True)  # noqa: E731
+
+    assert run_check().returncode != 0, "no link at all"
+
+    (folder / "take-01.mov").symlink_to(tmp_path / "typo-in-the-path.mov")
+    broken = run_check()
+    assert broken.returncode != 0 and "take-01.mov" in broken.stdout + broken.stderr
+
+    (folder / "take-01.mov").unlink()
+    real = tmp_path / "raw-take.mov"
+    real.write_bytes(b"the raw take")
+    (folder / "take-01.mov").symlink_to(real)
+    fine = run_check()
+    assert fine.returncode == 0 and "take-01.mov" in fine.stdout
+
+
+def test_the_folder_alone_would_not_have_caught_it(tmp_path):
+    """Why the check ends in /*: on this system a bare `ls -L` of the folder does not mind a broken link."""
+    folder = tmp_path / "take"
+    folder.mkdir()
+    (folder / "take-01.mov").symlink_to(tmp_path / "nowhere.mov")
+    done = subprocess.run(["ls", "-L", str(folder) + "/"], capture_output=True, text=True)
+    if done.returncode != 0:
+        pytest.skip("this ls already minds a broken link, so the /* is only a belt")
+    assert "take-01.mov" in done.stdout
+    assert link_check_command().endswith("/*")
 
 
 def test_the_test_clip_step_runs_the_clips_command_and_says_what_it_leaves_out():

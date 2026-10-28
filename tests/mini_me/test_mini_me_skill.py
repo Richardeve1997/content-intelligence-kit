@@ -175,6 +175,8 @@ def noisy_pipeline(monkeypatch, *, fail: bool = False):
     def fake_ship(args):
         print("  #       t field  pose        scale crown  headline sizes")
         if fail:
+            print("build/hits.json is missing, so the page check made it again.")
+            print("0 whooshes and 0 thuds -> build/hits.json")
             print("FAIL: the speech gate found 1 lost word run(s):")
             print('- "mini" (at 1.45 s in the edit) is missing from the final audio.')
             print("The failed render is build/final.next.mp4; final.mp4 was left as it was.")
@@ -219,7 +221,17 @@ def test_a_clip_that_fails_its_checks_says_what_the_steps_said(kit_home, tmp_pat
     said = capsys.readouterr().out
     assert 'FAIL: the speech gate found 1 lost word run(s):' in said and '"mini" (at 1.45 s' in said
     assert "--keep" in said and "final.next.mp4" in said
+    # the clips command cannot pass --keep, so the sentence says how to run the script by hand
+    assert "uv run python .claude/skills/mini-me/kit/test_clip.py --out" in said and "by hand" in said
+    assert "Run it again with --keep" not in said
+    assert len(said.strip().splitlines()) == 8, "a first line, the last six lines of the log, and how to look closer"
     assert "Traceback" not in said
+    # onboarding's clips command shows a failure's last eight lines, so none of these is cut when it passes them on
+    from kit import onboarding
+
+    shown = onboarding._what_it_said(subprocess.CompletedProcess([], 1, stdout=said, stderr=""))
+    for line in said.strip().splitlines():
+        assert line.strip() in shown, f"the clips command would cut: {line}"
     assert not (tmp_path / "clip.mp4").exists()
 
 
