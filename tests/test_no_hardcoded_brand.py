@@ -411,3 +411,12 @@ def test_the_allowlist_has_no_stale_or_unexplained_entries():
     for path, reason in NEUTRAL_FALLBACKS.items():
         assert (ROOT / path).is_file(), f"{path} is on the allowlist but does not exist"
         assert reason.strip(), f"{path} is on the allowlist with no reason"
+
+
+def test_the_diagrams_in_the_docs_use_greys_only():
+    """The docs show layouts to every creator, so they carry no brand colour either: greys only."""
+    diagrams = sorted((ROOT / "docs").rglob("*.svg"))
+    assert ROOT / "docs" / "media" / "ui-story-layouts.svg" in diagrams
+    for path in diagrams:
+        found = chromatic_colours(path.read_text(encoding="utf-8"))
+        assert found == [], f"{path.relative_to(ROOT).as_posix()} has a chromatic colour: {found}"
