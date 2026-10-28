@@ -29,7 +29,7 @@
  *     back    layer behind the character (cards tuck behind the head); front: in front (stamps, bursts)
  *     T(cue)  seconds of a spoken word: a word index, "phrase" or "phrase#2"; T.e(cue) is its end
  *     A       motion helpers (all fromTo with both ends given): pop rise slide drop slam punch shake out count burst;
- *             count leaves a number under 20 whole and counts a bigger one up from 10, unless given a start
+ *             count leaves a number under 20 whole, and a year, and counts a bigger one up from 10, unless given a start
  *     win(el, a, b)  show an element only from a to b      hit(kind, t)  a whoosh or thud at t (written to hits.json)
  *
  *   Helpers that build and animate in one call: Stage.card(c, o), Stage.stamp(c, text, o), Stage.bubble(c, text, o),
@@ -160,7 +160,7 @@
       if (!m) return false;
       var target = parseFloat(m[2].replace(/,/g, "")), decimals = (m[2].split(".")[1] || "").length, commas = m[2].indexOf(",") >= 0;
       if (from == null) {
-        if (target < COUNT_MIN) return false;
+        if (target < COUNT_MIN || (!m[1] && !m[3] && /^(19|20)\d\d$/.test(m[2]))) return false;  // too small, or a year
         from = COUNT_FROM;
       }
       var fmt = function (v) {
@@ -490,7 +490,8 @@
       if (!num) PROBLEMS.push("note: page " + s.n + " counts, but its headline has no number.");
       else if (s.i === 0) PROBLEMS.push("note: page 1 shows its number whole, so the first frame reads right.");
       else if (!A.count(num, s.t0 + 0.02, Math.min(0.7, s.dur * 0.6))) {
-        PROBLEMS.push("note: page " + s.n + " counts " + num.textContent + ", which is under 20, so it shows whole instead.");
+        var why = /^(19|20)\d\d$/.test(num.textContent) ? "reads as a year" : "is under 20";
+        PROBLEMS.push("note: page " + s.n + " counts " + num.textContent + ", which " + why + ", so it shows whole instead.");
       }
     }
     else if (kind === "burst") A.burst(c.front, c.char.x, c.char.crown + 140, c.keyAt + 0.05, { r: 260 });
@@ -502,6 +503,10 @@
       if (c.held) {
         s.heldNote = true;
         PROBLEMS.push("note: page " + s.n + ": the words " + JSON.stringify(what) + " do not fit on the card the character holds at " + HELD_MIN_SIZE + " px, so the card drops in beside it instead. Cut them to a few words.");
+      } else if (s.shot.pose === "hold_card") {
+        // a problem, not a note: the page would show a blank held card with a second card beside it
+        s.heldNote = true;
+        PROBLEMS.push("page " + s.n + " pairs hold_card with a card, but no card was measured on the character's hold_card drawing, so the card drops in beside a blank card. Give the page another pose, or draw hold_card again with a large plain white card and pack again.");
       }
       if (picture) card(c, { img: what }); else card(c, { text: what });
     } else if (kind === "card") PROBLEMS.push("note: page " + s.n + " has a card with nothing on it. Name what it shows in beats.json.");
@@ -718,7 +723,7 @@
       if (s.shot.pose === "hold_card" && !s.heldNote && !s.el.querySelector(".mm-held")) {
         problems.push("note: page " + p.n + ": the hold_card pose holds a blank card" + (s.shot.held
           ? ". Give the page a card prop with the words to write on it, or pick another pose."
-          : ", and no card was measured on it when the character was packed, so nothing can be written on it. Pick another pose, or pack the character again."));
+          : ", and no card was measured on it when the character was packed, so nothing can be written on it. Pick another pose, or draw hold_card again with a large plain white card and pack again."));
       }
       lines.forEach(function (L) {
         if (L.left < 90 || L.right > 990) problems.push("page " + p.n + ": the headline reaches x " + L.left + " to " + L.right + ", outside 90 to 990.");

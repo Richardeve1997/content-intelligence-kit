@@ -376,7 +376,7 @@ def test_an_unmeasured_waist_says_to_check_the_crop(wide_stage, stage):
 
 
 def test_a_single_digit_count_shows_whole(stage):
-    """"3 OF 5" never passes through 1 or 2 and keeps its 5: a number under 10 does not count."""
+    """"3 OF 5" never passes through 1 or 2 and keeps its 5: a number under 20 does not count."""
     page, start = stage["page"], PAGES[3]["t"]
     for k in range(-2, 54):  # every frame from just before the page to 0.9 s into it
         page.seek(round(start + k / 60, 4))
@@ -386,7 +386,7 @@ def test_a_single_digit_count_shows_whole(stage):
 
 
 def test_a_count_from_the_scenes_never_shows_a_single_digit(stage):
-    """Stage.A.count, as scenes.js calls it: a number under 10 stays whole, 10 or more counts up from 10."""
+    """Stage.A.count, as scenes.js calls it: a number under 20 stays whole, 20 or more counts up from 10."""
     page = stage["page"]
     page.js("""(() => { const box = document.createElement('div'); box.style.display = 'none'; document.body.appendChild(box);
         for (const [id, to] of [['mm-test-8', '8'], ['mm-test-21', '21']]) {
@@ -466,16 +466,66 @@ def test_a_card_on_a_hold_card_page_is_written_on_the_card_the_character_holds(t
     page.page.close()
 
 
-def test_a_hold_card_page_without_a_measured_card_drops_its_card_and_says_so(tmp_path, monkeypatch, browser):
-    """A character packed with no plain card in its hold_card drawing keeps the card dropping in, and the check
-    says why the held card stays blank."""
-    page, _ = held_project(tmp_path, monkeypatch, browser, build="big_head")
+def test_install_refuses_a_hold_card_page_with_a_card_when_no_card_was_measured(tmp_path, monkeypatch):
+    """A character packed with no plain card in its hold_card drawing: a page that pairs hold_card with a card is
+    refused before the project is written, with what to do."""
+    root, me = tmp_path / "kit", tmp_path / "me"
+    shutil.copytree(ROOT / "me.example", me)
+    monkeypatch.setenv("KIT_ME", str(me))
+    monkeypatch.setattr(config, "kit_root", lambda: root)
+    with pytest.raises(config.KitError, match="hold_card") as caught:
+        build_project(root, me, spoken=HELD_SPOKEN, build="big_head", pages=HELD_PAGES)
+    assert "draw hold_card again" in str(caught.value)
+
+
+def test_the_stage_fails_a_hold_card_page_with_a_card_when_no_card_was_measured(tmp_path, monkeypatch, browser):
+    """The same pairing made in scenes.js (a pose override) fails the page check, and the card drops in."""
+    pages = [dict(p) for p in HELD_PAGES]
+    pages[1]["pose"] = "point_left"
+    root, me = tmp_path / "kit", tmp_path / "me"
+    shutil.copytree(ROOT / "me.example", me)
+    monkeypatch.setenv("KIT_ME", str(me))
+    monkeypatch.setattr(config, "kit_root", lambda: root)
+    hf = build_project(root, me, spoken=HELD_SPOKEN, build="big_head", pages=pages)
+    (hf / "lib" / "scenes.js").write_text('Stage.page(2, { char: { pose: "hold_card" } });\n')
+    page = Page(browser, hf)
     info = page.js("Stage.audit()")
-    assert info["pages"][1]["held"] is None
+    assert info["pages"][1]["pose"] == "hold_card" and info["pages"][1]["held"] is None
+    failures = [p for p in info["problems"] if not p.startswith("note:")]
+    assert len(failures) == 1 and failures[0].startswith("page 2") and "hold_card" in failures[0], info["problems"]
+    assert "draw hold_card again" in failures[0]
     assert page.js("document.querySelectorAll('#mm-p2 .mm-card').length") == 1
-    notes = [p for p in info["problems"] if "hold_card" in p and "blank" in p]
-    assert len(notes) == 1 and notes[0].startswith("note: page 2"), info["problems"]
     page.page.close()
+
+
+def test_words_too_long_for_the_held_card_fall_back_to_a_dropped_card(tmp_path, monkeypatch, browser):
+    """Words that cannot fit the held card at 26 px are not clipped: the card drops in instead, with a note."""
+    pages = [dict(p) for p in HELD_PAGES]
+    pages[1]["prop"] = "card: " + " ".join(["water"] * 60)
+    page, _ = held_project(tmp_path, monkeypatch, browser, pages=pages)
+    info = page.js("Stage.audit()")
+    assert page.js("document.querySelectorAll('#mm-p2 .mm-held').length") == 0
+    assert page.js("document.querySelectorAll('#mm-p2 .mm-card').length") == 1
+    notes = [p for p in info["problems"] if "page 2" in p and "do not fit" in p]
+    assert len(notes) == 1 and notes[0].startswith("note:"), info["problems"]
+    page.page.close()
+
+
+def test_a_year_count_from_the_scenes_stays_whole(stage):
+    """A year never rolls up from 10, even though it is over 20; a number with a comma is not a year."""
+    page = stage["page"]
+    page.js("""(() => { const box = document.createElement('div'); box.style.display = 'none'; document.body.appendChild(box);
+        for (const [id, to] of [['mm-test-2024', '2024'], ['mm-test-2k', '2,024']]) {
+          const n = document.createElement('span'); n.id = id; n.setAttribute('data-to', to); n.textContent = to; box.appendChild(n);
+          n.setAttribute('data-counted', String(Stage.A.count(n, 1.0, 0.6))); }
+        return true; })()""")
+    assert page.js("document.getElementById('mm-test-2024').getAttribute('data-counted')") == "false"
+    assert page.js("document.getElementById('mm-test-2k').getAttribute('data-counted')") == "true"
+    seen = set()
+    for k in range(-6, 48):
+        page.seek(round(1.0 + k / 60, 4))
+        seen.add(page.js("document.getElementById('mm-test-2024').textContent"))
+    assert seen == {"2024"}, seen
 
 
 def test_a_hold_card_page_with_nothing_to_write_is_noted(tmp_path, monkeypatch, browser):

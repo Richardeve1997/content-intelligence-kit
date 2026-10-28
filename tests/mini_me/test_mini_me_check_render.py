@@ -52,6 +52,22 @@ def test_check_passes_and_writes_the_hits_from_the_page(reel, capsys):
 
 
 @needs_gsap
+def test_check_fails_a_hold_card_page_with_a_card_when_no_card_was_measured(kit_home, example_me, capsys):
+    """A pose override in scenes.js that pairs hold_card with a card, on a character with no measured card, is a
+    failure the page check prints, not a note it passes."""
+    pytest.importorskip("playwright.sync_api")
+    pages = [{"t": 0.0, "text": "BASIL *DIES*", "pose": "point_up", "field": "dark", "prop": "card: Week three"},
+             {"t": 1.6, "text": "THE PLAN", "pose": "point_left", "field": "light", "prop": "card: Water early"},
+             {"t": 3.4, "text": "COMMENT GROW", "pose": "point_up", "field": "dark", "prop": "cta"}]
+    spoken = "Basil dies in week three. Here is the plan. Comment GROW and I'll send you the checklist."
+    hf = build_project(kit_home, example_me, spoken=spoken, build="big_head", pages=pages)
+    (hf / "lib" / "scenes.js").write_text('Stage.page(2, { char: { pose: "hold_card" } });\n')
+    assert run_check() == 1
+    out = capsys.readouterr().out
+    assert "FAIL page 2" in out and "hold_card" in out and "PASS" not in out
+
+
+@needs_gsap
 def test_a_cue_the_narration_never_says_fails_by_name(reel, capsys):
     folder, hf = reel
     (hf / "lib" / "scenes.js").write_text('Stage.page(2, { build: function (c) { Stage.stamp(c, "NO", { t: c.T("moonwalk") }); } });\n')

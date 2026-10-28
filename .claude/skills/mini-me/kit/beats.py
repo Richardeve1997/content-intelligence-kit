@@ -17,7 +17,8 @@ beats.json is {"duration": seconds, "pages": [...]}, and every page is
          page is idle: the close is a big head-and-shoulders punch-in where the mouth does the work
   field  dark or light, taking turns, so the background flips on every page
   prop   what arrives because of the pose: none, stamp[: TEXT], count (a number of 20 or more counts up from
-         10; 1 to 19 show whole, and so does any number on the first page), burst, bubble: TEXT,
+         10; 1 to 19 show whole, and so do a year such as 2024 and any number on the first page), burst,
+         bubble: TEXT,
          card: <a few words or assets/<file>>, or cta (the closing call to action)
 
 How a phrase is found: the words break at the end of a sentence or clause, at a pause of 0.25 s or more,
@@ -121,10 +122,30 @@ def content(text: str) -> bool:
 CLOSERS = "\"')]}\u2019\u201d\u00bb"  # a closing quote or bracket can follow the mark that ends a sentence
 
 
+def _ends_with(word: transcribe.Word, marks: str | tuple[str, ...]) -> bool:
+    """Whether the word ends with one of `marks`, even when a closing quote or bracket follows it ('why?"')."""
+    return word.text.rstrip().rstrip(CLOSERS).endswith(marks)
+
+
 def _ends_sentence(word: transcribe.Word) -> bool:
-    """Whether the word ends its sentence: a full stop, a question mark or an exclamation mark, even when a closing
-    quote or bracket follows it ('why."')."""
-    return word.text.rstrip().rstrip(CLOSERS).endswith((".", "!", "?"))
+    """Whether the word ends its sentence: a full stop, a question mark or an exclamation mark."""
+    return _ends_with(word, (".", "!", "?"))
+
+
+def held_card_measured() -> bool | None:
+    """Whether the creator's packed character holds a measured card on its hold_card drawing (the pack writes its
+    clear face into the manifest). None when there is no packed character to read."""
+    try:
+        path = config.me_dir() / "character" / "manifest.json"
+    except KitError:
+        return None
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return bool(data["poses"]["hold_card"]["frame_info"][0].get("card"))
+    except (KeyError, IndexError, TypeError, ValueError, OSError):
+        return None
 
 
 def _cta_start(words: list[transcribe.Word], cta: str, keyword: str | None) -> int | None:
@@ -260,15 +281,24 @@ def headline(words, group: list[int]) -> str:
     return " ".join(w for w in (shown(t) for t in texts) if w)
 
 
-def _pose(words, group: list[int], index: int, previous: str | None) -> str:
+def _next_pose(pose: str, hold_card: bool) -> str:
+    """The pose after `pose` when the same one would repeat. hold_card only when the character's card was measured."""
+    following = NEXT_POSE.get(pose, "talking")
+    return "point_up" if following == "hold_card" and not hold_card else following
+
+
+def _pose(words, group: list[int], index: int, previous: str | None, hold_card: bool = True) -> str:
+    """The pose for a phrase. `hold_card` says whether the character holds a measured card: without one, a plan or
+    a checklist is shown on a card that slides in beside a pointing pose instead of the blank card hold_card holds."""
     said = [bare(words[i].text) for i in group]
-    ending = words[group[-1]].text.rstrip()
     if index == 0:
         pose = "point_up"
-    elif ending.endswith("?") or (said and said[0] in QUESTION_WORDS and len(said) > 1):
+    elif _ends_with(words[group[-1]], "?") or (said and said[0] in QUESTION_WORDS and len(said) > 1):
         pose = "thinking"
     else:
         pose = next((name for name, lexicon in LEXICON if any(w in lexicon for w in said)), None)
+        if pose == "hold_card" and not hold_card:
+            pose = "point_left"
         if pose is None and any(re.search(r"\d", w) for w in said):
             pose = "point_up"
         if pose is None:
@@ -277,7 +307,7 @@ def _pose(words, group: list[int], index: int, previous: str | None) -> str:
     if pose == "point_left" and previous == "point_left":
         pose = "point_right"
     if pose == previous:
-        pose = NEXT_POSE.get(pose, "talking")
+        pose = _next_pose(pose, hold_card)
     return pose
 
 
@@ -286,27 +316,43 @@ COUNT_FROM = 10  # where a count starts
 COUNT_MIN = 20  # a number under this shows whole: counting to 3 would show 1 and 2 first, and 12 would show 10 and 11
 
 
-def counted_number(text: str) -> float | None:
-    """The number a count would count: the accented one (between stars), else the first. None when there is none."""
+YEAR = re.compile(r"(19|20)\d\d")  # four plain digits that read as a year: never counted up from 10
+
+
+def counted_token(text: str) -> str | None:
+    """The number a count would count, as written in the headline: the accented one (between stars), else the first.
+    None when there is none."""
     accented, first, inside = None, None, False
     for raw in str(text).split():
         if raw.startswith("*"):
             inside = True
-        found = NUMBER.match(raw.strip("*").rstrip(".,!?;:"))
-        if found:
-            value = float(found.group(1).replace(",", ""))
-            value = int(value) if value == int(value) else value
-            first = value if first is None else first
+        token = raw.strip("*").rstrip(".,!?;:")
+        if NUMBER.match(token):
+            first = token if first is None else first
             if inside and accented is None:
-                accented = value
+                accented = token
         if len(raw) > 1 and raw.endswith("*"):
             inside = False
     return accented if accented is not None else first
 
 
+def counted_number(text: str) -> float | None:
+    """The number a count would count, as a number. None when there is none."""
+    token = counted_token(text)
+    if token is None:
+        return None
+    value = float(NUMBER.match(token).group(1).replace(",", ""))
+    return int(value) if value == int(value) else value
+
+
+def is_year(token: str | None) -> bool:
+    """Whether a counted token reads as a year (1900 to 2099, written plain: no sign, comma or decimals)."""
+    return bool(token) and YEAR.fullmatch(token) is not None
+
+
 def _prop(text: str, pose: str, first_page: bool = False) -> str:
     number = counted_number(text)
-    if number is not None and number >= COUNT_MIN and not first_page:
+    if number is not None and number >= COUNT_MIN and not first_page and not is_year(counted_token(text)):
         return "count"
     return PROP_FOR_POSE.get(pose, "none")
 
@@ -328,12 +374,15 @@ def _profile_cta() -> tuple[str, str | None]:
 
 
 def build(words: list[transcribe.Word], *, cta: str | None = None, keyword: str | None = None,
-          duration: float | None = None) -> dict:
-    """beats.json for these words. With no `cta`, the call to action comes from the creator's profile."""
+          duration: float | None = None, held_card: bool | None = None) -> dict:
+    """beats.json for these words. With no `cta`, the call to action comes from the creator's profile. `held_card`
+    says whether the character holds a measured card (read from the packed character when not given): without one,
+    hold_card is never drafted, because its card would drop in beside a blank card."""
     if not words:
         raise KitError("The words file has no words, so there is nothing to put on the pages.")
     if cta is None:
         cta, keyword = _profile_cta()
+    usable = bool(held_card_measured()) if held_card is None else bool(held_card)
     groups = phrases(words, cta=cta, keyword=keyword)
     closing = _cta_start(words, cta, keyword)
     pages, previous = [], None
@@ -346,9 +395,9 @@ def build(words: list[transcribe.Word], *, cta: str | None = None, keyword: str 
                 before = pages[-2]["pose"] if len(pages) > 1 else None
                 pages[-1]["pose"] = next(p for p in ("talking", "point_left", "point_right") if p != before)
         else:
-            pose = _pose(words, group, index, previous)
+            pose = _pose(words, group, index, previous, usable)
             if pose == previous:
-                pose = NEXT_POSE.get(pose, "talking")
+                pose = _next_pose(pose, usable)
         pages.append({
             "t": 0.0 if index == 0 else round(words[group[0]].start, 3),
             "text": text,
@@ -368,8 +417,11 @@ def prop_kind(prop: str) -> str:
     return str(prop).split(":", 1)[0].strip().lower()
 
 
-def check(beats: dict) -> list[str]:
-    """Problems with a beats.json, as sentences. Lines starting "note:" are worth a look but do not stop a build."""
+def check(beats: dict, held_card: bool | None = None) -> list[str]:
+    """Problems with a beats.json, as sentences. Lines starting "note:" are worth a look but do not stop a build.
+    `held_card` says whether the character holds a measured card (read from the packed character when not given):
+    a page that pairs hold_card with a card while none was measured is a problem, not a note."""
+    usable = held_card_measured() if held_card is None else bool(held_card)
     problems: list[str] = []
     pages = beats.get("pages") if isinstance(beats, dict) else None
     if not isinstance(pages, list) or not pages:
@@ -398,13 +450,19 @@ def check(beats: dict) -> list[str]:
             problems.append(f'page {n} has the prop {page["prop"]}, which the stage does not know. '
                             "Use one of: none, stamp, count, burst, bubble, card, cta.")
         elif kind == "count":
-            number = counted_number(page["text"])
+            token, number = counted_token(page["text"]), counted_number(page["text"])
             if number is None:
                 problems.append(f"note: page {n} counts, but its headline has no number.")
             elif n == 1:
                 problems.append("note: page 1 shows its number whole, so the first frame reads right.")
+            elif is_year(token):
+                problems.append(f"note: page {n} counts {token}, which reads as a year, so it shows whole instead.")
             elif number < COUNT_MIN:
                 problems.append(f"note: page {n} counts {number}, which is under 20, so it shows whole instead.")
+        if page["pose"] == "hold_card" and kind == "card" and usable is False:
+            problems.append(f"page {n} pairs hold_card with a card, but no card was measured on the character's hold_card "
+                            "drawing, so the card would drop in beside a blank card. Give the page another pose, or draw "
+                            "hold_card again with a large plain white card and pack again.")
         elif kind in ("card", "bubble") and ":" not in str(page["prop"]):
             problems.append(f"note: page {n} has a {kind} with nothing on it yet. Name what it shows, "
                             f"such as {kind}: <a few words>" + (" or card: assets/<file>.png." if kind == "card" else "."))
