@@ -6,8 +6,8 @@
 It reads build/picture.mp4 (the HyperFrames render), vo.m4a and words.json, and build/hits.json (written by
 check.py). A render older than beats.json, scenes.js or vo.m4a does not show the latest changes, so it stops and
 asks for a new render. A hits.json that is missing or older than beats.json or scenes.js is made again by the page
-check (check.py). Where the page check cannot run (no browser), it says so in one line: an older hits.json is used
-as it is, and with none the hits come from beats.json. Then:
+check (check.py). Where the page check cannot run (no browser or no Playwright), it says so in one line: an older
+hits.json is used as it is, and with none the hits come from beats.json. Then:
 
   1. The sound effects. kit.sfx makes the whoosh and the thud from numbers, and every hit is placed so its
      loudest moment lands on its time: a whoosh on each field flip, a thud on each stamp and button press.
@@ -56,13 +56,17 @@ def newer(target: Path, sources: list[Path]) -> list[Path]:
 
 
 def refresh_hits(slug: str) -> bool:
-    """Make build/hits.json again with the page check. False when no browser or project can run it."""
+    """Make build/hits.json again with the page check. False when it cannot run here: no browser, no Playwright,
+    or no project. A check that starts and then breaks is a plain sentence, never a traceback."""
     import check  # check.py beside this file
 
     try:
         code = check.run(slug, [])
-    except SystemExit:
-        return False  # no browser on this machine
+    except (SystemExit, ImportError):
+        return False  # no browser, or no Playwright, on this machine
+    except Exception as problem:  # the browser started, then something went wrong in it
+        raise KitError(f"The page check stopped part way ({problem}), so the sound cannot follow the page. "
+                       f"Run check.py {slug} to see why.") from None
     if code != 0 and not (config.work_dir(slug) / "build" / "hf" / "index.html").is_file():
         return False
     if code != 0:
@@ -74,8 +78,9 @@ def hits_for(folder: Path, slug: str | None = None) -> list[sfx.Hit]:
     """The hits from build/hits.json (check.py writes it from the page), else from beats.json.
 
     With a video name, a hits.json that is missing or older than beats.json or scenes.js is made again with the
-    page check first. When the page check cannot run here (no browser), one line says so: an older hits.json is
-    then used as it is, and with none the hits come from beats.json (a whoosh per flip, a thud per stamp page).
+    page check first. When the page check cannot run here (no browser or no Playwright), one line says so: an older
+    hits.json is then used as it is, and with none the hits come from beats.json (a whoosh per flip, a thud per stamp
+    page).
     """
     written = folder / "build" / "hits.json"
     if slug is not None:
