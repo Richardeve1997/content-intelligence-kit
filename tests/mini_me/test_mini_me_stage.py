@@ -559,14 +559,31 @@ def test_a_year_count_from_the_scenes_stays_whole(stage):
 
 
 def test_a_hold_card_page_with_nothing_to_write_is_noted(tmp_path, monkeypatch, browser):
-    """A hold_card page whose prop is not a card holds a blank card up, which the check points out."""
+    """A hold_card page whose prop is not a card holds a blank card up, which the check points out, with what to
+    do about it."""
     pages = [dict(p) for p in HELD_PAGES]
     pages[1]["prop"] = "none"
     page, _ = held_project(tmp_path, monkeypatch, browser, pages=pages)
     info = page.js("Stage.audit()")
     assert page.js("document.querySelectorAll('#mm-p2 .mm-held').length") == 0
     notes = [p for p in info["problems"] if "hold_card" in p and "blank" in p]
-    assert len(notes) == 1 and "card" in notes[0], info["problems"]
+    assert notes == ["note: page 2: the hold_card pose holds a blank card. Give the page a card prop with the words "
+                     "to write on it, or pick another pose."], info["problems"]
+    page.page.close()
+
+
+def test_a_hold_card_page_with_no_measured_card_is_noted_with_the_way_to_fix_it(tmp_path, monkeypatch, browser):
+    """With no card measured on the character's hold_card drawing, nothing can be written on it, so the note
+    says to pick another pose or draw the pose again with a plain card."""
+    pages = [dict(p) for p in HELD_PAGES]
+    pages[1]["prop"] = "none"
+    page, _ = held_project(tmp_path, monkeypatch, browser, build="big_head", pages=pages)
+    info = page.js("Stage.audit()")
+    assert info["pages"][1]["pose"] == "hold_card" and info["pages"][1]["held"] is None
+    notes = [p for p in info["problems"] if "hold_card" in p and "blank" in p]
+    assert notes == ["note: page 2: the hold_card pose holds a blank card, and no card was measured on it when the "
+                     "character was packed, so nothing can be written on it. Pick another pose, or draw hold_card "
+                     "again with a large plain white card and pack again."], info["problems"]
     page.page.close()
 
 

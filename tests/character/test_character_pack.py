@@ -275,6 +275,26 @@ def test_the_poses_board_outlines_the_measured_card(built):
     assert state["poses"]["hold_card"]["approved"]
 
 
+
+def test_the_poses_board_says_no_plain_card_was_found_and_outlines_nothing(built, tmp_path, monkeypatch):
+    """A hold_card drawing with no plain card in it gets the note "no plain card found" on its tile and no
+    outline, so the creator sees before any video that the pose needs drawing again. Here the hold_card drawing
+    is the idle one: hands down, nothing held."""
+    folder, _, _ = built
+    copy = tmp_path / "character"
+    shutil.copytree(folder, copy)
+    shutil.copy(copy / "poses" / "idle.png", copy / "poses" / "hold_card.png")
+
+    cells, outlined = [], []
+    monkeypatch.setattr(poses.art, "board", lambda drawn, **kwargs: cells.extend(drawn) or Image.new("RGB", (8, 8)))
+    monkeypatch.setattr(poses, "outline_card", lambda *args: outlined.append(args))
+    poses.board(copy)
+    notes = {label: note for _, label, note in cells}
+    assert "no plain card found" in notes[poses.LABELS["hold_card"]], notes
+    assert outlined == [], "an outline was drawn round a card that is not there"
+    assert not any("no plain card found" in note for label, note in notes.items() if label != poses.LABELS["hold_card"])
+
+
 def test_the_hold_card_pose_carries_the_clear_face_of_its_card(built):
     """The pack measures the card the hold_card pose holds up and stores its clear face in the manifest, so a
     video can write on it. No other pose carries one."""

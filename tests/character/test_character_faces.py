@@ -703,6 +703,25 @@ def test_the_open_mouth_shows_teeth_under_its_top_edge():
     assert not (states.patches["mouth_mid"][..., :3] == EYE_WHITE).all(2).any(), "the half open mouth shows teeth"
 
 
+def test_a_tiny_mouth_shows_teeth_when_open_and_a_normal_mouth_keeps_its_dark_corners():
+    """Teeth go where a column of the opening has room for them, the dark inside and the lip. A tiny mouth (6 x 1
+    at open_rows 2) has room for that nowhere, so it shows a row of teeth over its lip instead of none. A normal
+    mouth keeps the stricter rule, so its shallow corner columns stay dark rather than turning to teeth."""
+    from character_sprites import EYE_WHITE, PUPIL
+
+    tiny, _ = draw_figure("idle", mouth_size=(6, 1))
+    opened = faces.face_states(tiny, faces.locate(tiny), open_rows=2).patches["mouth_open"]
+    assert (opened[..., :3] == EYE_WHITE).all(2).any(), "the tiny mouth opens with no teeth"
+
+    normal, _ = draw_figure("idle")
+    opened = faces.face_states(normal, faces.locate(normal), open_rows=2).patches["mouth_open"]
+    teeth, dark = (opened[..., :3] == EYE_WHITE).all(2), (opened[..., :3] == PUPIL).all(2)
+    columns = np.nonzero(teeth.any(0) | dark.any(0))[0]
+    assert teeth.any(), "the normal mouth opens with no teeth"
+    for x in (columns.min(), columns.max()):
+        assert dark[:, x].any() and not teeth[:, x].any(), f"the corner column {x} lost its dark inside to teeth"
+
+
 def test_the_half_open_mouth_lowers_the_bottom_edge_and_keeps_the_top():
     """Half open, the mouth keeps the drawn top edge and reaches lower than the drawn mouth did, closed by the lower
     lip in the mouth's own colour: the drawn mouth opens rather than being replaced by a block."""
