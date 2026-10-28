@@ -111,8 +111,10 @@
   };
 
   // ---- typed text: one span per character, revealed with tl.set (seek-safe, no onUpdate) ----
+  // data-uis-typed and data-uis-count tell the reading-load audit which is which: both are one span a piece
   U.type = function(tl, el, text, t, cps){
     el = q(el); cps = cps || 22;
+    el.setAttribute('data-uis-typed', '');
     el.textContent = '';
     const spans = [];
     for (const ch of text){ const s = document.createElement('span'); s.textContent = ch; el.appendChild(s); spans.push(s); }
@@ -126,6 +128,7 @@
     el = q(el);
     const from = o.from || 0, dur = o.dur || 0.8, steps = o.steps || 24, fmt = o.format || ((v) => Math.round(v).toLocaleString('en-US'));
     const prefix = o.prefix || '', suffix = o.suffix || '';
+    el.setAttribute('data-uis-count', '');
     el.textContent = '';
     for (let i = 0; i <= steps; i++){
       const s = document.createElement('span');

@@ -279,3 +279,24 @@ def test_the_reading_load_audit_counts_typed_text_by_its_words(tmp_path, example
     cells = [cell.strip() for cell in typed[0].strip("|").split("|")]
     assert cells[2] == "4", "four words, counted from the whole typed line"
     assert float(cells[3]) >= 3.0 and cells[5] == "yes", cells
+
+
+def test_the_reading_load_audit_labels_a_count_by_the_number_it_lands_on(tmp_path, example_me):
+    """A count's first value is a number nobody reads; the row names the one it lands on."""
+    scene = ('<div class="scene" id="s-count"><div id="stars" style="position:absolute;left:120px;top:600px;'
+             'font-size:60px"></div></div>')
+    timeline = "UIS.show(tl, '#s-count', 0, 5.0);\nUIS.count(tl, '#stars', 80000, 2.0, {suffix: '+'});"
+    rows = _audit_page(tmp_path, scene, timeline)
+    counts = [row for row in rows if "(counter)" in row]
+    assert len(counts) == 1 and "(counter) 80,000+" in counts[0], rows
+
+
+def test_a_count_to_a_single_digit_is_a_count_not_typed_text(tmp_path, example_me):
+    """Each value of a count to 8 is one character, the same shape as typed text. The helpers mark which is which."""
+    scene = ('<div class="scene" id="s-small"><div id="steps" style="position:absolute;left:120px;top:600px;'
+             'font-size:60px"></div></div>')
+    timeline = "UIS.show(tl, '#s-small', 0, 5.0);\nUIS.count(tl, '#steps', 8, 1.0);"
+    rows = _audit_page(tmp_path, scene, timeline)
+    assert not [row for row in rows if "(typed)" in row], rows
+    counts = [row for row in rows if "(counter)" in row]
+    assert len(counts) == 1 and "(counter) 8 " in counts[0] + " ", rows

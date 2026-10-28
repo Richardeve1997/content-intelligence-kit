@@ -3,8 +3,9 @@
 
 It seeks the paused timeline every --step seconds in a headless browser and records every visible piece of
 text at --min-px or larger (so window chrome and tiny labels are skipped). A counter's changing spans are
-merged into one entry, and typed text (one span a character, from UIS.type) counts as the whole line it
-types, from its first letter on screen. For each text it reports the readable words, the seconds it is on
+merged into one entry, named by the value it lands on, and typed text (one span a character) counts as the
+whole line it types, from its first letter on screen. UIS.count and UIS.type mark their elements, so a count
+to a single digit is never taken for typing. For each text it reports the readable words, the seconds it is on
 screen after the gap trims and the speed-up, and the seconds it needs (0.35 s a word plus 0.6 s, counting at
 most 8 words), then OK or SHORT (within 0.15 s is fine). Captions are left out.
 
@@ -49,11 +50,16 @@ JS = """([t, minpx]) => {
     let key = el, text = own, ident = own;
     const par = el.parentElement;
     const kids = el.tagName === 'SPAN' && par ? Array.from(par.querySelectorAll(':scope > span')) : [];
-    if (kids.length >= 2 && kids.every(k => Array.from(k.textContent).length <= 1)) {
-      // typed text (UIS.type): one span a character, so the row is the whole line it types
+    // UIS.count and UIS.type mark their elements; one span a character means typing only when nothing says count
+    const counted = kids.length > 0 && par.hasAttribute('data-uis-count');
+    const typed = kids.length > 0 && par.hasAttribute('data-uis-typed');
+    const oneChar = kids.length >= 2 && kids.every(k => Array.from(k.textContent).length <= 1);
+    if (counted || (!typed && !oneChar && kids.length >= 5)) {
+      // a count: one span a value, one shown at a time, so the row is the value it lands on
+      key = par; ident = kids[kids.length - 1].textContent.replace(/\\s+/g, ' ').trim(); text = '(counter) ' + ident;
+    } else if (typed || oneChar) {
+      // typed text: one span a character, so the row is the whole line it types
       key = par; ident = par.textContent.replace(/\\s+/g, ' ').trim(); text = '(typed) ' + ident;
-    } else if (kids.length >= 5) {
-      key = par; text = '(counter) ' + own;  // a count: one span a value, one shown at a time
     }
     const sc = el.closest('.scene');
     const id = (key.id || '') + '|' + (sc ? sc.id : '') + '|' + (key.className && key.className.baseVal === undefined ? key.className : '') + '|' + (key.id ? '' : ident.slice(0, 40));
