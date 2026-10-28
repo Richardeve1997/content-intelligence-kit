@@ -180,9 +180,12 @@ def test_a_neck_row_above_the_mouth_or_off_the_canvas_is_refused_and_not_kept(me
         err = capsys.readouterr().err
         assert f"whose last row is {last}, so row {row} is too high" in err, err
         assert f"(row {last + 1} or lower)" in err and "Traceback" not in err
+        assert _state(me)["face_marks"] is None, "a refused too-high row is not kept"
     assert cli.main(["faces", "--neck", str(last + 1)]) == 0, "the first row under the mouth is allowed"
+    assert _state(me)["face_marks"] == {"neck": last + 1}
     assert cli.main(["faces", "--clear"]) == 0
     capsys.readouterr()
+    assert _state(me)["face_marks"] is None
     assert cli.main(["faces", "--neck", "999"]) == 1
     assert "off the 245 x 284 canvas" in capsys.readouterr().err
     assert _state(me)["face_marks"] is None, "a refused mark is not kept"
