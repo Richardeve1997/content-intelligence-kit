@@ -64,7 +64,7 @@ Every skill ends with a Feedback section. When the creator corrects something, o
 3. If it contradicts an older rule, take the old one out first. `uv run python -m kit.rules undo <skill>` removes the newest, and `learnings` handles the rest.
 4. Say in one line what you recorded.
 
-Rules and lessons live in `me/rules/<skill>.md` and `me/lessons.md`, so they survive updates. Never write a preference into a `SKILL.md`, because an update replaces it. In Claude Code, a Stop hook (`bin/feedback_check.py`, set up in `.claude/settings.json`) backs this up. When the creator's last message read like a correction and the turn recorded no rule, it asks once for one, with a fixed reason, and writes nothing itself. Codex has no hooks, so the Feedback section is the only recorder there.
+Rules and lessons live in `me/rules/<skill>.md` and `me/lessons.md`, so they survive updates. Never write a preference into a `SKILL.md`, because an update replaces it. In Claude Code, a Stop hook (`bin/feedback_check.py`, set up in `.claude/settings.json`) backs this up. When the creator's last message read like a correction and the turn recorded no rule, it asks once for one, with a fixed reason, and writes nothing itself. The kit sets up no hooks for Codex, so the Feedback section is the only recorder there.
 
 After you add or change a skill, run `bash bin/check_adapters.sh`. It confirms the Codex link, and that every skill reads its rules first and ends with a Feedback section.
 

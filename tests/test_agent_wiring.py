@@ -492,6 +492,9 @@ def test_update_kit_skill_says_what_to_do_when_a_pull_refuses():
     assert "If `git pull` refuses" in step
     for words in ("me/kit-backups/", "git checkout --", "again", "rules"):
         assert words in step, words
+    assert "untracked file" in step and "move that file into the same backup folder" in step, (
+        "a file of the creator's where the release adds one has no kit version to check out"
+    )
     assert "git pull --ff-only" in step, "a pull never makes a merge on its own"
     assert "uv sync --group video --group research --inexact" in step and "npm ci" in step, "a pull can change the dependencies"
 
@@ -839,3 +842,10 @@ def test_authored_files_have_no_internal_process_words(path):
     content = text(ROOT / path).lower()
     for word in INTERNAL_WORDS:
         assert word not in content, f"{path} contains {word!r}"
+
+
+def test_claude_md_says_the_kit_sets_up_no_hooks_for_codex():
+    """Codex can run hooks. The kit gives it none, so its Feedback sections are what record corrections."""
+    claude = text(ROOT / "CLAUDE.md")
+    assert "The kit sets up no hooks for Codex" in claude
+    assert "Codex has no hooks" not in claude
