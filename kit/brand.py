@@ -11,7 +11,7 @@ import os
 import posixpath
 import re
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from kit import config
 from kit.config import Profile, ProfileError
@@ -26,6 +26,7 @@ __all__ = [
     "grid_colour",
     "text_on",
     "tokens_css",
+    "url_file",
     "write_tokens",
 ]
 
@@ -159,6 +160,15 @@ def _relative(target: str, start: str) -> str:
 
 def _url(path: str) -> str:
     return quote(path, safe="/")
+
+
+def url_file(url: str, css_dir: Path) -> Path:
+    """The file a url() in a tokens stylesheet points at, for a stylesheet in `css_dir`.
+
+    tokens_css writes every font URL percent-encoded (a space as %20, an accented letter as its UTF-8 bytes), so
+    the URL is decoded before it is read as a path. Anything that copies the fonts a stylesheet names uses this.
+    """
+    return (Path(css_dir) / unquote(url)).resolve()
 
 
 def _relative_to_folder(file: Path, css_dir: Path) -> str:

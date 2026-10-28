@@ -1,0 +1,13 @@
+talking: Talking to the viewer. One hand is raised in front of the chest with the palm open and facing up, and the other arm hangs relaxed. The mouth is closed.
+point_left: Pointing at something on the left side of the picture. One arm is stretched straight out toward the viewer's left with the index finger pointing, and the other arm hangs relaxed. The body still faces the viewer.
+point_right: Pointing at something on the right side of the picture. One arm is stretched straight out toward the viewer's right with the index finger pointing, and the other arm hangs relaxed. The body still faces the viewer.
+point_up: Pointing straight up. One arm is raised above the head with the index finger pointing at the sky, and the other arm hangs relaxed.
+thumbs_up: Giving a clear thumbs up with one hand in front of the chest. The other arm hangs relaxed, and the face shows a confident smile with the mouth closed.
+shrug: Shrugging. Both forearms are out to the sides with the palms open and facing up, the shoulders are raised and the eyebrows go up.
+thinking: Thinking. One hand rests on the chin, the other arm crosses the body, and the eyes look up.
+mind_blown: Amazed. Both hands are on the sides of the head, the eyes are wide open and the mouth is open in a round O, with three small spark marks near the head.
+celebrate: Celebrating. Jumping in the air with both fists raised above the head and a big open smile, both feet off the ground.
+hold_card: Holding up a large blank white card with both hands, beside the body at chest height. The card faces the viewer and does not cover the face.
+typing: Typing. An open laptop rests on one forearm and the other hand types on it. The face looks at the viewer.
+facepalm: Facepalm. One hand covers the eyes, the head tilts down a little and the other arm hangs relaxed.
+wave: Waving hello. One hand is raised beside the head with the palm open toward the viewer and the fingers spread, the elbow is bent, and the face shows a friendly smile.
