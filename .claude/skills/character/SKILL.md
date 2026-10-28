@@ -86,4 +86,12 @@ A drawing command that is waiting for a picture exits with status 3 and prints, 
 
 ## Feedback
 
-When the creator corrects how this skill behaves, fix what is in front of them first, then record the lasting part with `kit.rules.add("character", "<rule>")`. In a shell: `uv run python -m kit.rules add character '<rule>'`, with single quotes so `$` and backticks stay as typed. Write one or two plain sentences, 300 characters at most. If the rule contradicts an older one for this skill, find the older one with `uv run python -m kit.rules read character --numbered` and remove it first with `uv run python -m kit.rules remove character <number>`. Say in one line what you recorded. A change to how the character looks (the hair, a pose, the outfit) is not a rule: it goes into a redraw.
+When the creator corrects how this skill behaves, fix what is in front of them first, then record the lasting part with `kit.rules.add("character", "<rule>")`. In a shell, send the rule on standard input, so an apostrophe, `$` or a backtick in it stays as typed:
+
+```bash
+uv run python -m kit.rules add character - <<'RULE'
+<rule>
+RULE
+```
+
+Write one or two plain sentences, 300 characters at most. If the rule contradicts an older one for this skill, find the older one with `uv run python -m kit.rules read character --numbered` and remove it first with `uv run python -m kit.rules remove character <number>`. Say in one line what you recorded. A change to how the character looks (the hair, a pose, the outfit) is not a rule: it goes into a redraw.

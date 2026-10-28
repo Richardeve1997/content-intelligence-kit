@@ -36,7 +36,7 @@ def test_the_skill_follows_the_shared_contract():
     headings = re.findall(r"^## (.+)$", BODY, re.M)
     assert headings[-1] == "Feedback", "Feedback is the last section"
     feedback = BODY[BODY.index("## Feedback") :]
-    assert 'kit.rules.add("mini-me"' in feedback and "python -m kit.rules add mini-me '<rule>'" in feedback
+    assert 'kit.rules.add("mini-me"' in feedback and "python -m kit.rules add mini-me - <<'RULE'\n<rule>\nRULE\n" in feedback
 
 
 def test_the_adapter_check_passes_with_the_skill_in_place():

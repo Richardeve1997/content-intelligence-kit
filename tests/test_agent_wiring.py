@@ -496,14 +496,27 @@ def test_update_kit_skill_says_what_to_do_when_a_pull_refuses():
     assert "uv sync --group video --group research --inexact" in step and "npm ci" in step, "a pull can change the dependencies"
 
 
-def test_shell_examples_that_add_a_rule_use_single_quotes_so_dollar_signs_and_backticks_survive():
+def test_shell_examples_that_add_a_rule_never_use_double_quotes_and_claude_md_uses_standard_input():
     sources = [ROOT / "CLAUDE.md", ROOT / "AGENTS.md", *[f / "SKILL.md" for f in skill_folders() if f.name != "humanizer"]]
     for source in sources:
         doubled = re.findall(r"python -m kit\.rules add \S+ \"", text(source))
         assert doubled == [], f"{source.name} quotes a rule with double quotes in a shell example"
     claude = text(ROOT / "CLAUDE.md")
-    assert "python -m kit.rules add <skill> '<rule>'" in claude
+    assert "python -m kit.rules add <skill> - <<'RULE'" in claude and "\n   RULE\n" in claude
+    assert "python -m kit.rules add <skill> '<rule>'" not in claude, "an apostrophe in the rule would end the quote"
     assert "300 characters" in claude
+
+
+def test_every_feedback_section_sends_the_rule_on_standard_input():
+    """A rule often has an apostrophe in it ("don't", "the creator's"), which ends a single-quoted shell word early.
+    On standard input, behind a quoted end marker, every character of the rule stays as typed."""
+    for folder in skill_folders():
+        if folder.name == "humanizer":
+            continue
+        body = text(folder / "SKILL.md")
+        feedback = body[body.index("## Feedback") :]
+        assert f"python -m kit.rules add {folder.name} - <<'RULE'\n<rule>\nRULE\n" in feedback, folder.name
+        assert f"python -m kit.rules add {folder.name} '" not in feedback, f"{folder.name} still quotes the rule"
 
 
 def test_learnings_skill_documents_adding_by_hand_with_its_limits():

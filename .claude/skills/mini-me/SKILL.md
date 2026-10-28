@@ -225,4 +225,12 @@ Shared helpers in `kit/`: `kit.voice` (the voice-over), `kit.sfx` (the whoosh an
 
 ## Feedback
 
-When the creator corrects something about a narration, a page or a finished Reel, fix it in the video first. Then record the lasting part with `kit.rules.add("mini-me", "<rule>")`. In a shell: `uv run python -m kit.rules add mini-me '<rule>'`, with single quotes so `$` and backticks stay as typed. Write one or two plain sentences, 300 characters at most, with no dates and no quotes from the creator. A change to how the character itself looks is not a rule: it goes to the `character` skill as a redraw. If the rule contradicts an older one for this skill, remove the older one first: `uv run python -m kit.rules read mini-me --numbered` shows the numbers, and `uv run python -m kit.rules remove mini-me <number>` removes one. Say in one line what you recorded.
+When the creator corrects something about a narration, a page or a finished Reel, fix it in the video first. Then record the lasting part with `kit.rules.add("mini-me", "<rule>")`. In a shell, send the rule on standard input, so an apostrophe, `$` or a backtick in it stays as typed:
+
+```bash
+uv run python -m kit.rules add mini-me - <<'RULE'
+<rule>
+RULE
+```
+
+Write one or two plain sentences, 300 characters at most, with no dates and no quotes from the creator. A change to how the character itself looks is not a rule: it goes to the `character` skill as a redraw. If the rule contradicts an older one for this skill, remove the older one first: `uv run python -m kit.rules read mini-me --numbered` shows the numbers, and `uv run python -m kit.rules remove mini-me <number>` removes one. Say in one line what you recorded.

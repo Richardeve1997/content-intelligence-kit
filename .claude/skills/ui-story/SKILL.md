@@ -288,4 +288,12 @@ Then run the `review` skill on `work/<video>/final.mp4`.
 
 ## Feedback
 
-When the creator corrects something about a plan or an edit, fix it in the video first. Then record the lasting part with `kit.rules.add("ui-story", "<rule>")`. In a shell: `uv run python -m kit.rules add ui-story '<rule>'`. Write one or two plain sentences, with no dates and no quotes from the creator. If it contradicts an older rule for this skill, remove the older one first: `uv run python -m kit.rules read ui-story --numbered` shows the numbers, and `uv run python -m kit.rules remove ui-story <number>` removes one. Say in one line what you recorded.
+When the creator corrects something about a plan or an edit, fix it in the video first. Then record the lasting part with `kit.rules.add("ui-story", "<rule>")`. In a shell, send the rule on standard input, so an apostrophe, `$` or a backtick in it stays as typed:
+
+```bash
+uv run python -m kit.rules add ui-story - <<'RULE'
+<rule>
+RULE
+```
+
+Write one or two plain sentences, with no dates and no quotes from the creator. If it contradicts an older rule for this skill, remove the older one first: `uv run python -m kit.rules read ui-story --numbered` shows the numbers, and `uv run python -m kit.rules remove ui-story <number>` removes one. Say in one line what you recorded.

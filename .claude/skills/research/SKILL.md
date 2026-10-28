@@ -78,4 +78,12 @@ HOOKS
 
 ## Feedback
 
-When the creator corrects how this skill behaves, fix it now and record the rule with `kit.rules.add("research", "<rule>")`. In a shell: `uv run python -m kit.rules add research '<rule>'`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.
+When the creator corrects how this skill behaves, fix it now and record the rule with `kit.rules.add("research", "<rule>")`. In a shell, send the rule on standard input, so an apostrophe, `$` or a backtick in it stays as typed:
+
+```bash
+uv run python -m kit.rules add research - <<'RULE'
+<rule>
+RULE
+```
+
+Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.

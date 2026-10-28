@@ -34,7 +34,7 @@ def test_each_skill_follows_the_shared_contract(name):
     headings = re.findall(r"^## (.+)$", body, re.M)
     assert headings[-1] == "Feedback", "Feedback is the last section"
     feedback = body[body.index("## Feedback") :]
-    assert f'kit.rules.add("{name}"' in feedback and f"python -m kit.rules add {name} '" in feedback
+    assert f'kit.rules.add("{name}"' in feedback and f"python -m kit.rules add {name} - <<'RULE'" in feedback
 
 
 @pytest.mark.parametrize("name", list(SKILLS))

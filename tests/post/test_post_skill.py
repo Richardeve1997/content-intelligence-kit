@@ -75,8 +75,8 @@ def test_it_reads_the_creators_rules_first_and_ends_with_feedback():
     assert "kit.rules.read" in re.search(r"^1\. (.+)$", body, re.M).group(1)
     assert re.findall(r"^## (.+)$", body, re.M)[-1] == "Feedback"
     feedback = body[body.index("## Feedback") :]
-    assert 'kit.rules.add("post"' in feedback and "python -m kit.rules add post '<rule>'" in feedback
-    assert not re.findall(r'python -m kit\.rules add \S+ "', body), "a rule is quoted with single quotes in a shell"
+    assert 'kit.rules.add("post"' in feedback and "python -m kit.rules add post - <<'RULE'\n<rule>\nRULE\n" in feedback
+    assert not re.findall(r'python -m kit\.rules add \S+ "', body), "a rule never goes in double quotes in a shell"
 
 
 def test_the_skill_folder_matches_its_name():
