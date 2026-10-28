@@ -180,6 +180,9 @@ jobs:
           fi
           echo "The kit's encoder settings: $settings"
           probe="$RUNNER_TEMP/encoder-probe.mp4"
+          # A blank line first, so the note below starts its own paragraph instead of running on from
+          # the machine check's table in the summary.
+          echo >> "$GITHUB_STEP_SUMMARY"
           if ffmpeg -nostdin -v error -f lavfi -i testsrc2=s=128x224:r=30:d=0.5 "${encoder[@]}" "$probe"; then
             echo "That encoder works on this runner."
             echo "Video encoder in the tests: the kit's default (${encoder[1]})" >> "$GITHUB_STEP_SUMMARY"
