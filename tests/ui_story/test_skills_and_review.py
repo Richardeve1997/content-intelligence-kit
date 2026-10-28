@@ -245,7 +245,7 @@ def test_prep_makes_the_sources_folder_first(tmp_path, monkeypatch):
     assert (tmp_path / "kit" / "work" / "example-reel" / "build" / "sources").is_dir()
 
 
-# --- the polish pass ---------------------------------------------------------------------------------------
+# --- a take with no plan, the lint, the cleanup, windows, numbers, the open and the music bed ----------------
 
 
 def test_an_edit_with_no_plan_names_the_video_and_links_the_take_first():
