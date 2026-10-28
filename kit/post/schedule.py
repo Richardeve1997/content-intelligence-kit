@@ -568,7 +568,9 @@ def schedule(
     one with a zone is the same moment wherever it is written. It has to be at least five minutes ahead,
     because Zernio publishes a post at once when its time has passed.
 
-    With dry_run nothing is sent, not even a read, and no key is needed: the Results say what would happen.
+    With dry_run nothing is sent, not even a read, and no key is needed: the Results say what would happen,
+    each with the request it would send as its payload. Facebook fails there, with the reason, when the video's
+    length cannot be read, as it would in a real post.
     Otherwise the creator must have approved the captions as they stand now (captions.approve), or it
     raises PostError before anything is sent. `client` is for tests and for callers that already hold
     one; by default the key comes from ZERNIO_API_KEY.
@@ -590,17 +592,25 @@ def schedule(
 
     if dry_run:
         note = f"Would schedule for {describe_time(when)}. Nothing was sent."
-        seconds = payloads.video_seconds(video) if "facebook" in names else None  # read from the file here
-        return [
-            Result(name, "dry run", reason=note, scheduled_for=when.isoformat(),
-                   payload=payloads.build_body(
-                       name, title=post_title(profile, name, slug), slug=slug, caption=data[name],
-                       account_id=ACCOUNT_PLACEHOLDER.format(platform=captions.display_name(name)),
-                       media_url=MEDIA_PLACEHOLDER, scheduled_for=when.isoformat(), timezone=profile.timezone,
-                       seconds=seconds if name == "facebook" else None,
-                   ))
-            for name in names
-        ]
+        seconds, unmeasured = None, None
+        if "facebook" in names:  # only Facebook needs the length, read from the file here
+            try:
+                seconds = payloads.video_seconds(video)
+            except PostError as exc:
+                unmeasured = str(exc)  # Facebook fails with the reason, as a real post would; the others carry on
+        plan = []
+        for name in names:
+            if name == "facebook" and unmeasured:
+                plan.append(Result(name, "failed", reason=unmeasured, scheduled_for=when.isoformat()))
+                continue
+            plan.append(Result(name, "dry run", reason=note, scheduled_for=when.isoformat(),
+                               payload=payloads.build_body(
+                                   name, title=post_title(profile, name, slug), slug=slug, caption=data[name],
+                                   account_id=ACCOUNT_PLACEHOLDER.format(platform=captions.display_name(name)),
+                                   media_url=MEDIA_PLACEHOLDER, scheduled_for=when.isoformat(),
+                                   timezone=profile.timezone, seconds=seconds if name == "facebook" else None,
+                               )))
+        return plan
 
     # Nothing is sent, and no file for posting by hand is written, until the creator has read these exact
     # captions and said yes. Their yes to the TikTok caption is also the preview and consent TikTok asks for.

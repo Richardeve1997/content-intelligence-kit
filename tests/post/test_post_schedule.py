@@ -351,6 +351,20 @@ def test_a_dry_run_carries_each_platforms_post_as_it_would_go_out(reel, stub, wh
     assert "#" not in sent["linkedin"]["content"]
 
 
+def test_a_dry_run_with_a_video_it_cannot_measure_fails_facebook_alone(reel, stub, when, monkeypatch):
+    """Facebook needs the video's length; the other platforms do not. A length that cannot be read fails Facebook
+    with the reason, as a real post would, and the rest of the plan still comes back."""
+    def cannot_measure(path):
+        raise PostError("The length of final.mp4 could not be read. Check that it plays and try again.")
+
+    monkeypatch.setattr(payloads, "video_seconds", cannot_measure)
+    results = by_platform(run(reel, stub, ["instagram", "facebook"], when, dry_run=True))
+    assert stub.calls() == []
+    assert results["instagram"].status == "dry run" and results["instagram"].payload["content"]
+    assert results["facebook"].status == "failed" and results["facebook"].payload is None
+    assert "could not be read" in results["facebook"].reason
+
+
 def test_a_result_without_a_payload_is_the_same_as_before():
     plain = post.Result("instagram", "scheduled", post_id="post-1")
     assert plain.payload is None

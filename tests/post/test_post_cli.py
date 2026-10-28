@@ -10,7 +10,7 @@ import errno
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -200,7 +200,9 @@ def test_a_dry_run_prints_each_post_as_it_would_go_out(keyed, reel, capsys):
     tiktok, youtube = (json.loads("\n".join(blocks[name])) for name in ("TikTok", "YouTube"))
     assert tiktok["tiktokSettings"]["privacy_level"] == "PUBLIC_TO_EVERYONE" and "#basil" in tiktok["content"]
     assert youtube["platforms"][0]["platformSpecificData"]["title"] == "Why windowsill basil dies in week three"
-    assert youtube["scheduledFor"].endswith("18:00:00+00:00") or "T18:00:00" in youtube["scheduledFor"]
+    day = datetime.strptime(tomorrow(), "%Y-%m-%d").date()
+    assert datetime.fromisoformat(youtube["scheduledFor"]) == datetime.combine(day, time(18, 0), tzinfo=ZoneInfo("Europe/London"))
+    assert youtube["timezone"] == "Europe/London" and tiktok["scheduledFor"] == youtube["scheduledFor"]
     assert youtube["platforms"][0]["accountId"] == "<your YouTube account in Zernio>"
     assert youtube["mediaItems"] == [{"type": "video", "url": "<the video, once it is uploaded>"}]
 
@@ -254,6 +256,24 @@ def test_with_no_key_the_manual_file_gives_the_day_and_time_of_every_post(reel, 
     assert say(capsys, "schedule", reel.slug, "--on", "tomorrow")[0] == 0, "no time: each platform's usual time"
     text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
     assert f"## Instagram ({day} 18:00)" in text and f"## LinkedIn ({day} 08:30)" in text and f"## X ({day} 12:00)" in text
+
+
+def test_a_video_it_cannot_measure_still_lets_the_other_platforms_go_out(keyed, reel, capsys, monkeypatch):
+    """The real schedule makes its plan first, and the plan asks for the length only for Facebook. A length that
+    cannot be read fails Facebook alone; Instagram is still scheduled."""
+    from kit.post import payloads
+    from kit.post.errors import PostError
+
+    def cannot_measure(path):
+        raise PostError("The length of final.mp4 could not be read. Check that it plays and try again.")
+
+    monkeypatch.setattr(payloads, "video_seconds", cannot_measure)
+    say(capsys, "approve", reel.slug)
+    status, out, _ = say(capsys, "schedule", reel.slug, "--platforms", "instagram", "facebook", "--on", tomorrow(),
+                         "--time", "18:00")
+    assert status == 1, out
+    assert out.startswith("Instagram: scheduled for ") and "Facebook: failed." in out and "could not be read" in out
+    assert len(keyed.creates()) == 1
 
 
 def test_the_manual_command_writes_the_same_file(reel, capsys):
