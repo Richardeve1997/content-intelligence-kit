@@ -18,9 +18,10 @@ from kit.config import KitError
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# A command as written in code or prose: it runs to the end of the line or to a quote or a backtick. One that is
-# introduced as "a bare `uv sync`" is a warning about what not to run, not a hint to follow, so it is skipped.
-COMMAND = re.compile(r"(?<!bare )(?<!bare `)uv sync(?P<rest>[^\n`\"']*)", re.IGNORECASE)
+# A command as written in code or prose: it runs to the end of the line, to a quote or a backtick, or to the end of its
+# place in a chain (&&, ||, ; or |), so each command of a chain is checked on its own. One that is introduced as
+# "a bare `uv sync`" is a warning about what not to run, not a hint to follow, so it is skipped.
+COMMAND = re.compile(r"(?<!bare )(?<!bare `)uv sync(?P<rest>[^\n`\"';|&]*)", re.IGNORECASE)
 INEXACT = re.compile(r"(?<![\w-])--inexact(?![\w-])")
 
 # Not read by a creator as advice, so not checked: tests (they hold the expected text, and skip reasons for
@@ -62,7 +63,7 @@ def checked_files() -> list[Path]:
 
 
 def hints(path: Path) -> list[str]:
-    """Every `uv sync ...` command in a file, as written, up to the end of its line or its quote."""
+    """Every `uv sync ...` command in a file, as written, up to the end of its line, its quote or its place in a chain."""
     text = text_of(path)
     return ["uv sync" + match.group("rest").rstrip() for match in COMMAND.finditer(text)] if text else []
 
@@ -123,6 +124,22 @@ def test_the_detector_reads_a_command_to_the_end_of_its_line_or_quote(tmp_path):
         encoding="utf-8",
     )
     assert [bool(INEXACT.search(c)) for c in hints(sample)] == [True, False, False, False]
+
+
+def test_each_command_in_a_chain_is_checked_on_its_own(tmp_path):
+    """A flag on the second command of a chain says nothing about the first, which still removes the other groups."""
+    sample = tmp_path / "sample.md"
+    sample.write_text(
+        "uv sync --group video && uv sync --group research --inexact\n"
+        "uv sync --group video --inexact; uv sync --group research\n"
+        "`uv sync --group video || uv sync --group research --inexact`\n"
+        "uv sync --group video --inexact | tail -n 1\n"
+        "uv sync --group video --inexact && npm ci\n",
+        encoding="utf-8",
+    )
+    found = hints(sample)
+    assert [bool(INEXACT.search(c)) for c in found] == [False, True, True, False, False, True, True, True], found
+    assert found[0] == "uv sync --group video", "the first command ends where the chain goes on"
 
 
 def test_a_bare_command_named_in_a_warning_is_not_a_hint(tmp_path):
