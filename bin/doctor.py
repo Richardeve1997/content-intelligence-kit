@@ -8,7 +8,8 @@ Each row is {"check": ..., "status": "ok" | "missing" | "warn", "fix": ...}.
 
   ok       the check passes, and "fix" is empty.
   missing  a required check fails. "fix" is the exact command to run, or a sentence when no command can help.
-  warn     worth a look but it does not stop anything: low disk space.
+  warn     worth a look but it does not stop anything: low disk space, or an ffmpeg without the zscale
+           filter (HDR phone videos then keep washed-out colours).
 
 Under the table, one line names the optional keys that are not set yet (Apify, an image model,
 ElevenLabs, Zernio). A key that is not set is not a problem, so it is a line and not a row, and
@@ -51,6 +52,11 @@ FIX_BREW_PATH = (
 )
 FIX_FFMPEG = "brew install ffmpeg"
 FIX_FFMPEG_AGAIN = "brew reinstall ffmpeg"
+# Homebrew's plain ffmpeg is built without the zimg library, so it has no zscale filter and cannot tone-map an
+# HDR phone video. ffmpeg-full has it, and videotoolbox too. Homebrew keeps ffmpeg-full out of the way of the
+# plain ffmpeg ("keg-only"), so the plain one is unlinked and the full one linked in its place.
+FIX_FFMPEG_FULL = "brew install ffmpeg-full && brew unlink ffmpeg && brew link --force ffmpeg-full"
+FIX_FFMPEG_FULL_FRESH = "brew install ffmpeg-full && brew link --force ffmpeg-full"
 FIX_UV = "brew install uv"
 FIX_PYTHON = "uv python install 3.11"
 FIX_NODE = "brew install node"
@@ -65,6 +71,8 @@ FIX_COMMANDS = (
     FIX_BREW_PATH,
     FIX_FFMPEG,
     FIX_FFMPEG_AGAIN,
+    FIX_FFMPEG_FULL,
+    FIX_FFMPEG_FULL_FRESH,
     FIX_UV,
     FIX_PYTHON,
     FIX_NODE,
@@ -253,6 +261,26 @@ def check_ffmpeg(probe: Probe) -> Result:
     )
 
 
+def check_zscale(probe: Probe) -> Result:
+    """Passes when ffmpeg has the zscale filter, which turns an HDR phone video into normal colours.
+
+    Without it the kit still edits the video, but HDR colours can look washed out. Turning HDR video off
+    on the phone avoids that too, so this is a warning and never a stop.
+    """
+    path = probe.which("ffmpeg")
+    if not path:
+        return "warn", FIX_FFMPEG_FULL_FRESH  # the ffmpeg row above says to install one, and this build would do
+    result = probe.run([path, "-hide_banner", "-filters"], timeout=30)
+    if result and result[0] == 0 and any(line.split()[1:2] == ["zscale"] for line in result[1].splitlines()):
+        return "ok", ""
+    if path.startswith(BREW_PREFIX):
+        return "warn", FIX_FFMPEG_FULL
+    return "warn", (
+        f"{FIX_FFMPEG_FULL_FRESH} (then remove or rename the old ffmpeg at {path}, which has no zscale filter, "
+        "and open a new terminal)"
+    )
+
+
 def check_uv(probe: Probe) -> Result:
     return ("ok", "") if probe.which("uv") else ("missing", FIX_UV)
 
@@ -419,6 +447,7 @@ def collect(probe: Probe) -> List[Row]:
         ("macOS on Apple silicon", lambda: check_mac(probe)),
         ("Homebrew", lambda: check_brew(probe)),
         ("ffmpeg with h264_videotoolbox", lambda: check_ffmpeg(probe)),
+        ("HDR tone mapping (zscale filter)", lambda: check_zscale(probe)),
         ("uv", lambda: check_uv(probe)),
         ("Python 3.11", lambda: check_python(probe)),
         ("Node 22 or newer", lambda: check_node(probe)),

@@ -38,6 +38,10 @@ CHROMIUM = "uv run python -m playwright install chromium"
 ENV_EXAMPLE = "# Names only.\nAPIFY_TOKEN=\nOPENAI_API_KEY=\nGEMINI_API_KEY=\nELEVENLABS_API_KEY=\nZERNIO_API_KEY=\n"
 KEYS = ["APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"]
 ENCODERS = " V....D h264_videotoolbox    VideoToolbox H.264 Encoder (codec h264)\n V....D libx264 x264\n"
+FILTERS = " ... scale             V->V       Scale the input video size.\n .S. zscale            V->V       Apply resizing, colorspace and bit depth conversion.\n T.. tonemap           V->V       Conversion to/from different dynamic ranges.\n"
+FILTERS_WITHOUT_ZSCALE = " ... scale             V->V       Scale the input video size.\n T.. tonemap           V->V       Conversion to/from different dynamic ranges. Not zscale.\n"
+FULL_FFMPEG = "brew install ffmpeg-full && brew unlink ffmpeg && brew link --force ffmpeg-full"
+FULL_FFMPEG_FRESH = "brew install ffmpeg-full && brew link --force ffmpeg-full"
 GOOD_REPORT = {
     "mlx_whisper": "ok",
     "faster_whisper": "ok",
@@ -79,6 +83,7 @@ def fake(doctor):
             }
             self.outputs = {
                 "ffmpeg -hide_banner -encoders": (0, ENCODERS),
+                "ffmpeg -hide_banner -filters": (0, FILTERS),
                 "uv python find 3.11": (0, "/opt/homebrew/bin/python3.11\n"),
                 "node --version": (0, "v22.11.0\n"),
                 "npx --no-install hyperframes --version": (0, PIN + "\n"),
@@ -172,6 +177,7 @@ def test_a_healthy_mac_passes_every_required_check(doctor, fake):
         "macOS",
         "Homebrew",
         "ffmpeg",
+        "zscale",
         "uv",
         "Python 3.11",
         "Node 22",
@@ -348,6 +354,82 @@ def test_ffmpeg_from_somewhere_else_is_not_fixed_by_brew_alone(doctor, fake):
     assert row["status"] == "missing"
     assert row["fix"].startswith("brew install ffmpeg")
     assert "/usr/local/bin/ffmpeg" in row["fix"]
+
+
+# --- HDR phone videos: the zscale filter -------------------------------------------------------------------
+# Homebrew's plain ffmpeg is built without the zimg library, so it has no zscale filter and an HDR take cannot
+# be tone-mapped. The full build has it. Turning HDR video off on the phone avoids the problem, so the row warns.
+
+
+def test_the_zscale_row_passes_when_ffmpeg_has_the_filter(doctor, fake):
+    probe = fake()
+    row = find(rows_of(doctor, probe), "zscale")
+    assert row == {"check": "HDR tone mapping (zscale filter)", "status": "ok", "fix": ""}
+    assert "ffmpeg -hide_banner -filters" in probe.calls
+
+
+def test_the_zscale_row_warns_with_the_full_build_when_the_filter_is_missing(doctor, fake):
+    probe = fake()
+    probe.outputs["ffmpeg -hide_banner -filters"] = (0, FILTERS_WITHOUT_ZSCALE)
+    row = find(rows_of(doctor, probe), "zscale")
+    assert row["status"] == "warn"
+    assert row["fix"] == FULL_FFMPEG
+
+
+def test_only_a_filter_called_zscale_counts(doctor, fake):
+    # the word in a description, or a longer filter name, is not the filter
+    for listing in (FILTERS_WITHOUT_ZSCALE, " ... zscale_hw          V->V       A made-up filter.\n"):
+        probe = fake()
+        probe.outputs["ffmpeg -hide_banner -filters"] = (0, listing)
+        assert find(rows_of(doctor, probe), "zscale")["status"] == "warn", listing
+
+
+@pytest.mark.parametrize("answer", [(1, "ffmpeg: broken\n"), (0, ""), None], ids=["fails", "empty", "will-not-start"])
+def test_an_ffmpeg_that_cannot_list_its_filters_gets_the_same_warning(doctor, fake, answer):
+    probe = fake()
+    probe.outputs["ffmpeg -hide_banner -filters"] = answer
+    row = find(rows_of(doctor, probe), "zscale")
+    assert (row["status"], row["fix"]) == ("warn", FULL_FFMPEG)
+
+
+def test_the_zscale_row_is_a_warning_and_never_stops_the_run(doctor, fake, capsys):
+    probe = fake()
+    probe.outputs["ffmpeg -hide_banner -filters"] = (0, FILTERS_WITHOUT_ZSCALE)
+    assert doctor.main([], probe=probe) == 0
+    out = capsys.readouterr().out
+    assert re.search(r"^warn\s+HDR tone mapping \(zscale filter\)\s+" + re.escape(FULL_FFMPEG) + "$", out, re.M)
+    assert "Nothing required is missing. The rows marked warn are worth a look" in out
+    assert doctor.main(["--json"], probe=probe) == 0
+
+
+def test_without_ffmpeg_the_zscale_row_offers_the_full_build_to_install_first(doctor, fake):
+    probe = fake()
+    probe.programs.pop("ffmpeg")
+    rows = rows_of(doctor, probe)
+    assert find(rows, "videotoolbox")["fix"] == "brew install ffmpeg", "the ffmpeg row still says how to get a working one"
+    row = find(rows, "zscale")
+    assert (row["status"], row["fix"]) == ("warn", FULL_FFMPEG_FRESH), "nothing to unlink yet"
+    assert not any("-filters" in call for call in probe.calls), "no ffmpeg, so none was asked"
+
+
+def test_an_ffmpeg_from_somewhere_else_is_named_in_the_zscale_fix(doctor, fake):
+    probe = fake()
+    probe.programs["ffmpeg"] = "/usr/local/bin/ffmpeg"
+    probe.outputs["ffmpeg -hide_banner -filters"] = (0, FILTERS_WITHOUT_ZSCALE)
+    row = find(rows_of(doctor, probe), "zscale")
+    assert row["status"] == "warn"
+    assert row["fix"].startswith(FULL_FFMPEG_FRESH)
+    assert "/usr/local/bin/ffmpeg" in row["fix"] and "open a new terminal" in row["fix"]
+    assert "brew unlink" not in row["fix"], "that ffmpeg is not Homebrew's, so unlinking would change nothing"
+
+
+def test_the_zscale_row_sits_right_after_the_ffmpeg_row(doctor, fake):
+    names = [row["check"] for row in rows_of(doctor, fake())]
+    assert names.index("HDR tone mapping (zscale filter)") == names.index("ffmpeg with h264_videotoolbox") + 1
+
+
+def test_the_full_build_commands_are_in_the_fix_list(doctor):
+    assert FULL_FFMPEG in doctor.FIX_COMMANDS and FULL_FFMPEG_FRESH in doctor.FIX_COMMANDS
 
 
 def test_node_22_is_enough_and_so_is_anything_newer(doctor, fake):
@@ -875,11 +957,11 @@ def test_doctor_on_this_mac():
     assert problems == [], problems
     assert done.returncode == 0
     for row in rows:
-        if "Free disk" in row["check"]:
-            assert row["status"] in {"ok", "warn"}, row
+        if "Free disk" in row["check"] or "zscale" in row["check"]:
+            assert row["status"] in {"ok", "warn"}, row  # a Mac with Homebrew's plain ffmpeg has no zscale
         else:
             assert row["status"] == "ok", row
-    assert len(rows) >= 14
+    assert len(rows) >= 15
 
 
 # --- bin/fetch_gsap.sh ----------------------------------------------------------------------------------------

@@ -31,8 +31,8 @@ Read .claude/skills/onboard/SKILL.md and follow it from step 1.
 5. Your voice. One to three scripts or transcripts of yours, links to your own videos to transcribe, or a few adjectives and sample sentences. This becomes the voice model that scripts and captions are written from.
 6. Your watch list. Between 5 and 30 creators on Instagram, TikTok or YouTube whose videos you want the research to learn from.
 7. Posting, if you want the kit to post for you. Your Zernio key, a check of which platforms you have connected there, your time zone, and your default posting time for each platform. Without Zernio, every video still ends with the MP4 and a caption file for each platform, ready to post by hand.
-8. Styles. UI story needs nothing generated. You get filming tips and can record a 20 second test take. Mini me builds your character from photos or from a description, and you approve the character sheet and then the poses. You also choose how the voice-over is made.
-9. Test clip. A short clip in your brand for each style you chose.
+8. Styles. UI story needs nothing generated. You get filming tips, including turning HDR video off on your phone (on an iPhone: Settings, Camera, Record Video, HDR Video off), and you can record a 20 second test take. Mini me builds your character from photos or from a description, and you approve the character sheet, then the poses, then the in-between drawings. You also choose how the voice-over is made.
+9. Test clip. A short clip in your brand for each style you chose. The UI story clip uses your test take if you filmed one, and a sample card with a scratch voice if you did not. The mini me clip needs the finished character.
 10. Tour. How to talk to the kit, and what to say next: "run my research".
 
 Your profile and brand files are written at the end of step 8, because the test clips need them.
@@ -53,6 +53,7 @@ It lists each check with its status (ok, missing or warn) and the fix for anythi
 | Homebrew | Installs most of the tools below. | `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` |
 | Homebrew, installed but not found | The terminal does not know where Homebrew is. | `echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile && eval "$(/opt/homebrew/bin/brew shellenv)"` |
 | ffmpeg with h264_videotoolbox | Encodes video on the Mac's own hardware. | `brew install ffmpeg`, or `brew reinstall ffmpeg` if ffmpeg is there but built without that encoder |
+| HDR tone mapping (zscale filter) | Turns an HDR phone video into normal colours. Homebrew's plain ffmpeg lacks it, so HDR footage can look washed out. This row only warns: turning HDR video off on your phone avoids the problem too, and so does the fix. | `brew install ffmpeg-full && brew unlink ffmpeg && brew link --force ffmpeg-full`, or `brew install ffmpeg-full && brew link --force ffmpeg-full` if you have no ffmpeg yet. It is a big download. |
 | uv | Runs the kit's Python. | `brew install uv` |
 | Python 3.11 | The version the kit is pinned to. | `uv python install 3.11` |
 | Node 22 or newer | Runs HyperFrames. Node 20 is too old. | `brew install node`, or `brew upgrade node` for an older one |
