@@ -2,9 +2,9 @@
 #
 # The kit is built on a Mac that already has every tool installed, so a wrong or missing install step
 # would never show up there. This job starts from an empty hosted Mac and checks the result: the
-# machine check, the tests, and one three second HyperFrames render. Homebrew installs ffmpeg and
-# yt-dlp. uv and Node come from their setup actions instead of Homebrew, so this job does not test
-# `brew install uv` or `brew install node`.
+# machine check, the tests, and one three second HyperFrames render. Homebrew installs ffmpeg, and
+# yt-dlp comes with the Python tools, as it does in setup. uv and Node come from their setup actions
+# instead of Homebrew, so this job does not test `brew install uv` or `brew install node`.
 #
 # It runs only when you start it (the Actions tab, or `gh workflow run smoke.yml`). The repository takes
 # no pull requests. A public repository runs it for free, but on a private one a macOS minute costs
@@ -63,14 +63,13 @@ jobs:
             exit 1
           fi
 
-      - name: Install ffmpeg and yt-dlp with Homebrew
+      - name: Install ffmpeg with Homebrew
         timeout-minutes: 20
         run: |
           # The runner image can be weeks old, so refresh Homebrew's list before installing.
           brew update
-          brew install ffmpeg yt-dlp
+          brew install ffmpeg
           ffmpeg -version | sed -n 1p
-          yt-dlp --version
 
           # Homebrew's ffmpeg is a small build, and the machine check only looks for h264_videotoolbox.
           # Check two more things the kit needs. Each listing goes into a variable first, so no pipe
@@ -114,11 +113,13 @@ jobs:
       - name: Install the Python environment
         timeout-minutes: 25
         # --locked stops the run if uv.lock is out of date with pyproject.toml, instead of quietly
-        # resolving again. The dev group, which holds pytest, is installed by default.
+        # resolving again. The dev group, which holds pytest, is installed by default. yt-dlp comes
+        # from the research group here, as it does in setup.
         run: |
           uv --version
           uv sync --locked --group video --group research --group character
           uv run python --version
+          uv run yt-dlp --version
 
       - name: Install the pinned HyperFrames
         timeout-minutes: 10
