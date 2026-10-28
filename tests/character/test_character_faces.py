@@ -187,6 +187,71 @@ def test_a_beard_stays_a_beard_when_the_mouth_opens():
         assert (after != before).any()
 
 
+BEARDS = {
+    "a grey beard on black hair": dict(hair=(30, 26, 28), beard=(150, 150, 150)),
+    "a beard a darker shade of the hair": dict(beard=(76, 45, 29)),
+    "a beard under a red cap": dict(hat=14, beard=BEARD),
+}
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("cheeks", [True, False], ids=["skin cheeks", "flat top"])
+@pytest.mark.parametrize("look", list(BEARDS))
+def test_a_beard_of_any_colour_is_followed(look, cheeks, scale):
+    """A beard need not share a colour with the hair or a hat, and it may start across the whole face in one row,
+    with no skin above the moustache."""
+    rgba, drawn = _scaled(*draw_figure("idle", beard_cheeks=cheeks, **BEARDS[look]), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+@pytest.mark.parametrize(("length", "scale"), [(4, 1), (2, 2), (4, 2)], ids=["4 rows at 1x", "2 rows at 2x", "4 rows at 2x"])
+def test_a_beard_hanging_below_the_chin_stays_with_the_head(length, scale):
+    """A beard that ends a little way below the chin is followed to its end: the eyes and mouth are found, and the
+    head holds the whole beard and stops under it."""
+    rgba, drawn = _scaled(*draw_figure("idle", hair=BEARD, beard=BEARD, beard_length=length), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    bottom = drawn["face"][3] + length * scale  # the beard's last row
+    assert bottom < face.neck <= bottom + 1 + 2 * scale, (face.neck, bottom)
+
+
+def test_a_beard_in_many_shades_is_measured_without_an_error():
+    """No colour of the first beard row covers a fair share of it, so its commonest colour sets the beard."""
+    from character_sprites import OY
+
+    rgba, _ = draw_figure("idle", hair=BEARD, beard=BEARD, beard_cheeks=False)
+    shades = [(60 + 3 * i, 40 + 2 * i, 30 + i) for i in range(11)]
+    rows = np.arange(rgba.shape[0])[:, None]
+    ys, xs = np.nonzero((rgba[..., :3] == BEARD).all(2) & (rows >= OY + 26))
+    for k, (y, x) in enumerate(zip(ys, xs)):
+        rgba[y, x, :3] = shades[k % len(shades)]
+    try:
+        faces.locate(rgba)
+    except faces.FaceNotFound:
+        pass  # a plain sentence for the board is fine; any other error is not
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+def test_a_beard_too_long_to_follow_never_stretches_the_head_into_the_body(scale):
+    """A beard hanging well below the chin runs past the search and is left for the creator to mark (the face
+    board says so). Whatever is measured then, the head never reaches down into the top."""
+    rgba, drawn = _scaled(*draw_figure("idle", hair=BEARD, beard=BEARD, beard_length=12), scale)
+    try:
+        face = faces.locate(rgba)
+    except faces.FaceNotFound:
+        return
+    assert face.neck <= drawn["body"][1], (face.neck, drawn["body"][1])
+
+
 # --- where the head ends: short necks, no neck, collars ---------------------------------------------------------------
 
 NECKS = {

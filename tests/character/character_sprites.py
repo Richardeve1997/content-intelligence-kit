@@ -145,6 +145,8 @@ def draw_figure(
     hat_colour: tuple[int, int, int] = (176, 44, 44),
     neck: int = 5,
     collar: tuple[int, int, int] | None = None,
+    beard_cheeks: bool = True,
+    beard_length: int = 0,
 ) -> tuple[np.ndarray, dict]:
     """One figure on a 120 x 170 transparent canvas. Returns (RGBA uint8 array, info).
 
@@ -152,13 +154,17 @@ def draw_figure(
     (x0, y0, x1, y1) inclusive canvas boxes, and "air", how far the figure is lifted off the ground. The face
     box is the skin drawn around the eyes and mouth.
 
-    Options draw other looks: `skin`, `hair` and `mouth` colours (the cheeks are a shade of the skin); `glasses`,
-    dark frames round both eyes joined by a bridge and running out to the hair, so the eyes are not closed in by
-    skin; `beard`, a beard in that colour over the jaw and chin with a moustache and the mouth showing through;
-    `shirt`, the colour of the top; `hat`, a hat that many rows tall on top of the hair, with a brim; `neck`, how
-    many rows of neck show between the chin and the top (5, or fewer for a short neck, 0 for none: the body moves
-    up to meet the head); `collar`, a high collar in that colour over the neck, wider than the neck and touching
-    the chin, like a turtleneck.
+    Options draw other looks:
+    - `skin`, `hair` and `mouth` colours (the cheeks are a shade of the skin) and `shirt`, the colour of the top;
+    - `glasses`, dark frames round both eyes joined by a bridge and running out to the hair, so the eyes are not
+      closed in by skin;
+    - `beard`, a beard in that colour over the jaw and chin with a moustache and the mouth showing through. With
+      `beard_cheeks` False it starts across the whole face in one row, with no skin cheeks above the moustache,
+      and `beard_length` rows of it hang below the chin, in front of the neck and the top;
+    - `hat`, a hat that many rows tall on top of the hair, with a brim, in `hat_colour`;
+    - `neck`, how many rows of neck show between the chin and the top (5, or fewer for a short neck, 0 for none:
+      the body moves up to meet the head), and `collar`, a high collar in that colour over the neck, wider than
+      the neck and touching the chin, like a turtleneck.
     """
     body: dict[tuple[int, int], tuple[int, int, int]] = {}
     air = 10 if pose == "celebrate" else 0
@@ -197,7 +203,7 @@ def draw_figure(
         if beard is not None:
             for y in range(26, 37):
                 for x in range(11, 45):
-                    if y <= 27 and 17 < x < 38:
+                    if beard_cheeks and y <= 27 and 17 < x < 38:
                         continue  # the cheeks above the moustache stay skin
                     body[(x, y)] = beard
             _box(body, 22, 28, 33, 28, beard)  # the moustache
@@ -224,6 +230,8 @@ def draw_figure(
     lift = 5 - neck
     for (x, y), colour in lower.items():
         body[(x, y - lift)] = colour
+    if beard is not None and beard_length and pose != "back":
+        _box(body, 16, 37, 39, 36 + beard_length, beard)  # hangs from the chin, in front of the neck and the top
 
     rgba = np.zeros((CANVAS_H, CANVAS_W, 4), np.uint8)
     for (x, y), colour in body.items():

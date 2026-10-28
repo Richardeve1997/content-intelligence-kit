@@ -48,7 +48,8 @@ def test_the_skill_walks_every_approval_and_names_its_commands():
     assert body.index("approve sheet") < body.index("approve poses"), "the face is checked before the sheet is approved"
     for words in ("--numbered", "remove character <number>", "13 poses are left to draw, 14 in all", ".attach-1.png",
                   "--description - <<'WORDS'", "smaller hat", "each keeping its own file type",
-                  "deletes the copies once the picture is back", "a line where the head ends"):  # fmt: skip
+                  "deletes the copies once the picture is back", "a line where the head ends",
+                  "A beard that hangs well below the chin is not measured"):  # fmt: skip
         assert words in body, words
     for stale in ("kept only in", "Never copy them anywhere else"):  # the manual tool does copy photos, for a while
         assert stale not in body, stale

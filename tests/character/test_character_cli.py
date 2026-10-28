@@ -174,9 +174,15 @@ def test_a_neck_row_above_the_mouth_or_off_the_canvas_is_refused_and_not_kept(me
     _sheet_drawn(me, capsys)
     face, _ = faces.measure(faces.front_canvas(me, _state(me)), None)
 
-    assert cli.main(["faces", "--neck", str(face.mouth.y)]) == 1
-    err = capsys.readouterr().err
-    assert "above the bottom of the mouth" in err and "Traceback" not in err
+    last = face.mouth.y1 - 1  # the mouth's own last row is not below the mouth either
+    for row in (face.mouth.y, last):
+        assert cli.main(["faces", "--neck", str(row)]) == 1
+        err = capsys.readouterr().err
+        assert f"whose last row is {last}, so row {row} is too high" in err, err
+        assert f"(row {last + 1} or lower)" in err and "Traceback" not in err
+    assert cli.main(["faces", "--neck", str(last + 1)]) == 0, "the first row under the mouth is allowed"
+    assert cli.main(["faces", "--clear"]) == 0
+    capsys.readouterr()
     assert cli.main(["faces", "--neck", "999"]) == 1
     assert "off the 245 x 284 canvas" in capsys.readouterr().err
     assert _state(me)["face_marks"] is None, "a refused mark is not kept"
