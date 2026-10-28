@@ -54,6 +54,7 @@ BEARD_TRACE = 0.1  # under a beard, a row holding fewer of its colours than this
 EYE_AREA_SHARE = 0.15  # an eye covers at most this share of the face; a bigger "eye" means a wrong guess
 AREA_SHARE = 0.25  # below the eyes, a colour covering more than this share fills an area (skin, a beard)
 TRIES = 10  # how many colours down the middle of the head are tried as the skin, longest run first
+LIP_LIGHTER = 12.0  # how much lighter (Lab L) than the mouth's line a colour must be to count as its lip
 BOARD = "faces/board.png"
 FIX = (
     "Draw the sheet again with the whole face in view (a smaller hat or none, no hair over the eyes), or mark "
@@ -755,8 +756,19 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     m = face.mouth
     mouth_cells = rgba[max(0, m.y) : m.y1, max(0, m.x) : m.x1]
     lip_pick = [tuple(int(v) for v in c) for c in mouth_cells[..., :3][mouth_cells[..., 3] > 0]]
+    # The lip is the mouth's own colour. A mouth drawn as a dark line with a lip under it has more of the line in
+    # its box, so the lip is the commonest colour there that is not skin and is clearly lighter than the line. A
+    # mouth in one colour keeps that colour, unless it is the darkest, which would make the open mouth one dark blot.
     lip_pick = [c for c in lip_pick if c not in family]
-    lip = max(set(lip_pick), key=lip_pick.count) if lip_pick else shadow
+    lightness = {c: float(art.lab_of(np.array([c]))[0][0]) for c in set(lip_pick)}
+    line = min(lightness, key=lightness.get) if lightness else None
+    lighter = [c for c in lip_pick if lightness[c] >= lightness[line] + LIP_LIGHTER]
+    if lighter:
+        lip = max(set(lighter), key=lighter.count)
+    elif lip_pick:
+        lip = max(set(lip_pick), key=lip_pick.count)
+    else:
+        lip = shadow
     if lip == darkest:
         lip = shadow
     # what surrounds the drawn mouth: the colour the closed mouth is painted over with when it opens
@@ -779,6 +791,27 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
     eyes_rect = face.eyes.grown(lash_unit, lash_unit, lash_unit, lash_unit)
     mouth_rect = _union(m.grown(unit, unit, unit, unit),
                         _box(centre - half_w - unit, top - unit, centre + half_w + unit, top + (open_rows + 2) * unit))  # fmt: skip
+    # The drawn mouth can reach past its box, as the raised tips of a smile do when the box is marked tighter. Its
+    # strokes, in the colours drawn inside the box, are followed a little way out (inside the face, below the eyes,
+    # above the neck) and the patch grows to hold them, so an open mouth paints all of it over.
+    inside = rgba[max(0, m.y) : m.y1, max(0, m.x) : m.x1]
+    drawn_inside = ~art.colour_mask(inside, family | {surround}) & (inside[..., 3] > 0)
+    stroke_colours = {tuple(int(v) for v in c) for c in inside[..., :3][drawn_inside]}
+    stroke = np.zeros(rgba.shape[:2], bool)
+    if stroke_colours:
+        reach = max(unit, m.w)
+        x0, x1 = max(0, min(m.x, max(face.x, m.x - reach))), min(rgba.shape[1], max(m.x1, min(face.x1, m.x1 + reach)))
+        y0, y1 = max(0, m.y - 2 * unit), min(rgba.shape[0], m.y1 + 2 * unit)
+        cells = rgba[y0:y1, x0:x1]
+        same = art.colour_mask(cells, stroke_colours) & (cells[..., 3] > 0)
+        same[: max(0, min(eyes_rect.y1, m.y) - y0)] = False  # never up into the eyes
+        same[max(0, max(face.neck, m.y1) - y0) :] = False  # nor down past the head
+        labels, _ = ndimage.label(same, structure=np.ones((3, 3)))
+        seeds = labels[max(0, m.y) - y0 : m.y1 - y0, max(0, m.x) - x0 : m.x1 - x0]
+        stroke[y0:y1, x0:x1] = np.isin(labels, seeds[seeds > 0])
+        if stroke.any():
+            ys, xs = np.nonzero(stroke)
+            mouth_rect = _union(mouth_rect, _box(xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
     if mouth_rect.y < eyes_rect.y1:  # a small face: the mouth patch starts below the eye patch
         mouth_rect = _box(mouth_rect.x, eyes_rect.y1, mouth_rect.x1, max(mouth_rect.y1, eyes_rect.y1 + 1))
 
@@ -800,11 +833,12 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
             canvas[y0:y1, x0:x1, 3] = 255
 
     def unmouthed() -> np.ndarray:
-        """The sprite with the drawn mouth painted over with what surrounds it."""
+        """The sprite with the drawn mouth painted over with what surrounds it, the strokes past its box too."""
         bare = rgba.copy()
         region = bare[max(0, m.y) : m.y1, max(0, m.x) : m.x1]
         drawn = ~art.colour_mask(region, family | {surround}) & (region[..., 3] > 0)
         region[..., :3][drawn] = surround
+        bare[..., :3][stroke] = surround
         return bare
 
     narrow = max(1, half_w - unit)

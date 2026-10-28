@@ -592,3 +592,46 @@ def test_a_box_is_four_whole_numbers(text):
     with pytest.raises(faces.KitError) as caught:
         faces.parse_box(text)
     assert "x,y,w,h" in str(caught.value) or "width and a height" in str(caught.value)
+
+
+def _smile_marked_narrow():
+    """A face whose mouth is a smile in the outline colour, its tips rising past a box marked narrower and lower,
+    with a lip line in the mouth colour under it: the box a creator marks when the measured one gave a bar."""
+    from character_sprites import MOUTH, OUTLINE, OX, OY, SKIN
+
+    rgba, _ = draw_figure("idle")
+    face = faces.locate(rgba)
+
+    def paint(cells, colour):
+        for x, y in cells:
+            rgba[y + OY, x + OX, :3] = colour
+
+    paint([(x, y) for x in range(24, 32) for y in (29, 30)], SKIN)  # the drawn mouth box goes back to skin
+    tips = [(19, 26), (36, 26), (20, 27), (35, 27), (21, 28), (34, 28), (22, 29), (23, 29), (32, 29), (33, 29)]
+    paint(tips + [(x, 30) for x in range(24, 32)], OUTLINE)
+    paint([(x, 31) for x in range(25, 31)], MOUTH)
+    marked = faces.apply_marks(rgba, face, {"mouth": [24 + OX, 29 + OY, 8, 3]})
+    return rgba, marked, [(x + OX, y + OY) for x, y in tips], MOUTH, OUTLINE
+
+
+def test_an_open_mouth_paints_over_all_of_the_drawn_mouth_not_just_the_marked_box():
+    """The tips of a smile drawn wider than the marked box are painted over when the mouth opens, and the mouth
+    patch is big enough to hold them, so they never float beside the opening."""
+    rgba, face, tips, _, outline = _smile_marked_narrow()
+    states = faces.face_states(rgba, face, open_rows=2)
+    for name in ("mouth_mid", "mouth_open"):
+        rect, patch = states.rects[name], states.patches[name]
+        for x, y in tips:
+            assert rect.x <= x < rect.x1 and rect.y <= y < rect.y1, f"{name} patch {rect} misses the tip at {(x, y)}"
+            assert tuple(int(v) for v in patch[y - rect.y, x - rect.x, :3]) != outline, f"{name} keeps the tip {(x, y)}"
+    closed = states.patches["mouth_closed"]
+    rect = states.rects["mouth_closed"]
+    assert (closed == rgba[rect.y : rect.y1, rect.x : rect.x1]).all(), "the closed mouth is still the sprite as drawn"
+
+
+def test_an_open_mouth_keeps_the_lip_colour_the_mouth_is_drawn_with():
+    """The lip under the opening is the mouth's own colour, even when the outline colour fills more of the box."""
+    rgba, face, _, lip, _ = _smile_marked_narrow()
+    states = faces.face_states(rgba, face, open_rows=2)
+    for name in ("mouth_mid", "mouth_open"):
+        assert (states.patches[name][..., :3] == lip).all(2).any(), f"{name} has no lip in the mouth's colour"
