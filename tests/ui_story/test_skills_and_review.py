@@ -85,12 +85,21 @@ def test_one_fact_shows_one_number_on_every_card():
     real_things = ui.split("### Real things on screen")[1].split("###")[0]
     assert "One fact shows one number" in real_things
     assert "badge" in real_things, "the subject card's badges are named, since they come first"
+    assert "stronger sourced version" not in real_things, "the number rule and the one-number rule must agree"
+    assert "is the one the creator says" in real_things, "it says plainly that the spoken number wins"
     pace = ui.split("### Pace and reading load")[1].split("###")[0]
     assert "in under a second" in pace, "a count's passing values must not read as numbers"
     rubric = review.split("## The rubric")[1].split("## Common mistakes")[0]
     assert "one fact shows one number" in rubric.lower()
     handover = ui.split("## Before handing over")[1]
     assert "one number" in handover
+
+
+def test_the_restart_step_keeps_a_repeat_the_creator_meant():
+    """The restart check flags any word said twice in a row, so the recipe says a meant repeat is not cut."""
+    recipe = text(SKILLS["ui-story"]).split("## The edit")[1]
+    restart_line = next(line for line in recipe.splitlines() if "restarts.log" in line)
+    assert "a repeat the creator meant stays" in restart_line
 
 
 def test_both_skills_are_routed_in_claude_md():

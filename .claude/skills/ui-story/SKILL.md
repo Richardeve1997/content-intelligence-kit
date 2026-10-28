@@ -104,7 +104,7 @@ Test it: mute the render and look at frames 0.2, 1, 2, 3, 4 and 5 s (the review'
 - The one exception is a prompt. When the creator says "this prompt" or "paste this", show their real prompt as a tall designed card that scrolls smoothly through that sentence. Its label is the read; the body is texture.
 - Product footage plays in a `.vidcard` (a rounded app window) with accent motion graphics on top: a chip naming the action on its word, a ring on the UI element, a cursor glide and click, a zoom to the detail that lands on its word and holds. No drifting pans.
 - Plain language on screen: "Free and open source" with a star count, not a licence name or a technical metric.
-- Every number on screen matches the number the creator says, or is the stronger sourced version of it (their number big, the sourced range under it). Never invent a number, a rank or a quote. A small spoken slip is not corrected on screen.
+- Every number on screen is the one the creator says; a fact they give no number for shows the sourced one from `SOURCES.md`. Never invent a number, a rank or a quote. A small spoken slip is not corrected on screen.
 - One fact shows one number. When the creator says a number, every card that shows that fact uses it, the subject card's badges included, since they come first. A fuller live figure from the source goes in `SOURCES.md`, not on another card.
 - No grey credit lines and no "illustrative" tags on screen. Credits and notes go in `SOURCES.md`; a stat may keep one readable source pill.
 - When the creator cites their own experience, show it: the real marks of the places they name, with their titles.
@@ -145,7 +145,7 @@ uv run python $K/prep.py $V --edl
 
 # 2. The base, the clean voice, the words, the restart check, the matte and the PIP geometry
 uv run python $K/prep.py $V
-#    read $B/restarts.log; when it flags a restart, fix the EDL and run prep again
+#    read $B/restarts.log; when it flags a restart, fix the EDL and run prep again; a repeat the creator meant stays ("much, much")
 uv run python -m kit.media probe $B/base.mp4          # D, the base duration in seconds
 
 # 3. Layout: write $B/layout.json from $B/base.lines.txt (cues are words as spoken)
