@@ -46,9 +46,9 @@ FULL = "scale=1080:1920:flags=lanczos"
 HDR_TRANSFERS = ("arib-std-b67", "smpte2084")  # HLG (iPhone) and PQ (HDR10)
 # What the creator hears when an HDR take meets an ffmpeg without zscale. The cut goes on without the colour fix.
 NO_ZSCALE = (
-    "This take is HDR and this ffmpeg has no zscale filter, so its colours may look washed out: film again with "
-    "HDR video turned off on the phone, or install the full ffmpeg (python3 bin/doctor.py shows the command); "
-    "until then the cut goes on without the colour fix."
+    "This take is HDR and this ffmpeg cannot convert HDR colours (it has no zscale filter), so they may look "
+    "washed out; film again with HDR video turned off on the phone, or install the full ffmpeg (python3 "
+    "bin/doctor.py shows the command), and until then the cut goes on without the colour fix."
 )
 
 
