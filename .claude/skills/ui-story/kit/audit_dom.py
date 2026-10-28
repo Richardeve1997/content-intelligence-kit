@@ -4,9 +4,9 @@
 It seeks the paused timeline every --step seconds in a headless browser and records every visible piece of
 text at --min-px or larger (so window chrome and tiny labels are skipped). A counter's changing spans are
 merged into one entry, and typed text (one span a character, from UIS.type) counts as the whole line it
-types, from its first letter on screen. For each text it reports the readable words, the seconds it is on screen after the
-gap trims and the speed-up, and the seconds it needs (0.35 s a word plus 0.6 s, counting at most 8 words),
-then OK or SHORT (within 0.15 s is fine). Captions are left out.
+types, from its first letter on screen. For each text it reports the readable words, the seconds it is on
+screen after the gap trims and the speed-up, and the seconds it needs (0.35 s a word plus 0.6 s, counting at
+most 8 words), then OK or SHORT (within 0.15 s is fine). Captions are left out.
 
 The house limits it checks against: one idea and about six readable words a visual, on screen long enough
 to read. A SHORT row is allowed only when the speech binds it (two cards on one sentence); say so in the
