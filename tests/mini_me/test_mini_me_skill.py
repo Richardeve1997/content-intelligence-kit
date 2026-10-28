@@ -158,6 +158,113 @@ def test_the_test_clip_runs_the_pipeline_on_one_page(kit_home, tmp_path, monkeyp
     assert not config.work_dir("mini-me-test-clip").exists(), "the scratch folder is cleaned up"
 
 
+def noisy_pipeline(monkeypatch, *, fail: bool = False):
+    """The three build steps, each printing the kind of progress lines the real ones print."""
+    import sys
+
+    install, render, ship = (load(name) for name in ("install", "render", "ship"))
+    for name, module in (("install", install), ("render", render), ("ship", ship)):
+        monkeypatch.setitem(sys.modules, name, module)
+
+    def fake_install(slug):
+        print(f"installed work/{slug}/build/hf (6.2 s, 1 pages).")
+
+    def fake_render(slug, *args):
+        print("rendered picture.mp4 (1080x1920, 60 fps, 6.20 s)")
+
+    def fake_ship(args):
+        print("  #       t field  pose        scale crown  headline sizes")
+        if fail:
+            print("FAIL: the speech gate found 1 lost word run(s):")
+            print('- "mini" (at 1.45 s in the edit) is missing from the final audio.')
+            print("The failed render is build/final.next.mp4; final.mp4 was left as it was.")
+            return 1
+        print("finished build/final.next.mp4 at 1x: -13.0 LUFS, true peak -2.6 dBTP")
+        print("PASS: the speech gate heard every word of the voice-over.")
+        (config.work_dir(args[0]) / "final.mp4").write_bytes(b"clip")
+        return 0
+
+    monkeypatch.setattr(install, "install", fake_install)
+    monkeypatch.setattr(render, "render", fake_render)
+    monkeypatch.setattr(ship, "main", fake_ship)
+
+
+def scratch_voice(monkeypatch, seconds: float = 6.2):
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/say" if name == "say" else None)
+
+    def fake_say(text, slug, **kwargs):
+        (config.work_dir(slug) / "vo.m4a").write_bytes(b"audio")
+        return voice.VO(config.work_dir(slug) / "vo.m4a", [])
+
+    monkeypatch.setattr(voice, "from_say", fake_say)
+    test_clip = load("test_clip")
+    monkeypatch.setattr(test_clip.media, "probe", lambda path: type("I", (), {"duration": seconds})())
+    return test_clip
+
+
+def test_the_build_steps_keep_their_progress_lines_off_the_screen(kit_home, tmp_path, monkeypatch, capsys):
+    """Whatever the script prints before its last line is a note for the creator, so the build's own log is not."""
+    noisy_pipeline(monkeypatch)
+    test_clip = scratch_voice(monkeypatch, seconds=4.0)  # a short line earns a real note
+    assert test_clip.main(["--out", str(tmp_path / "clip.mp4")]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[0].startswith("note: the line runs 4.0 s")
+    assert len(lines) == 2 and lines[1].startswith("test clip "), lines
+
+
+def test_a_clip_that_fails_its_checks_says_what_the_steps_said(kit_home, tmp_path, monkeypatch, capsys):
+    noisy_pipeline(monkeypatch, fail=True)
+    test_clip = scratch_voice(monkeypatch)
+    assert test_clip.main(["--out", str(tmp_path / "clip.mp4")]) == 1
+    said = capsys.readouterr().out
+    assert 'FAIL: the speech gate found 1 lost word run(s):' in said and '"mini" (at 1.45 s' in said
+    assert "--keep" in said and "final.next.mp4" in said
+    assert "Traceback" not in said
+    assert not (tmp_path / "clip.mp4").exists()
+
+
+def test_a_recording_that_was_paced_gets_a_note_that_fits_a_test_clip(kit_home, tmp_path, monkeypatch, capsys):
+    """kit.voice says how to keep a recording's own pace for a whole Reel. A test clip has no such option."""
+    noisy_pipeline(monkeypatch)
+    test_clip = scratch_voice(monkeypatch, seconds=6.0)
+    recording = tmp_path / "line.m4a"
+    recording.write_bytes(b"the creator's own recording")
+
+    def fake_recording(path, slug, **kwargs):
+        (config.work_dir(slug) / "vo.m4a").write_bytes(b"audio")
+        print(voice.PACED.format(tempo=voice.RECORDING_TEMPO, longest=voice.PAUSE_LONGEST, keep=voice.PAUSE_KEEP))
+        return voice.VO(config.work_dir(slug) / "vo.m4a", [])
+
+    monkeypatch.setattr(voice, "from_recording", fake_recording)
+    assert test_clip.main(["--out", str(tmp_path / "clip.mp4"), "--voice", str(recording)]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2 and lines[1].startswith("test clip "), lines
+    assert lines[0].startswith("note: your recording was sped up to 1.15x and pauses over 0.35 s were cut to 0.24 s")
+    assert "--keep-pace" not in lines[0], "that option belongs to the voice-over command, not to a test clip"
+
+
+def test_a_recording_that_was_not_paced_says_nothing_about_pace(kit_home, tmp_path, monkeypatch, capsys):
+    noisy_pipeline(monkeypatch)
+    test_clip = scratch_voice(monkeypatch, seconds=6.0)
+    recording = tmp_path / "line.m4a"
+    recording.write_bytes(b"the creator's own recording")
+
+    def fake_recording(path, slug, **kwargs):
+        (config.work_dir(slug) / "vo.m4a").write_bytes(b"audio")
+        return voice.VO(config.work_dir(slug) / "vo.m4a", [])
+
+    monkeypatch.setattr(voice, "from_recording", fake_recording)
+    assert test_clip.main(["--out", str(tmp_path / "clip.mp4"), "--voice", str(recording)]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 1 and lines[0].startswith("test clip ")
+
+
+def test_the_test_clip_script_is_executable_like_the_scripts_beside_it():
+    script = KIT / "test_clip.py"
+    assert script.stat().st_mode & 0o111
+    assert script.read_text(encoding="utf-8").startswith("#!/usr/bin/env python3")
+
+
 def test_the_test_clip_page_is_one_headline_under_four_words():
     test_clip = load("test_clip")
     assert len(test_clip.HEADLINE.split()) <= 4
