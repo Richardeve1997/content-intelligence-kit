@@ -1,13 +1,14 @@
 # Smoke test on a clean Apple silicon Mac.
 #
 # The kit is built on a Mac that already has every tool installed, so a wrong or missing install step
-# would never show up there. This job starts from an empty hosted Mac, installs the tools that
-# ONBOARDING.md lists, and checks the result: the machine check, the tests, and one three second
-# HyperFrames render.
+# would never show up there. This job starts from an empty hosted Mac and checks the result: the
+# machine check, the tests, and one three second HyperFrames render. Homebrew installs ffmpeg and
+# yt-dlp. uv and Node come from their setup actions instead of Homebrew, so this job does not test
+# `brew install uv` or `brew install node`.
 #
 # It runs only when you start it (the Actions tab, or `gh workflow run smoke.yml`). The repository takes
-# no pull requests, and a macOS minute costs several times what a Linux minute does, so run it once
-# before each release and not on every push.
+# no pull requests. A public repository runs it for free, but on a private one a macOS minute costs
+# several times what a Linux minute does, so run it once before each release and not on every push.
 name: macOS smoke test
 
 on:
@@ -16,7 +17,7 @@ on:
 permissions:
   contents: read
 
-# Starting the job twice replaces the first run, so a double click is not billed twice.
+# Starting the job twice replaces the first run, so a double click does not run it twice.
 concurrency:
   group: smoke-${{ github.ref }}
   cancel-in-progress: true
@@ -71,6 +72,29 @@ jobs:
           ffmpeg -version | sed -n 1p
           yt-dlp --version
 
+          # Homebrew's ffmpeg is a small build, and the machine check only looks for h264_videotoolbox.
+          # Check two more things the kit needs. Each listing goes into a variable first, so no pipe
+          # can stop ffmpeg early and fail the step by accident under pipefail.
+          encoders="$(ffmpeg -hide_banner -encoders)"
+          filters="$(ffmpeg -hide_banner -filters)"
+          # The test the kit uses: the second word on a line is the name.
+          has() { awk -v name="$2" '$2 == name { found = 1 } END { exit !found }' <<< "$1"; }
+          # The UI story graphics layer is rendered as VP9 with alpha, and read back with libvpx-vp9
+          # because ffmpeg's own VP9 decoder drops the alpha. Without it the edit cannot run.
+          if has "$encoders" libvpx-vp9; then
+            echo "ffmpeg has the libvpx-vp9 encoder."
+          else
+            echo "::error::This ffmpeg has no libvpx-vp9 encoder, and the UI story graphics layer needs it."
+            exit 1
+          fi
+          # HDR phone takes are tone-mapped with zscale. Without it the kit prints a note and goes on,
+          # so this is a warning and not a failure.
+          if has "$filters" zscale; then
+            echo "ffmpeg has the zscale filter."
+          else
+            echo "::warning::This ffmpeg has no zscale filter, so HDR phone takes cannot be tone-mapped with this build."
+          fi
+
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
@@ -123,12 +147,18 @@ jobs:
           import json
           import sys
 
+
+          def cell(text):
+              # One line with no bare pipe, because a pipe would end the table cell.
+              return " ".join(str(text).split()).replace("|", "\\|")
+
+
           rows = json.load(open(sys.argv[1], encoding="utf-8"))
           print("### Machine check\n")
-          print("| Status | Check |")
-          print("| --- | --- |")
+          print("| Status | Check | Fix |")
+          print("| --- | --- | --- |")
           for row in rows:
-              print(f"| {row['status']} | {row['check']} |")
+              print(f"| {cell(row['status'])} | {cell(row['check'])} | {cell(row['fix'])} |")
           PY
           exit "$status"
 
@@ -138,15 +168,23 @@ jobs:
       # steps. Try the kit's own encoder settings once. If they fail, switch the kit to libx264 for
       # the tests with KIT_FORCE_X264, which it reads, and say so in the summary.
       - name: Check the hardware video encoder
+        timeout-minutes: 5
         run: |
-          read -r -a encoder <<< "$(uv run python -m kit.media encoder)"
-          echo "The kit's encoder settings: ${encoder[*]}"
+          # The settings go into a variable first. Inside read's here-string a failing uv run would
+          # not fail the step.
+          settings="$(uv run python -m kit.media encoder)"
+          read -r -a encoder <<< "$settings"
+          if [ "${#encoder[@]}" -lt 2 ]; then
+            echo "::error::kit.media encoder printed no encoder settings."
+            exit 1
+          fi
+          echo "The kit's encoder settings: $settings"
           probe="$RUNNER_TEMP/encoder-probe.mp4"
           if ffmpeg -nostdin -v error -f lavfi -i testsrc2=s=128x224:r=30:d=0.5 "${encoder[@]}" "$probe"; then
             echo "That encoder works on this runner."
             echo "Video encoder in the tests: the kit's default (${encoder[1]})" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::notice::The kit's default video encoder does not work on this runner, so the tests use libx264."
+            echo "::warning::The kit's default video encoder does not work on this runner, so the tests use libx264."
             echo "KIT_FORCE_X264=1" >> "$GITHUB_ENV"
             echo "Video encoder in the tests: libx264, because ${encoder[1]} cannot encode on this runner" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -159,6 +197,7 @@ jobs:
       # example profile (tokens, fonts, GSAP and the kit's helpers), hyperframes lint checks it, and
       # kit.media takes a heavy-job slot around the render, as the ui-story skill does.
       - name: Build the test card project
+        timeout-minutes: 10
         env:
           KIT_ME: ${{ github.workspace }}/me.example
         run: |
@@ -175,6 +214,7 @@ jobs:
             --fps 60 --workers 1 --output "$RUNNER_TEMP/card.mp4" "$RUNNER_TEMP/card"
 
       - name: Check the rendered card
+        timeout-minutes: 10
         env:
           KIT_ME: ${{ github.workspace }}/me.example
         run: |
