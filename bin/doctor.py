@@ -10,7 +10,8 @@ Each row is {"check": ..., "status": "ok" | "missing" | "warn", "fix": ...}.
   missing  a required check fails. "fix" is the exact command to run, or a sentence when no command can help.
   warn     worth a look but it does not stop anything: low disk space, an ffmpeg without the zscale
            filter (HDR phone videos then keep washed-out colours), or, inside Codex's sandbox, a tool that
-           cannot start there (HyperFrames and Chromium). One run outside the sandbox checks those.
+           cannot start there (HyperFrames and Chromium, and Python 3.11 when the sandbox is read-only).
+           One run outside the sandbox checks those.
 
 Under the table, one line names the optional keys that are not set yet (Apify, an image model,
 ElevenLabs, Zernio). A key that is not set is not a problem, so it is a line and not a row, and
@@ -478,14 +479,21 @@ def footer_line(probe: Probe) -> Optional[str]:
 # --- putting the rows together --------------------------------------------------------------------------------
 
 
+def _reason(exc: Exception) -> str:
+    """The system's own words for a failure, such as Permission denied, else the kind of error. An exception's
+    message is never shown, because it can carry a path or a value."""
+    said = exc.strerror if isinstance(exc, OSError) else None
+    return said.strip() if isinstance(said, str) and said.strip() else type(exc).__name__
+
+
 def _row(label: str, required: bool, check: Callable[[], Result]) -> Row:
     try:
         status, fix = check()
     except Exception as exc:  # a check must never end in a traceback
         status = "missing" if required else "warn"
         fix = (
-            f"This check could not run ({type(exc).__name__}). "
-            "Run python3 bin/doctor.py again, and tell your agent if it keeps failing."
+            f"This check could not run ({_reason(exc)}). Run python3 bin/doctor.py again. "
+            "If it stops the same way, that reason is what to fix."
         )
     return {"check": label, "status": status, "fix": fix}
 

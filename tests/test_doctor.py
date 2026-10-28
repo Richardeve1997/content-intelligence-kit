@@ -882,6 +882,38 @@ def test_a_check_that_blows_up_becomes_a_row_not_a_traceback(doctor, fake, capsy
     assert "Traceback" not in capsys.readouterr().out
 
 
+def test_a_check_that_blows_up_says_what_to_fix_and_not_to_tell_an_agent(doctor, fake):
+    import errno
+
+    probe = fake()
+
+    def refused(*args, **kwargs):
+        raise PermissionError(errno.EACCES, "Permission denied", "/private/example/folder")
+
+    probe.free_gb = refused
+    fix = find(rows_of(doctor, probe), "Free disk")["fix"]
+    assert fix == (
+        "This check could not run (Permission denied). Run python3 bin/doctor.py again. "
+        "If it stops the same way, that reason is what to fix."
+    )
+    assert "/private/example/folder" not in fix, "the system's reason is shown, never the path it named"
+
+    probe.free_gb = lambda: 1 / 0
+    fix = find(rows_of(doctor, probe), "Free disk")["fix"]
+    assert fix.startswith("This check could not run (ZeroDivisionError).") and "agent" not in fix
+
+
+def test_the_header_names_every_row_the_sandbox_can_leave_unchecked(doctor, fake):
+    probe = sandboxed(fake)
+    probe.outputs["uv python find --no-cache 3.11"] = (2, REFUSED)  # a read-only sandbox refuses uv as well
+    unchecked = [row["check"] for row in rows_of(doctor, probe) if row["fix"] == doctor.FIX_OUTSIDE_SANDBOX]
+    assert len(unchecked) == 3, unchecked
+    header = doctor.__doc__
+    warn = header[header.index("\n  warn ") :].split("\n\n", 1)[0]
+    for check in unchecked:
+        assert check.split()[0] in warn, f"the header's warn line does not name the {check} row"
+
+
 def test_the_checks_run_in_the_order_the_fixes_must_be_made(doctor, fake):
     names = [row["check"] for row in rows_of(doctor, fake())]
     order = ["macOS", "Homebrew", "ffmpeg", "uv", "Python 3.11", "Node", "HyperFrames", "Chromium"]
