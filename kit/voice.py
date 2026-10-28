@@ -12,7 +12,7 @@ The paths:
 * from_recording(path, slug): the creator records the narration on their phone (free, and the default).
   A light chain cleans it: a high-pass for rumble, a gentle noise reduction, a soft compressor.
 * from_elevenlabs(text, slug, voice_id=None, voice=None): ElevenLabs reads the narration with the creator's
-  key (ELEVENLABS_API_KEY, read through kit.config.env and never printed). With no voice id it uses one of
+  key (ELEVENLABS_API_KEY, read from .env through kit.config.key and never printed). With no voice id it uses one of
   the account's stock voices: the one named for this video, else the one the creator picked (saved by name
   in me/voice/elevenlabs.json), else the first by name, with a sentence on how to choose another. A stock
   voice is saved by its name, never its id.

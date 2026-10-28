@@ -511,6 +511,12 @@ def test_a_setting_that_is_not_a_key_still_prefers_the_environment(tmp_path, mon
     assert config.env("CODEX_IMAGE_MODEL") == "from-file", "a blank one falls back to the file"
 
 
+def test_the_kit_never_says_a_key_is_read_with_config_env():
+    root = Path(__file__).resolve().parent.parent
+    stale = [str(p.relative_to(root)) for p in sorted((root / "kit").rglob("*.py")) if "kit.config.env" in p.read_text(encoding="utf-8")]
+    assert stale == [], "these still say a key is read with kit.config.env, but keys come through kit.config.key"
+
+
 def test_no_provider_takes_a_key_from_the_environment(tmp_path, monkeypatch, example_me):
     from kit import voice, zernio
     from kit.character import providers

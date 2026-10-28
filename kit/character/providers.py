@@ -10,7 +10,7 @@ showing the tool the reference pictures in `refs` (in that order), and save the 
   openai   the OpenAI Images API, with OPENAI_API_KEY in .env.
   gemini   the Gemini API, with GEMINI_API_KEY in .env.
 
-Keys are read with kit.config.env and only ever go into the request header. They are never printed,
+Keys are read from .env with kit.config.key and only ever go into the request header. They are never printed,
 logged or written to a file, and no error message repeats them.
 """
 
