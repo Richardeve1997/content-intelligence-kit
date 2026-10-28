@@ -452,6 +452,13 @@ def test_update_kit_skill_runs_the_script_in_check_then_apply_order():
         assert words in body
 
 
+def test_update_kit_skill_keeps_the_groups_that_are_installed_when_it_syncs():
+    body = text(SKILLS / "update-kit" / "SKILL.md")
+    assert "`uv sync --group video --group research --inexact`" in body
+    assert "add `--group character`" in body and "mini me character" in body
+    assert "without it uv removes the groups the command does not name" in body
+
+
 def test_update_kit_skill_sends_git_clones_to_git_pull_and_explains_what_is_kept():
     body = text(SKILLS / "update-kit" / "SKILL.md")
     assert "`git pull`" in body and "gitignored" in body

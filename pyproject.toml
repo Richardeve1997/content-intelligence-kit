@@ -17,11 +17,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-# Installed by a plain `uv sync`.
+# Installed by default, whichever other groups are asked for.
 dev = [
     "pytest>=8",
 ]
-# Install a group on demand: `uv sync --group video`.
+# Install a group on demand: `uv sync --group video --inexact`. Without --inexact, uv removes the groups installed earlier.
 video = [
     "numpy",
     "Pillow",
