@@ -70,6 +70,8 @@ Before each release:
 
 ## Quick start
 
+Install Claude Code or Codex first, and sign in. For Claude Code, run `curl -fsSL https://claude.ai/install.sh | bash` in Terminal, as its [setup page](https://code.claude.com/docs/en/setup) shows, then run `claude` and log in through the browser prompts. For Codex, run `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, as its [CLI page](https://learn.chatgpt.com/docs/codex/cli) shows, then run `codex` and choose Sign in with ChatGPT. Whatever you say to the kit, "set me up" included, you type into that agent, not into Terminal.
+
 ```bash
 git clone https://github.com/Richardeve1997/content-intelligence-kit
 cd content-intelligence-kit

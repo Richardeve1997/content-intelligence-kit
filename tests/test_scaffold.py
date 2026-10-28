@@ -268,6 +268,17 @@ def test_readme_quick_start_covers_a_new_mac_and_opening_the_folder():
     assert "`claude`" in section and "`codex`" in section, "how to open the folder in each agent"
 
 
+def test_readme_says_how_to_get_each_agent_before_the_clone():
+    """The commands and pages come from each vendor's own install docs. A new creator installs and signs in to
+    the agent first, and types "set me up" into it rather than into Terminal."""
+    before_clone = _readme_section("## Quick start").split("```bash", 1)[0]
+    assert "`curl -fsSL https://claude.ai/install.sh | bash`" in before_clone
+    assert "(https://code.claude.com/docs/en/setup)" in before_clone and "browser prompts" in before_clone
+    assert "`curl -fsSL https://chatgpt.com/codex/install.sh | sh`" in before_clone
+    assert "(https://learn.chatgpt.com/docs/codex/cli)" in before_clone and "Sign in with ChatGPT" in before_clone
+    assert '"set me up"' in before_clone and "not into Terminal" in before_clone
+
+
 def test_readme_codex_section_explains_hooks_and_the_sandbox_in_plain_words():
     section = _readme_section("## Codex")
     assert "The kit sets up no hooks for Codex" in section
