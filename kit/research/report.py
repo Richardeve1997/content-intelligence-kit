@@ -71,25 +71,32 @@ def _plural_creators(count: int) -> str:
 # --- the pieces ---------------------------------------------------------------------------------------------
 
 
-def _hero(p: Page) -> str:
-    """The top of the page. Its big numbers are the whole pull, the same ones the run printed in the terminal; the
-    sentence above them says how many of those videos are from the last two weeks."""
-    data = p.data
+def _counts(data: dict) -> tuple[int, int, int]:
+    """(videos, of them recent, creators) for this run's own pull, the numbers the run printed in the terminal.
+    The earlier standouts from past runs are not part of the pull, so none of the three counts them."""
     videos = data.get("videos", [])
-    this_run = [v for v in videos if v.get("source", "run") == "run"]  # not the earlier standouts from past runs
-    recent = [v for v in this_run if v.get("set") == "recent"]
+    this_run = [v for v in videos if v.get("source", "run") == "run"]
     if "videos_recent" in data:  # counted by the run before the list was cut short, as the terminal counts
         total, recent_count = data.get("videos_total", 0), data["videos_recent"]
     else:  # a run from before these counts: its total also counted the earlier standouts it listed
         total = max(len(this_run), (data.get("videos_total") or 0) - (len(videos) - len(this_run)))
-        recent_count = len(recent)
-    total = total if this_run else 0
-    pulled = [c for c in data.get("creators", []) if c.get("pulled")]
+        recent_count = sum(1 for v in this_run if v.get("set") == "recent")
+    creators = sum(1 for c in data.get("creators", []) if c.get("pulled"))
+    return (total, recent_count, creators) if this_run else (0, 0, creators)
+
+
+def _hero(p: Page) -> str:
+    """The top of the page. Its big numbers are the whole pull, the same ones the run printed in the terminal; the
+    sentence above them says how many of those videos are from the last two weeks."""
+    data = p.data
+    this_run = [v for v in data.get("videos", []) if v.get("source", "run") == "run"]  # not the earlier standouts
+    recent = [v for v in this_run if v.get("set") == "recent"]
+    total, recent_count, creators = _counts(data)
     scored = [v for v in recent if v.get("outlier") is not None]
     days = data.get("window_days", common.WINDOW_DAYS)
     if total:
         window = f"{recent_count} of them from the last {days} days" if recent_count else f"none of them from the last {days} days"
-        lede = f"{common.plural(total, 'video')} from {_plural_creators(len(pulled))} this time, {window}."
+        lede = f"{common.plural(total, 'video')} from {_plural_creators(creators)} this time, {window}."
         if scored:
             top = max(scored, key=lambda v: v["outlier"])
             lede += f" The strongest of those ran {top['outlier']:.1f} times that creator's normal."
@@ -101,7 +108,7 @@ def _hero(p: Page) -> str:
     read = sum(1 for post in posts if post.get("status") == "read")
     stats = [
         ("Videos", str(total)),
-        ("Creators", str(len(pulled))),
+        ("Creators", str(creators)),
         ("X posts", f"{read} of {len(posts)}" if posts else "0"),
         ("Ideas", str(len(p.ideas)) if p.ideas else "0"),
     ]
@@ -416,10 +423,9 @@ def render(profile, data: dict, ideas: list | None, problems: list, run_dir) -> 
             _creators_section(page), _shared_section(page), _you_section(page), _run_section(page), "</main>", _footer(page),
         ]
     )  # fmt: skip
-    recent = [v for v in data.get("videos", []) if v.get("set") == "recent"]
-    names = {(v["platform"], str(v["creator"]).lower()) for v in recent}
+    total, _, creators = _counts(data)  # this run's own pull, as the big numbers at the top count it
     title = f"{profile.name} research, {common.fmt_date(data.get('generated_at'), tz)}"
-    description = f"{common.plural(len(recent), 'video')} from {_plural_creators(len(names))}, each scored against that creator's own normal."
+    description = f"{common.plural(total, 'video')} from {_plural_creators(creators)}, each scored against that creator's own normal."
     template = TEMPLATE.read_text(encoding="utf-8")
     return (
         template.replace("{{TITLE}}", E(title))

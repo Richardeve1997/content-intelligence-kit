@@ -184,6 +184,22 @@ def test_the_counts_at_the_top_match_what_the_run_printed(offline_run):
     assert f"{data['videos_total']} videos" in lede and f"{len(recent)} of them from the last" in lede, lede
 
 
+def test_the_hidden_description_counts_this_run_as_the_tiles_do(offline_run):
+    """A standout from an earlier run is not part of this pull, even when it is recent, so the page's description
+    counts the same videos and creators as the big numbers."""
+    profile, run_dir = offline_run
+    data = load(run_dir)
+    standout = dict(data["videos"][0], id="ig:from-an-earlier-run", creator="example_earlier_creator",
+                    url="https://example.com/earlier/1", source="brain", set="recent", outlier=4.0)
+    data["videos"].append(standout)
+    save(run_dir, data)
+
+    page = rebuild(profile, run_dir)
+    tiles = dict(re.findall(r"<dt>([^<]+)</dt><dd class=\"num\">([^<]+)</dd>", page))
+    description = re.search(r'<meta name="description" content="([^"]*)">', page).group(1)
+    assert description.startswith(f"{tiles['Videos']} videos from {tiles['Creators']} creators,"), (description, tiles)
+
+
 def test_the_offline_banner_is_shown(offline_run):
     _, run_dir = offline_run
     text = visible((run_dir / "report.html").read_text(encoding="utf-8"))
