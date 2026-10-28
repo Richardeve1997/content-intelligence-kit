@@ -57,7 +57,8 @@ SELFIE_MODEL_URL = (
     "selfie_segmenter.tflite"
 )
 SELFIE_MODEL_SHA256 = "191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b"
-# A model download that receives nothing for this long is given up on, so a stalled connection cannot hold a matte.
+# A model file download that receives nothing for this long is given up on, so a stalled file cannot hold a matte.
+# The matting code itself comes through torch.hub, which sets no limit of its own.
 DOWNLOAD_TIMEOUT = 60
 Segmenter = Callable[["object"], "object"]  # an RGB frame (H x W x 3, uint8) in, a 0..1 float mask (H x W) out
 

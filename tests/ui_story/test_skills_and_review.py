@@ -198,7 +198,7 @@ def test_tiles_keep_their_times_when_the_picture_starts_after_the_sound(tmp_path
         assert abs(frame - max(0.0, index / fps - 1 / 60) * 60) <= 2.0, (index, frame)
 
 
-# --- what this round of fixes added ------------------------------------------------------------------------
+# --- feedback rules and the steps the ui-story skill spells out --------------------------------------------
 
 
 @pytest.mark.parametrize("name", list(SKILLS))
@@ -209,7 +209,7 @@ def test_feedback_removes_an_older_rule_by_its_number(name):
     assert "kit.rules undo" not in feedback, "undo removes the newest rule, not the one it contradicts"
 
 
-def test_ui_story_states_the_rules_the_review_found_missing():
+def test_ui_story_spells_out_footage_assets_layout_closing_and_shipping():
     body = text(SKILLS["ui-story"])
     assert "The first real footage lands early" in body
     assert "build/hf/assets/" in body and "only loads files inside the project" in body
