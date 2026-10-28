@@ -38,8 +38,9 @@ ZERNIO_PLATFORM = {name: name for name in config.PLATFORMS}
 FACEBOOK_REEL_MAX_SECONDS = 60  # a Facebook Reel runs 3 to 60 seconds, and a longer video goes up as a feed video
 YOUTUBE_TITLE_MAX = 100
 
-# TikTok asks for the creator's consent before a direct post. The creator reads and approves every
-# caption in the post skill first, and Zernio takes that approval as the preview and the consent.
+# TikTok asks for the creator's consent before a direct post. schedule() sends nothing until the creator
+# has approved every caption, and these flags say that their approval of the TikTok caption is the
+# preview and the consent.
 TIKTOK_SETTINGS = {
     "privacy_level": "PUBLIC_TO_EVERYONE",
     "allow_comment": True,

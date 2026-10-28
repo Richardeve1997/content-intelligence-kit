@@ -4,12 +4,13 @@
 
 1. It checks everything that can be checked on this machine: the platforms, the time, the captions and
    the video. If any of that is wrong, nothing is sent.
-2. With no Zernio key it writes the captions and the video's path to work/<slug>/post/manual.md, for
+2. Unless it is a dry run, it checks that the creator approved these exact captions.
+3. With no Zernio key it writes the captions and the video's path to work/<slug>/post/manual.md, for
    posting by hand, and raises NoZernio.
-3. It asks Zernio which platforms are connected. A platform that is not connected is skipped and
+4. It asks Zernio which platforms are connected. A platform that is not connected is skipped and
    reported, never posted some other way.
-4. It uploads the video once. Every platform's post uses that one upload.
-5. It creates one post for each platform, each with its own caption and time, so each can be moved or
+5. It uploads the video once. Every platform's post uses that one upload.
+6. It creates one post for each platform, each with its own caption and time, so each can be moved or
    cancelled alone.
 
 The records in work/<slug>/post/ make a rerun safe. <platform>.json is written before the create is sent
@@ -470,12 +471,13 @@ def schedule(
     because Zernio publishes a post at once when its time has passed.
 
     With dry_run nothing is sent, not even a read, and no key is needed: the Results say what would happen.
-    `client` is for tests and for callers that already hold one; by default the key comes from
-    ZERNIO_API_KEY.
+    Otherwise the creator must have approved the captions as they stand now (captions.approve), or it
+    raises PostError before anything is sent. `client` is for tests and for callers that already hold
+    one; by default the key comes from ZERNIO_API_KEY.
 
-    Raises PostError for a platform, time, video or record that cannot be used, CaptionProblems when a
-    caption breaks a rule, ZernioError when the account lookup fails, and NoZernio when there is no key
-    (after writing manual.md).
+    Raises PostError for a platform, time, video, record or approval that cannot be used, CaptionProblems
+    when a caption breaks a rule, ZernioError when the account lookup fails, and NoZernio when there is no
+    key (after writing manual.md).
     """
     profile = config.load_profile()
     folder = _folder(slug)
@@ -491,6 +493,12 @@ def schedule(
     if dry_run:
         note = f"Would schedule for {describe_time(when)}. Nothing was sent."
         return [Result(name, "dry run", reason=note, scheduled_for=when.isoformat()) for name in names]
+
+    # Nothing is sent, and no file for posting by hand is written, until the creator has read these exact
+    # captions and said yes. Their yes to the TikTok caption is also the preview and consent TikTok asks for.
+    unapproved = captions.approval_problem(slug)
+    if unapproved:
+        raise PostError(unapproved)
 
     if client is None:
         try:

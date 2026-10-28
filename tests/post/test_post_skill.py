@@ -117,6 +117,15 @@ def test_the_skill_runs_the_checks_in_the_order_that_keeps_the_creator_in_charge
     assert order == sorted(order)
 
 
+def test_step_8_keeps_the_creator_in_charge_of_what_goes_out():
+    step = re.search(r"^8\. (.+)$", text(), re.M).group(1)
+    assert "never run `approve` or `schedule` until the creator has read every caption and said yes" in step.lower()
+    assert "in this conversation" in step
+    assert "never call the python function directly" in step.lower()
+    assert "TikTok" in step and "preview and consent" in step  # their yes to that caption is TikTok's consent
+    assert "`schedule` refuses to send until the creator approves again" in re.search(r"^9\. (.+)$", text(), re.M).group(1)
+
+
 def test_the_numbers_in_the_skill_match_the_rules_in_the_code():
     body = text()
     assert captions.HASHTAG_CAPS == {"instagram": 5, "tiktok": 5, "youtube": 8, "facebook": 5, "twitter": 2, "linkedin": 0}

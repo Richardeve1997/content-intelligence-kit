@@ -14,6 +14,7 @@
 
 A time with no zone is read in the creator's time zone from the profile. `schedule` refuses to send until
 `approve` has been run on the captions as they are now, and any change to a caption undoes the approval.
+The refusal comes from kit.post.schedule itself, so calling the Python function directly is no way round it.
 Problems come back as plain sentences on standard error with exit status 1. A platform that fails also
 gives exit status 1, and one that is skipped does not.
 """
@@ -174,9 +175,6 @@ def _schedule(args) -> int:
         code = _print_results(plan, zone)
         print("Nothing was sent. To see which platforms are connected, run: uv run python -m kit.post check")
         return code
-    problem = post.captions.approval_problem(args.video)
-    if problem:
-        raise post.PostError(problem)
     results: list[post.Result] = []
     try:
         for moment, group in groups.items():

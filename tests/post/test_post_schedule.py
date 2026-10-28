@@ -28,7 +28,10 @@ LONDON = ZoneInfo("Europe/London")
 schedule_module = sys.modules["kit.post.schedule"]
 
 
-def run(reel, stub, platforms, when, **kw):
+def run(reel, stub, platforms, when, *, approve=True, **kw):
+    """Schedule through the stand-in. The captions are approved first, as the skill does after the creator says yes."""
+    if approve and not kw.get("dry_run"):
+        captions.approve(reel.slug)
     return post.schedule(reel.slug, platforms, when, client=stub.client(), **kw)
 
 
@@ -260,6 +263,7 @@ def test_two_accounts_and_no_match_is_skipped_never_guessed(reel, stub, when):
 
 
 def test_no_key_manual_files(reel, when):
+    captions.approve(reel.slug)
     with pytest.raises(NoZernio) as caught:  # no key in the environment, no .env, no client given
         post.schedule(reel.slug, ["instagram", "youtube"], when)
 
@@ -295,6 +299,7 @@ def test_the_manual_file_will_not_hold_a_caption_that_breaks_a_rule(reel):
 def test_a_key_in_the_environment_is_used(reel, stub, when, monkeypatch):
     monkeypatch.setenv("ZERNIO_API_KEY", KEY)
     monkeypatch.setattr(Client, "from_env", classmethod(lambda cls, base=zernio.API: stub.client()))
+    captions.approve(reel.slug)
     (result,) = post.schedule(reel.slug, ["instagram"], when)
     assert result.status == "scheduled"
 
@@ -303,6 +308,7 @@ def test_a_key_in_the_environment_is_used(reel, stub, when, monkeypatch):
 
 
 def test_dry_run_sends_nothing(reel, stub, when):
+    assert not (reel.folder / "captions.approved.json").exists()  # a dry run needs no approval
     results = run(reel, stub, ["instagram", "tiktok"], when, dry_run=True)
     assert stub.calls() == []  # no upload, no create and not even a read
     assert [(r.platform, r.status) for r in results] == [("instagram", "dry run"), ("tiktok", "dry run")]
@@ -321,6 +327,51 @@ def test_a_dry_run_needs_no_key_and_still_checks_the_captions(reel, when):
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(CaptionProblems, match="never list"):
         post.schedule(reel.slug, ["instagram"], when, dry_run=True)
+
+
+# --- the creator's yes is checked here, not only by the skill ----------------------------------------------------------
+
+
+def test_schedule_refuses_to_send_until_the_creator_has_said_yes(reel, stub, when):
+    # the case that was probed: no approval on record, one platform, a client ready to take the request
+    with pytest.raises(PostError, match="not been approved") as caught:
+        post.schedule(reel.slug, ["tiktok"], when, client=stub.client())
+    assert f"approve {reel.slug}" in str(caught.value)
+    assert stub.calls() == []  # no lookup, no upload, no create
+    assert not (reel.folder / "post").exists()
+
+
+def test_a_caption_changed_after_the_yes_needs_a_new_yes(reel, stub, when):
+    captions.approve(reel.slug)
+    path = reel.folder / "captions.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["tiktok"]["body"] = data["tiktok"]["body"].replace("one thing", "one mistake")
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(PostError, match="changed after"):
+        post.schedule(reel.slug, ["instagram", "tiktok"], when, client=stub.client())
+    assert stub.calls() == []
+
+    captions.approve(reel.slug)  # the creator read the new words and said yes
+    assert [r.status for r in post.schedule(reel.slug, ["instagram", "tiktok"], when, client=stub.client())] == [
+        "scheduled", "scheduled",
+    ]
+
+
+def test_no_file_for_posting_by_hand_is_written_for_captions_nobody_approved(reel, when):
+    with pytest.raises(PostError, match="not been approved"):
+        post.schedule(reel.slug, ["instagram"], when)  # no key either
+    assert not (reel.folder / "post").exists()
+
+
+def test_moving_or_cancelling_a_post_needs_no_new_yes_because_no_words_go_out(reel, stub, when):
+    run(reel, stub, ["instagram", "tiktok"], when)
+    path = reel.folder / "captions.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["tiktok"]["body"] += " A later edit."  # the approval no longer matches the file
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert post.reschedule(reel.slug, "instagram", when + timedelta(days=1), client=stub.client()).status == "scheduled"
+    assert post.cancel(reel.slug, "tiktok", client=stub.client()).status == "cancelled"
+    assert [r.status for r in post.list_scheduled(reel.slug, client=stub.client())] == ["scheduled"]
 
 
 # --- running it twice ----------------------------------------------------------------------------------------------
