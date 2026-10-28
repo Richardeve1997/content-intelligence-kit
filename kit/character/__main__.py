@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 from kit import config
@@ -34,6 +35,26 @@ from kit.config import KitError
 WAITING = 3
 MISSING_GROUP = "Run: uv sync --group character --inexact to install the packages the character steps need."
 GROUP_MODULES = ("numpy", "PIL", "scipy", "skimage", "sklearn")
+# The first command after the install loads the drawing packages while the Mac checks every new file, which can
+# take a minute with nothing on the screen. A load slower than this says so. A warm load takes a few seconds.
+SLOW_LOAD_SECONDS = 10.0
+SLOW_LOAD_NOTE = "Loading the drawing tools. The first run after an install can take a minute."
+
+
+def _import_tools() -> None:
+    """Import the character steps, which bring numpy, Pillow, scipy and scikit-image with them."""
+    from kit.character import faces, moves, poses, sheet  # noqa: F401
+
+
+def _load_tools() -> None:
+    """Load the drawing tools before the command runs, and say so when that is slow."""
+    timer = threading.Timer(SLOW_LOAD_SECONDS, lambda: print(SLOW_LOAD_NOTE, file=sys.stderr, flush=True))
+    timer.daemon = True
+    timer.start()
+    try:
+        _import_tools()
+    finally:
+        timer.cancel()
 
 
 def _preferred(folder: Path) -> str | None:
@@ -283,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("pack", help="pack the character for the runtime")
     args = parser.parse_args(argv)
     try:
+        _load_tools()
         return _run(args)
     except ModuleNotFoundError as problem:
         if (problem.name or "").split(".")[0] in GROUP_MODULES:

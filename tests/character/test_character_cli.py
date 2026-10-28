@@ -251,6 +251,27 @@ def test_a_missing_character_group_is_one_plain_sentence(me, tmp_path):
     assert "Traceback" not in done.stderr
 
 
+def test_a_slow_first_load_says_the_drawing_tools_are_loading(me, capsys, monkeypatch):
+    # The first command after the install loads the drawing packages while the Mac checks each new file, which
+    # took a minute with nothing on the screen. A load that slow says what is happening.
+    import time
+
+    monkeypatch.setattr(cli, "SLOW_LOAD_SECONDS", 0.05)
+    monkeypatch.setattr(cli, "_import_tools", lambda: time.sleep(0.5))
+    assert cli.main(["status"]) == 0
+    said = capsys.readouterr()
+    assert said.err.count("The first run after an install can take a minute") == 1
+    assert "There is no character yet" in said.out, "the command still does its job"
+
+
+def test_a_quick_load_adds_nothing(me, capsys, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "_import_tools", lambda: calls.append("loaded"))
+    assert cli.main(["status"]) == 0
+    assert calls == ["loaded"], "the drawing tools load before the command runs"
+    assert "first run after an install" not in capsys.readouterr().err
+
+
 def test_start_again_with_the_kept_photos_keeps_them(me, tmp_path):
     from PIL import Image
 
