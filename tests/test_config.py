@@ -270,7 +270,7 @@ BAD_PROFILES = [
         "research.cost_cap.youtube",
     ),
     ("handles not a group", lambda d: d.update(handles="@me"), "handles"),
-    ("timezone that is not a zone", lambda d: d.update(timezone="Sydney"), "timezone"),
+    ("timezone that is not a zone", lambda d: d.update(timezone="Exampleton"), "timezone"),
     ("font family the kit does not ship", lambda d: d["fonts"].update(mono="Courier Prime"), "fonts.mono"),
     ("empty logo", lambda d: d.update(logo=""), "logo"),
     ("a setting the kit does not know", lambda d: d.update(favourite_colour="green"), "favourite_colour"),
