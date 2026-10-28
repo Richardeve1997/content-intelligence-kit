@@ -217,9 +217,38 @@ def test_the_model_downloads_are_pinned():
     assert re.fullmatch(r"[0-9a-f]{64}", matte.SELFIE_MODEL_SHA256)
 
 
+
+class Served:
+    """Stands in for the response urlopen gives: the bytes of one download, read in blocks."""
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size: int = -1) -> bytes:
+        size = len(self.data) if size is None or size < 0 else size
+        block, self.data = self.data[:size], self.data[size:]
+        return block
+
+
+def serve(monkeypatch, data: bytes, calls: list | None = None):
+    """Every download serves `data`, and each call is recorded as (url, timeout)."""
+
+    def urlopen(url, *args, timeout=None, **kwargs):
+        if calls is not None:
+            calls.append((url, timeout))
+        return Served(data)
+
+    monkeypatch.setattr(matte.urllib.request, "urlopen", urlopen)
+
 def test_a_model_download_that_is_not_the_pinned_file_is_refused(tmp_path, monkeypatch):
     monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
-    monkeypatch.setattr(matte.urllib.request, "urlretrieve", lambda url, to: Path(to).write_bytes(b"not the model"))
+    serve(monkeypatch, b"not the model")
     with pytest.raises(matte.KitError) as caught:
         matte._selfie_model()
     assert "not the expected file" in str(caught.value)
@@ -233,13 +262,143 @@ def test_the_pinned_model_is_used_from_the_cache_without_a_download(tmp_path, mo
     monkeypatch.setattr(matte, "SELFIE_MODEL_SHA256", hashlib.sha256(content).hexdigest())
     monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
     calls = []
-
-    def fetch(url, to):
-        calls.append(url)
-        Path(to).write_bytes(content)
-
-    monkeypatch.setattr(matte.urllib.request, "urlretrieve", fetch)
+    serve(monkeypatch, content, calls)
     first = matte._selfie_model()
     second = matte._selfie_model()
     assert first == second and first.read_bytes() == content
-    assert calls == [matte.SELFIE_MODEL_URL], "downloaded once, then read from the cache"
+    assert [url for url, _ in calls] == [matte.SELFIE_MODEL_URL], "downloaded once, then read from the cache"
+    assert 0 < calls[0][1] <= 120, "a download that stalls is given up on"
+
+
+# --- the Robust Video Matting weights ----------------------------------------------------------------------------
+
+
+def test_the_rvm_weights_are_pinned_to_the_file_the_hub_code_names():
+    """The pinned hub code loads its weights from the repo's v1.0.0 release; the kit downloads that one file
+    itself and checks its SHA-256, as it does for MediaPipe and GSAP."""
+    import re
+
+    assert matte.RVM_WEIGHTS_URL == (
+        "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3.pth")
+    assert re.fullmatch(r"[0-9a-f]{64}", matte.RVM_WEIGHTS_SHA256)
+
+
+def test_rvm_weights_that_are_not_the_pinned_file_are_refused(tmp_path, monkeypatch):
+    pytest.importorskip("torch")
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    serve(monkeypatch, b"not the weights")
+    with pytest.raises(matte.KitError) as caught:
+        matte._rvm_weights()
+    assert "not the expected file" in str(caught.value)
+    assert list((tmp_path / "torch" / "hub" / "checkpoints").iterdir()) == [], "nothing half-downloaded is left"
+
+
+def test_the_pinned_rvm_weights_are_used_from_torchs_cache_without_a_download(tmp_path, monkeypatch):
+    import hashlib
+
+    pytest.importorskip("torch")
+    content = b"pretend weights"
+    monkeypatch.setattr(matte, "RVM_WEIGHTS_SHA256", hashlib.sha256(content).hexdigest())
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    calls = []
+    serve(monkeypatch, content, calls)
+    first = matte._rvm_weights()
+    second = matte._rvm_weights()
+    assert first == second == tmp_path / "torch" / "hub" / "checkpoints" / "rvm_mobilenetv3.pth"
+    assert first.read_bytes() == content
+    assert [url for url, _ in calls] == [matte.RVM_WEIGHTS_URL], "downloaded once, then read from torch's cache"
+    assert 0 < calls[0][1] <= 120, "a download that stalls is given up on"
+
+
+def test_rvm_loads_the_checked_weights_and_never_downloads_its_own(tmp_path, monkeypatch):
+    """torch.hub would fetch the weights itself with no checksum. The model is built without them and given
+    the file the kit checked."""
+    torch = pytest.importorskip("torch")
+    checked = tmp_path / "checked.pth"
+    checked.write_bytes(b"checked weights")
+    seen = {}
+
+    class Model:
+        def load_state_dict(self, state):
+            seen["state"] = state
+
+        def eval(self):
+            return self
+
+        def to(self, device):
+            return self
+
+    def fake_hub_load(repo, entry, *args, **kwargs):
+        seen["hub"] = (repo, entry, kwargs)
+        return Model()
+
+    def fake_torch_load(path, **kwargs):
+        seen["loaded"] = (Path(path), kwargs)
+        return {"weights": "from the checked file"}
+
+    monkeypatch.setattr(matte, "_rvm_weights", lambda: checked)
+    monkeypatch.setattr(torch.hub, "load", fake_hub_load)
+    monkeypatch.setattr(torch, "load", fake_torch_load)
+    matte._rvm_segmenter("cpu")
+    repo, entry, kwargs = seen["hub"]
+    assert (repo, entry) == (matte.RVM_REPO, "mobilenetv3") and kwargs.get("pretrained") is False, kwargs
+    assert seen["loaded"][0] == checked and seen["loaded"][1].get("weights_only") is True
+    assert seen["state"] == {"weights": "from the checked file"}
+
+
+
+# --- a stalled download, and messages that end once ---------------------------------------------------------------
+
+
+class Stalled(Served):
+    """A connection that opened and then sent nothing until the socket timed out."""
+
+    def read(self, size: int = -1) -> bytes:
+        raise TimeoutError("timed out")
+
+
+@pytest.mark.parametrize("model", ["_selfie_model", "_rvm_weights"])
+@pytest.mark.parametrize("stall", ["reading", "connecting"])
+def test_a_stalled_model_download_stops_and_says_what_to_do(tmp_path, monkeypatch, model, stall):
+    """A first matte waits on its model download. A connection that goes quiet is given up on, with what to do."""
+    if model == "_rvm_weights":
+        pytest.importorskip("torch")
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
+
+    def urlopen(url, *args, timeout=None, **kwargs):
+        assert timeout and timeout > 0, "every download has a timeout"
+        if stall == "connecting":
+            raise matte.urllib.error.URLError(TimeoutError("timed out"))
+        return Stalled(b"")
+
+    monkeypatch.setattr(matte.urllib.request, "urlopen", urlopen)
+    with pytest.raises(matte.KitError) as caught:
+        getattr(matte, model)()
+    said = str(caught.value)
+    assert "stalled" in said and "Check the connection, then run the matte again." in said, said
+    left = [p for p in tmp_path.rglob("*") if p.is_file()]
+    assert left == [], f"a part file was left behind: {left}"
+
+
+@pytest.mark.parametrize("reason", [
+    "could not reach github.com",
+    "The Robust Video Matting weights that downloaded are not the expected file, so they were not used.",
+    "The download of the Robust Video Matting weights stalled. Check the connection, then run the matte again.",
+])
+def test_every_matting_failure_message_ends_once(monkeypatch, capsys, reason):
+    """A reason that is already a sentence is not given a second full stop or put in brackets."""
+
+    def broken(**kwargs):
+        raise matte.KitError(reason)
+
+    monkeypatch.setattr(matte, "_rvm_segmenter", broken)
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", FakeSegmenter)
+    with pytest.raises(matte.KitError) as caught:
+        matte._choose("rvm", 0.5)
+    matte._choose("auto", 0.5)
+    printed = capsys.readouterr().out.strip()
+    for said in (str(caught.value), printed):
+        assert said.endswith(".") and ".." not in said and ".)" not in said, said
+        assert reason.rstrip(".") in said, said
+    assert "MediaPipe" in printed

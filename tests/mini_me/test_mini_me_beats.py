@@ -258,9 +258,11 @@ def test_running_it_again_keeps_an_edited_beats_json(kit_home, capsys):
 
 
 def test_only_numbers_of_20_or_more_are_drafted_to_count():
-    pages = beats.build(timed("Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days. Mine took 12 days."),
-                        cta="follow")["pages"]
+    """No number here sits on the first page, which never counts: each page counts or not by its own number."""
+    pages = beats.build(timed("Basil is easy. Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days. "
+                              "Mine took 12 days."), cta="follow")["pages"]
     by_number = {re.search(r"\d+", p["text"]).group(): p for p in pages if re.search(r"\d", p["text"])}
+    assert not re.search(r"\d", pages[0]["text"]), "a number on the first page would show whole for that reason alone"
     assert by_number["21"]["prop"] == "count" and by_number["40"]["prop"] == "count"
     assert by_number["3"]["prop"] != "count", "the counted number is the first one, 3, which shows whole"
     assert by_number["12"]["prop"] != "count", "counting 12 up from 10 would show 10 and 11 under the words first"

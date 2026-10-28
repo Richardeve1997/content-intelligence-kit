@@ -14,13 +14,16 @@ layout.json (cues are phrases of the BASE transcript, matched like UIS.cue: lowe
      {"mode": "face", "at": "one big problem", "nth": 1, "zooms": [
          {"kind": "punch", "at": "big problem", "z": 1.14, "until": "you're stuck"},
          {"kind": "slow", "z": 1.06}]},
-     {"mode": "canvas", "at": "four things"}]}
+     {"mode": "canvas", "at": "four things", "name": "list"}]}
   A window starts at cue(at) - lead (or at "t" seconds) and ends where the next one starts.
+  "name" is optional and must not repeat. The timeline finds a window with UIS.win: by its name, by the
+  phrase it starts at, or by a time inside it, never by its place in the list, which moves whenever a
+  window is added before it.
   punch: eases in over 0.35 s from cue(at) - 0.05, holds, and cuts back at cue(until) - lead or the window end.
   slow:  a sine ease across [cue(at) - lead or the window start, the window end], 1.00 drifting to z.
   "fy" on a zoom is the row of the take held still, as a fraction of its height (default 0.385, the eyes).
 
-    python layout.py --layout layout.json --words base.words.json --duration <base seconds> \
+    python layout.py --layout layout.json --words base.words.json --duration <base seconds> \\
         --out layout.resolved.json [--hf <hf dir>] [--edl-in edl.json --edl-out edl-zoom.json]
         [--seg-starts seg_starts.json]
 
@@ -43,6 +46,11 @@ PUNCH_EASE = 0.35
 
 def norm(word):
     return re.sub(r"[^a-z0-9#]", "", str(word).lower())
+
+
+def norm_phrase(phrase):
+    """A phrase as UIS.win compares it: each word lower case, [a-z0-9#] only."""
+    return " ".join(t for t in (norm(x) for x in str(phrase).split()) if t)
 
 
 def load_words(path):
@@ -96,10 +104,18 @@ def main():
     lead = float(spec.get("lead", 0.12))
     D = a.duration
     wins = spec["windows"]
-    starts = []
+    starts, named = [], {}
     for i, w in enumerate(wins):
         if w.get("mode") not in MODES:
             raise SystemExit(f"layout.py: window {i} has the mode {w.get('mode')!r}; use split, canvas or face")
+        if "name" in w:
+            name = w["name"]
+            if not isinstance(name, str) or not name.strip():
+                raise SystemExit(f"layout.py: window {i} has the name {name!r}; a name is a few words of text")
+            if norm_phrase(name) in named:
+                raise SystemExit(f"layout.py: windows {named[norm_phrase(name)]} and {i} are both named {name!r}; "
+                                 "give each window its own name")
+            named[norm_phrase(name)] = i
         t = float(w["t"]) if "t" in w else cue(words, w["at"], int(w.get("nth", 1))) - lead
         starts.append(snap(max(0.0, t)))
     if starts[0] != 0:
@@ -113,7 +129,7 @@ def main():
     out_w, emph, warn = [], [], []
     for i, w in enumerate(wins):
         t0, t1 = starts[i], ends[i]
-        out_w.append({"mode": w["mode"], "t0": t0, "t1": t1, "at": w.get("at", w.get("t"))})
+        out_w.append({"mode": w["mode"], "t0": t0, "t1": t1, "at": w.get("at", w.get("t")), "name": w.get("name")})
         if t1 - t0 < 0.5:
             warn.append(f"window {i} ({w['mode']} at {t0}s) is only {t1 - t0:.2f}s long")
         for z in w.get("zooms", []):
@@ -148,7 +164,11 @@ def main():
     if a.hf:
         lib = Path(a.hf) / "lib"
         lib.mkdir(parents=True, exist_ok=True)
-        (lib / "layout.js").write_text("window.UIS_LAYOUT=" + json.dumps([[w["mode"], w["t0"], w["t1"]] for w in out_w]) + ";\n")
+        # [mode, t0, t1, name, at]: UIS.win finds a window by its name or by the phrase it starts at (null for a
+        # window that starts at "t" seconds)
+        entries = [[w["mode"], w["t0"], w["t1"], w["name"], w["at"] if isinstance(w["at"], str) else None]
+                   for w in out_w]
+        (lib / "layout.js").write_text("window.UIS_LAYOUT=" + json.dumps(entries) + ";\n")
     if a.edl_in and a.edl_out:
         edl = json.loads(Path(a.edl_in).read_text())
         out_emph = emph

@@ -1,9 +1,12 @@
-"""cut_base.py and HDR phone takes.
+"""cut_base.py: HDR phone takes, and a cut that stops part way.
 
 An iPhone films HDR by default. Turning an HDR take into normal colours needs ffmpeg's zscale filter, which
 comes from the zimg library, and Homebrew's plain ffmpeg is built without it. The cut must not stop there:
 it says in one plain sentence what will look wrong and how to fix it, and goes on without the colour fix.
 The ffmpeg filter list is faked in most of these tests, so they behave the same on any machine.
+
+A cut that stops part way (ctrl-C, a crash, an ffmpeg that fails) must leave no half base behind, since
+prep.py takes a base newer than its inputs for a finished one.
 """
 
 import json
@@ -138,3 +141,69 @@ def test_a_real_hdr_take_is_tone_mapped_when_this_ffmpeg_can(tmp_path, capsys):
     assert cut_base.main([str(raw), str(edl), str(out), "--no-hwaccel"]) == 0
     assert cut_base.NO_ZSCALE not in capsys.readouterr().out
     assert probe(out, "stream=width,height")["height"] == 1920
+
+
+# --- a cut that stops part way ----------------------------------------------------------------------------------
+
+
+def stopped_cut(tmp_path, monkeypatch, *, stop):
+    """Run cut_base.main with an ffmpeg that writes half a file to its output and then stops: `stop` is an
+    exception to raise (a ctrl-C, a crash) or a non-zero exit status. Returns (exit status or the exception,
+    the base path, the paths ffmpeg was told to write)."""
+    real_run = subprocess.run
+    written = []
+
+    def fake_run(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "ffmpeg" and "-filter_complex" in cmd:  # the cut itself, not a look at ffmpeg's encoders
+            target = cmd[-1]
+            written.append(target)
+            with open(target, "wb") as half:
+                half.write(b"half a base")
+            if isinstance(stop, BaseException):
+                raise stop
+            return subprocess.CompletedProcess(cmd, stop)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(cut_base, "prefix_for", lambda raw: "")
+    monkeypatch.setattr(cut_base.subprocess, "run", fake_run)
+    build = tmp_path / "build"
+    build.mkdir(exist_ok=True)
+    edl = build / "edl.json"
+    edl.write_text(json.dumps({"keep": [[0.0, 1.5]]}))
+    out = build / "base.mp4"
+    try:
+        result = cut_base.main(["take.mov", str(edl), str(out), "--no-hwaccel"])
+    except BaseException as raised:  # noqa: BLE001 - the stop is what the test checks
+        result = raised
+    return result, out, written
+
+
+def test_a_cut_stopped_part_way_keeps_the_base_that_was_there(tmp_path, monkeypatch):
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "base.mp4").write_bytes(b"the earlier, complete base")
+    result, out, written = stopped_cut(tmp_path, monkeypatch, stop=KeyboardInterrupt())
+    assert isinstance(result, KeyboardInterrupt), "a ctrl-C still stops the cut"
+    assert out.read_bytes() == b"the earlier, complete base", "the stopped cut wrote over the base"
+    assert written and all(path != str(out) for path in written), "ffmpeg writes a part file, never the base itself"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["base.mp4", "edl.json"], "a part file was left behind"
+
+
+def test_a_cut_whose_ffmpeg_fails_leaves_no_half_base(tmp_path, monkeypatch):
+    result, out, _ = stopped_cut(tmp_path, monkeypatch, stop=1)
+    assert result == 1
+    assert not out.exists(), "a half-written base would pass for a finished one"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["edl.json"], "a part file was left behind"
+
+
+def test_a_good_cut_replaces_the_base_and_its_leftover_part_file(tmp_path):
+    raw = tmp_path / "take.mp4"
+    ffmpeg("-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=1.2", "-f", "lavfi", "-i", "sine=frequency=440:d=1.2",
+           "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", raw)
+    edl = tmp_path / "edl.json"
+    edl.write_text(json.dumps({"keep": [[0.0, 1.0]]}))
+    out = tmp_path / "base.mp4"
+    out.write_bytes(b"an older base")
+    (tmp_path / "base.part.mp4").write_bytes(b"left by a stopped run")
+    assert cut_base.main([str(raw), str(edl), str(out), "--no-hwaccel"]) == 0
+    assert probe(out, "stream=width,height,avg_frame_rate")["avg_frame_rate"] == "60/1"
+    assert not (tmp_path / "base.part.mp4").exists()

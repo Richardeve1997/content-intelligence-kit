@@ -1,6 +1,6 @@
 ---
 name: ui-story
-description: Plan and edit a talking-head Reel in the UI story style. The plan step writes talking points and a film guide in the creator's voice from a chosen idea. The edit step turns their raw take into a finished vertical Reel. The real thing they talk about builds up on a light grid above them, their head breaking out of a rounded picture-in-picture, with full-screen moments and punch-ins, karaoke captions, motion graphics in their accent colour and a closer with their call to action. It runs at 1.15x with a music bed and normalised loudness, then the gates and the review loop check it. Use when the creator says "plan the video for number 2", "plan this idea", "write my talking points", "here's my raw take, edit it", "edit this take", "edit my video" or "do the UI story edit", or drops a filmed take into work/. It needs Claude Max (or a paid ChatGPT plan in Codex), because an edit is a long run.
+description: Plan and edit a talking-head Reel in the UI story style. The plan step writes talking points and a film guide in the creator's voice from a chosen idea. The edit step turns their raw take into a finished vertical Reel. The real thing they talk about builds up on a light grid above them, their head breaking out of a rounded picture-in-picture, with full-screen moments and punch-ins, karaoke captions, motion graphics in their accent colour and a closer with their call to action. It runs at 1.15x with normalised loudness and, once the creator adds licensed tracks to me/music/ (the kit ships none), a music bed under the voice. Then the gates and the review loop check it. Use when the creator says "plan the video for number 2", "plan this idea", "write my talking points", "here's my raw take, edit it", "edit this take", "edit my video" or "do the UI story edit", or drops a filmed take into work/. It needs Claude Max (or a paid ChatGPT plan in Codex), because an edit is a long run.
 ---
 
 # UI story
@@ -25,7 +25,7 @@ Everything for one video lives in `work/<video>/`:
 1. Read the creator's rules for this skill with `kit.rules.read("ui-story")`. In a shell: `uv run python -m kit.rules read ui-story`. Follow them; they win over anything below.
 2. Work out which part they want. "Plan the video for number 2" is the plan. "Here's my raw take, edit it" is the edit. When `plan.md` exists and `take/` holds a file, it is the edit.
 3. For the plan, follow "The plan". Stop when `plan.md` is written and shown to the creator: filming is theirs.
-4. For the edit, follow "The look" and "The edit", in order. Run the checks in "Before handing over", then the `review` skill. Fix what it finds and review again, at most 5 cycles.
+4. For the edit, follow "The look" and "The edit", in order. A take that comes with no plan has no folder yet: agree a short video name with the creator (lower case words joined by dashes, such as `example-reel`), run `mkdir -p work/<video>/take/`, and link the take into it with `ln -s`, never a copy. Run the checks in "Before handing over", then the `review` skill. Fix what it finds and review again, at most 5 cycles.
 5. Give the creator the path to `work/<video>/final.mp4` and say what the review found.
 
 ## The plan
@@ -80,7 +80,7 @@ Layouts switch with a hard cut on the start of a phrase. Split is the spine. Fac
 The first four seconds make the topic clear with the sound off. Three beats:
 
 1. 0 to about 2.5 s: a motion graphic of the problem or idea of THIS video. Frame 0 is already moving. Almost no text, no logo card. It pictures the hook's own noun (the product's real page, the set of things the hook names) and carries the subject's real mark at its centre.
-2. About 2.5 to 3 s: one proof card. A real, sourced fact in about seven words or fewer (a loss, a number, a headline), designed rather than recorded, with its source as one small pill. It backs the first claim the creator says. If no fact makes the idea clearer, skip it and go straight to the subject card.
+2. About 2.5 to 3 s: one proof card. A real, sourced fact in about seven words or fewer (a loss, a number, a headline), designed rather than recorded, with its source as one small pill. It backs the first claim the creator says. If no fact makes the idea clearer, or the card cannot stay up long enough to read (0.35 s a word plus 0.6 s) before the subject card, skip it and go straight to the subject card.
 3. About 4.5 s: the subject card above the creator. Its logo, its name, one plain-language line, and badges with social proof (stars, users), held long enough to read.
 
 The first real footage lands early: by the subject card at the latest, the viewer has seen the real thing (its UI, its site, footage of it in use), not only drawings of it.
@@ -130,7 +130,7 @@ The last beat shows the creator's call to action, built by `closer.py` from `pro
 
 - Tight cuts: every gap between words over 0.22 s is cut to about 0.15 s (`make_blocks.py`), and `check_trims.py` proves no trim cut speech. Never cut a line the next one leans on: read each join back as a cold listener.
 - Hide every take join inside a face window with a layout cut or a punch-in change on the next word, and trim the breath or click in the gap.
-- The finish runs at 1.15x, never faster. The bed comes from `kit.music.pick()` (the creator's `me/music/` folders, skipping the last track used) or there is none. It sits at `--music-lufs -24` under the voice with `--mix-peak 0.74` and a 0.3 s fade-in; a denser track starts about 6 dB lower (`--music-lufs -30`). The finished Reel lands at -13 LUFS with the true peak at or below -1.5 dBTP. The kit ships no music and no sound effects.
+- The finish runs at 1.15x, never faster. A bed plays only once the creator has added licensed tracks to a mood folder in `me/music/`, such as `me/music/calm/`. The kit ships no music and no sound effects, so until then a Reel has no bed. `kit.music.pick()` chooses from those folders, skipping the last track used. The bed sits at `--music-lufs -24` under the voice with `--mix-peak 0.74` and a 0.3 s fade-in; a denser track starts about 6 dB lower (`--music-lufs -30`). The finished Reel lands at -13 LUFS with the true peak at or below -1.5 dBTP.
 
 ## The edit
 
@@ -187,7 +187,7 @@ uv run python $K/ship.py $V                            # composite, finish at 1.
 uv run python $K/postcheck.py $V                       # format, loudness, captions, stills, safe area, sheet
 ```
 
-`build/layout.json` lists the layout windows in order. Each one starts at its cue minus `lead` (or at `t` seconds) and runs until the next one starts. Cues are phrases as the speech model heard them (copy them from `base.lines.txt`); `nth` picks a later time the phrase was said. Zooms go in face windows only: a punch eases in on its cue and cuts back at `until` (or the end of the window), and a slow push drifts from its cue (or the window start) to the end of the window. Start a window with `"t"` on a take join (from `seg_starts.json`) so no frame of the next take shows in the previous layout. `layout.py --help` prints the same format.
+`build/layout.json` lists the layout windows in order. Each one starts at its cue minus `lead` (or at `t` seconds) and runs until the next one starts. Cues are phrases as the speech model heard them (copy them from `base.lines.txt`); `nth` picks a later time the phrase was said. Zooms go in face windows only: a punch eases in on its cue and cuts back at `until` (or the end of the window), and a slow push drifts from its cue (or the window start) to the end of the window. Start a window with `"t"` on a take join (from `seg_starts.json`) so no frame of the next take shows in the previous layout. Give a window a `"name"` when a scene needs its times. `UIS.win('the list')` finds it in the timeline by its name, by the phrase it starts at, or by a time inside it (`UIS.win(31.2)`), never by its place in `lib/layout.js`, since a window added later moves every place after it. It returns `{mode, t0, t1, name, at}`. In `index.src.html`, `{{ w('the list') }}` or `{{ w(31.2) }}` gives the window's start. `layout.py --help` prints the same format.
 
 ```json
 {"lead": 0.12,
@@ -196,7 +196,7 @@ uv run python $K/postcheck.py $V                       # format, loudness, capti
    {"mode": "face", "at": "one big problem", "zooms": [
      {"kind": "punch", "at": "big problem", "z": 1.14, "until": "you're stuck"},
      {"kind": "slow", "at": "you're stuck", "z": 1.06}]},
-   {"mode": "canvas", "at": "four things"},
+   {"mode": "canvas", "at": "four things", "name": "the list"},
    {"mode": "split", "t": 14.13}]}
 ```
 
@@ -205,9 +205,10 @@ Notes on the recipe:
 - `--describe false` stops the snapshot from sending frames to an outside vision service.
 - Without face zooms, skip the zoomed base: `ship.py` uses `base.mp4` when there is no `zbase.mp4`.
 - The geometry in step 3 is measured over the split windows. Put its zone line (`:root{--zone-bottom: Npx}`) in the composition's style block.
+- `npx hyperframes lint` gives two warnings that come from how the kit builds a Reel, and both are expected: `composition_file_too_large`, because the Reel is one `index.html` with one timeline, and `duplicate_media_discovery_risk` for an `<img>` shown in two scenes, because scenes are plain layers with no start time of their own. Fix every error and any other warning. The same duplicate warning about a `<video>` is real: give each video its own `id` and start.
 - `ship.py` keeps the bed this video already has. The first ship picks one with `kit.music.pick()` (skipping the last track used) and logs it, and the ledger keeps one row per video, so every re-ship sounds the same. Pass `--mood <folder>` to pick from another mood, or `--music none` for no bed.
 - The new render becomes `final.mp4` only after it passes the speech gate. At that moment `ship.py` deletes `review/review.json`, because the review passed the previous final and has to run again. A render that fails stays as `build/final.next.mp4` to listen to, and `final.mp4` is left as it was.
-- After the composite passes, delete `build/gfx.webm`, the snapshots and the test windows. Keep the base, the zoomed base, the matte and the words until the creator has signed off.
+- Clean up only once the review passes: `snap_render_gate.py` compares the render with the snapshots, and every ship reads `build/gfx.webm`. Then delete `build/gfx.webm`, the snapshots and the test windows. Keep the base, the zoomed base, the matte and the words until the creator has signed off.
 
 ## The kit
 
@@ -228,7 +229,7 @@ Everything is in `.claude/skills/ui-story/kit/`. Run the scripts with `uv run py
 | `scaffold.py` | a HyperFrames project with the creator's tokens and fonts copied in, and GSAP |
 | `template.html` | the composition the scaffold starts from |
 | `uistory.css` | cards, rows, chips, pills, rings, `.vidcard`, cursor, the closer; every colour from the tokens |
-| `uistory.js` | seek-safe GSAP helpers: `cue`, `show`, `pop`, `rise`, `tick`, `chip`, `fill`, `type`, `count`, `light`, `detail`, `cursor`, `click`, `ring`, `captions` |
+| `uistory.js` | seek-safe GSAP helpers: `cue`, `win`, `show`, `pop`, `rise`, `tick`, `chip`, `fill`, `type`, `count`, `light`, `detail`, `cursor`, `click`, `ring`, `captions` |
 | `karaoke.css` | the karaoke caption look |
 | `build_captions.py` | the karaoke caption track, `lib/words.js` and the transcript the speech gate reads |
 | `fill_times.py` | `{{ c("phrase") }}` cue expressions into frame-snapped seconds |
@@ -265,7 +266,7 @@ HyperFrames rules for the composition: one `index.html`, a transparent root, `da
 - When a chip replaces another in a face window, hide the first at least 0.1 s before the second appears.
 - The speech model cannot read digits well and can invent words in silence at a take join. Check the words file around numbers and joins, and drop invented words before building the captions. A word the model spells wrong goes in `build/captions/corrections.json` (`{"misheard": "correct"}`); cue phrases still use the spelling as heard.
 - A long render with transparency needs `--workers 1`: more workers try to keep every frame on disk first.
-- Stopping `cut_base.py` does not always stop its ffmpeg. Stop that too, delete the half-written base, and check a new one with `ffmpeg -v error -i base.mp4 -f null -` before matting it.
+- `cut_base.py` writes a new base to a part file (`base.part.mp4`) and swaps it in only when ffmpeg finishes, so a stopped cut leaves the earlier base as it was. Stopping the script does not always stop its ffmpeg: stop that too, and delete the part file it leaves.
 - Free disk before a render, not after. HyperFrames keeps a frame cache in the system temp folder (`hyperframes-extract-cache-*`) that is safe to delete when no render is running.
 
 ## Before handing over
@@ -279,7 +280,7 @@ HyperFrames rules for the composition: one `index.html`, a transparent root, `da
 - [ ] Karaoke captions at y 1570 in every layout, light over the canvas, `caption_blink_check.py` reports 0
 - [ ] Tight cuts, `check_trims.py` passes, no pause over about 0.45 s between sentences
 - [ ] `check_static.py` passes; no bare face run over about 5 s
-- [ ] Every number on screen matches the spoken one, one fact shows one number on every card, and each traces to `build/sources/SOURCES.md`
+- [ ] Every number on screen is the one the creator says, and a fact they give no number for shows the sourced one; one fact shows one number on every card, and each traces to `build/sources/SOURCES.md`
 - [ ] The closer shows the creator's call to action from their profile
 - [ ] Nothing meaningful within 90 px of either side (`ig_safe_check.py` frames in `review/safe/`)
 - [ ] `ship.py` passed the speech gate; `postcheck.py` passes (1080x1920, 60 fps, -13 LUFS within 1 LU, true peak at or below -1.5 dBTP)

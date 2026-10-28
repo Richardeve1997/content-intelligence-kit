@@ -6,12 +6,13 @@ list and check what it writes.
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 
 import numpy as np
 import pytest
-from uistory_helpers import ffmpeg, load, run_kit
+from uistory_helpers import ROOT, ffmpeg, load, run_kit
 
 scaffold = load("scaffold")
 
@@ -78,6 +79,58 @@ def test_the_first_window_starts_at_zero(tmp_path):
     assert done.returncode != 0
 
 
+LOOKUP = """
+const fs = require('fs'), vm = require('vm');
+globalThis.window = globalThis;
+vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'));
+vm.runInThisContext(fs.readFileSync(process.argv[2], 'utf8'));
+const out = {};
+for (const key of JSON.parse(process.argv[3])) {
+  try { out[String(key)] = UIS.win(key); } catch (e) { out[String(key)] = 'error: ' + e.message; }
+}
+out.second = window.UIS_LAYOUT[1];
+console.log(JSON.stringify(out));
+"""
+
+
+def lookup(hf, keys):
+    """UIS.win for each key, run in Node on the project's lib/layout.js and the kit's uistory.js."""
+    done = subprocess.run(["node", "-e", LOOKUP, str(hf / "lib" / "layout.js"), str(ROOT / ".claude" / "skills" / "ui-story"
+                           / "kit" / "uistory.js"), json.dumps(keys)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node")
+def test_a_window_is_found_by_its_name_or_a_time_after_another_is_inserted_before_it(tmp_path):
+    """A timeline that reads windows by their place in lib/layout.js breaks when a window is added before them.
+    UIS.win finds a window by its name in layout.json, by the phrase it starts at, or by a time inside it."""
+    hf = tmp_path / "hf"
+    windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret", "name": "payoff"},
+               {"mode": "canvas", "at": "not the seeds"}]
+    assert resolve(tmp_path, {"windows": windows}, hf=hf).returncode == 0
+    before = lookup(hf, ["payoff", "The Secret", "not the seeds", 4.2])
+    assert before["payoff"] == {"mode": "face", "t0": before["payoff"]["t0"], "t1": before["payoff"]["t1"],
+                                "name": "payoff", "at": "the secret"}, before
+    assert before["The Secret"] == before["payoff"], "a named window answers to the phrase it starts at too"
+    assert before["4.2"] == before["payoff"], "a time inside the window finds it too"
+
+    windows.insert(1, {"mode": "canvas", "at": "took ten minutes"})  # a window added before the one looked up
+    assert resolve(tmp_path, {"windows": windows}, hf=hf).returncode == 0
+    after = lookup(hf, ["payoff", "The Secret", "not the seeds", 4.2, "parsley"])
+    assert after["second"][0] == "canvas", "the old index now points at the inserted window"
+    assert after["payoff"] == after["The Secret"] == after["4.2"] == before["payoff"], (before, after)
+    assert after["not the seeds"] == before["not the seeds"] and after["not the seeds"]["mode"] == "canvas"
+    assert after["parsley"].startswith("error: ") and "parsley" in after["parsley"], "a name no window has is an error"
+
+
+def test_two_windows_with_one_name_are_refused(tmp_path):
+    done = resolve(tmp_path, {"windows": [{"mode": "split", "t": 0, "name": "list"},
+                                          {"mode": "canvas", "at": "the secret", "name": "list"}]})
+    assert done.returncode != 0
+    assert "list" in done.stdout + done.stderr and "name" in done.stdout + done.stderr
+
+
 # --- karaoke captions --------------------------------------------------------------------------------------
 
 
@@ -106,6 +159,30 @@ def test_captions_are_karaoke_groups_of_three_words_at_most(tmp_path, hf_with_la
     assert len(json.loads(capwords.split("=", 1)[1].rstrip(";\n"))) == len(LINE)
     transcript = json.loads((tmp_path / "captions" / "transcript.json").read_text())
     assert " ".join(c["text"] for c in transcript["captions"]).split() == LINE
+
+
+def test_caption_clips_carry_the_class_hyperframes_reads_as_captions(tmp_path, hf_with_layout):
+    """HyperFrames' lint warns about any track with more than three timed clips, except clips it can tell are
+    captions by their class. The caption track holds one clip a group, so every clip says it is a caption."""
+    words, _ = word_file(tmp_path)
+    run_kit("build_captions.py", "--words", words, "--hf", hf_with_layout, "--layout", tmp_path / "layout.resolved.json")
+    classes = re.findall(r'<div id="cap\d+" class="([^"]+)"', (hf_with_layout / "index.html").read_text())
+    assert len(classes) > 3
+    assert all({"clip", "cap", "k", "caption"} <= set(c.split()) for c in classes), classes
+
+
+def test_the_caption_track_gives_no_lint_warning(tmp_path, hf_with_layout):
+    """Every build used to print a timeline_track_too_dense warning for the caption track, a warning about the
+    kit's own design that a creator would learn to ignore."""
+    hyperframes = ROOT / "node_modules" / ".bin" / "hyperframes"
+    if not hyperframes.exists() or shutil.which("node") is None:
+        pytest.skip("needs HyperFrames: npm ci")
+    words, _ = word_file(tmp_path)
+    run_kit("build_captions.py", "--words", words, "--hf", hf_with_layout, "--layout", tmp_path / "layout.resolved.json")
+    done = subprocess.run([str(hyperframes), "lint", str(hf_with_layout)], capture_output=True, text=True, timeout=120)
+    said = done.stdout + done.stderr
+    assert "Linting" in said, said
+    assert "timeline_track_too_dense" not in said, said
 
 
 def test_touching_caption_groups_swap_on_one_frame(tmp_path, hf_with_layout):
@@ -163,17 +240,23 @@ def test_caption_size_is_measured_with_the_creators_display_font(tmp_path, examp
 # --- gap trims -----------------------------------------------------------------------------------------------
 
 
-def speech_audio(path, words_path):
-    """A tone burst under each word and silence in the gaps, so the energy guard has something to hear."""
+def speech_audio(path, words_path, ring_after=()):
+    """A tone burst under each word and silence in the gaps, so the energy guard has something to hear.
+    After each word index in `ring_after` the room rings on: noise decaying from -20 dB, above the guard's
+    -42 dB floor for about 0.55 s."""
     data = json.loads(words_path.read_text())
     sr = 48000
     audio = np.zeros(int(data["dur"] * sr), np.float32)
-    for w in data["words"]:
+    for i, w in enumerate(data["words"]):
         a, b = int(w["s"] * sr), int(w["e"] * sr)
         t = np.arange(b - a) / sr
         # a voiced sound: a 180 Hz pitch with even harmonics up to 1.8 kHz, like a vowel
         voice = sum(np.sin(2 * np.pi * 180 * k * t) for k in range(1, 11))
         audio[a:b] = 0.3 * voice / np.abs(voice).max()
+        if i in ring_after:
+            n = int(0.6 * sr)
+            tail = np.random.default_rng(i).standard_normal(n) * 0.1 * np.exp(-np.arange(n) / sr / 0.217)
+            audio[b : b + n] += tail.astype(np.float32)[: len(audio) - b]
     raw = path.with_suffix(".f32")
     raw.write_bytes(audio.tobytes())
     ffmpeg("-f", "f32le", "-ar", sr, "-ac", 1, "-i", raw, "-c:a", "pcm_s16le", path)
@@ -200,6 +283,26 @@ def test_make_blocks_cuts_long_gaps_tight_and_the_trim_check_passes(tmp_path):
         assert (gap_end - gap_start) - removed == pytest.approx(0.15, abs=0.08)
     check = run_kit("check_trims.py", "--audio", audio, "--blocks", blocks)
     assert check.returncode == 0, check.stdout
+    assert "ringing tail" not in done.stdout, "no gap was kept, so there is nothing to explain"
+
+
+def test_make_blocks_says_once_why_it_kept_a_ringing_tail(tmp_path):
+    """A breathy take rings on after a word, above the guard's floor, so the guard leaves that gap long. The
+    report says why, once, instead of leaving the creator to wonder why a pause survived."""
+    words, duration = word_file(tmp_path, gaps={3: 0.5, 6: 0.5, 9: 0.6})
+    audio = speech_audio(tmp_path / "clean.wav", words, ring_after=(3, 6))
+    (tmp_path / "layout.resolved.json").write_text(json.dumps(
+        {"duration": duration, "windows": [{"mode": "split", "t0": 0, "t1": duration}]}))
+    blocks = tmp_path / "blocks.json"
+    done = run_kit("make_blocks.py", audio, words, tmp_path / "layout.resolved.json", blocks)
+    assert done.returncode == 0, done.stderr
+    why = [line for line in done.stdout.splitlines() if "ringing tail" in line]
+    assert len(why) == 1, done.stdout
+    assert why[0].strip().startswith("2 of 3 gaps over 0.22 s"), why[0]
+    assert "-42 dB" in why[0] and "never cuts" in why[0], why[0]
+    lines = done.stdout.splitlines()
+    assert lines.index(why[0]) > next(i for i, line in enumerate(lines) if line.startswith("blocks ")), \
+        "it is said where the trim is reported"
 
 
 def test_check_trims_catches_a_cut_through_a_word(tmp_path):
@@ -256,7 +359,7 @@ def test_fill_times_replaces_cue_expressions_with_snapped_seconds(tmp_path):
     (tmp_path / "layout.resolved.json").write_text(json.dumps(
         {"duration": duration, "windows": [{"mode": "split", "t0": 0, "t1": duration}]}))
     src = tmp_path / "index.src.html"
-    src.write_text('<div data-start="{{ c("the secret") }}" data-end="{{ e("the pot") }}" data-w="{{ w(0) }}"></div>')
+    src.write_text('<div data-start="{{ c("the secret") }}" data-end="{{ e("the pot") }}" data-w="{{ w(1.0) }}"></div>')
     out = tmp_path / "index.html"
     done = run_kit("fill_times.py", src, words, tmp_path / "layout.resolved.json", out)
     assert done.returncode == 0, done.stderr
@@ -264,8 +367,52 @@ def test_fill_times_replaces_cue_expressions_with_snapped_seconds(tmp_path):
     values = [float(v) for v in re.findall(r'"([\d.]+)"', html)]
     assert values[0] == pytest.approx(3.7 - 0.12, abs=1 / 60)
     assert values[1] == pytest.approx(0.5 + 12 * 0.4 + 0.3, abs=1 / 60)
-    assert values[2] == 0.0
+    assert values[2] == 0.0, "the window holding 1.0 s starts at 0"
     assert all(abs(v * 60 - round(v * 60)) < 0.01 for v in values), "every time sits on a frame"
+
+
+def fill_window_times(tmp_path, windows, expressions):
+    """Resolve `windows` with layout.py, then fill one attribute per {{ expression }}; returns the values, or the
+    finished run when it failed."""
+    assert resolve(tmp_path, {"windows": windows}).returncode == 0
+    src, out = tmp_path / "index.src.html", tmp_path / "index.html"
+    src.write_text("<i " + " ".join(f'v{n}="{{{{ {x} }}}}"' for n, x in enumerate(expressions)) + "></i>")
+    done = run_kit("fill_times.py", src, tmp_path / "base.words.json", tmp_path / "layout.resolved.json", out)
+    if done.returncode != 0:
+        return done
+    return [float(v) for v in re.findall(r'"([\d.]+)"', out.read_text())]
+
+
+def test_fill_times_finds_a_window_by_name_phrase_or_time_after_another_is_inserted_before_it(tmp_path):
+    """{{ w(i) }} once read a window by its place in the list, so a window added before it moved every later
+    time without a word. w() finds a window by its name, the phrase it starts at, or a time inside it."""
+    windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret", "name": "payoff"},
+               {"mode": "canvas", "at": "not the seeds"}]
+    asks = ['w("payoff")', 'w("The Secret")', 'w("not the seeds")', "w(4.2)"]
+    before = fill_window_times(tmp_path, windows, asks)
+    windows.insert(1, {"mode": "canvas", "at": "took ten minutes"})  # a window added before the ones looked up
+    after = fill_window_times(tmp_path, windows, asks)
+    assert after == before, (before, after)
+    face_start = round(round((3.7 - 0.12) * 60) / 60, 4)
+    assert before[0] == before[1] == before[3] == face_start
+    assert before[2] == round(round((0.5 + 13 * 0.4 - 0.12) * 60) / 60, 4)
+
+
+def test_fill_times_refuses_a_window_by_its_place_and_names_the_ways_that_last(tmp_path):
+    windows = [{"mode": "split", "t": 0}, {"mode": "face", "at": "the secret"}]
+    done = fill_window_times(tmp_path, windows, ["w(1)"])
+    said = done.stdout + done.stderr
+    assert done.returncode != 0 and "Traceback" not in said, said
+    assert "w(1)" in said and "place" in said and "name" in said and "phrase" in said and "w(31.0)" in said, said
+    done = fill_window_times(tmp_path, windows, ['w("parsley")'])
+    said = done.stdout + done.stderr
+    assert done.returncode != 0 and "Traceback" not in said and "parsley" in said, said
+
+
+
+def test_fill_times_help_lists_the_window_lookups():
+    said = run_kit("fill_times.py", "--help").stdout
+    assert 'w("name")' in said and "w(31.0)" in said and "refused" in said, said
 
 
 def test_seg_starts_finds_each_join(tmp_path):

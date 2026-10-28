@@ -3,9 +3,11 @@
 
 It seeks the paused timeline every --step seconds in a headless browser and records every visible piece of
 text at --min-px or larger (so window chrome and tiny labels are skipped). A counter's changing spans are
-merged into one entry. For each text it reports the readable words, the seconds it is on screen after the
-gap trims and the speed-up, and the seconds it needs (0.35 s a word plus 0.6 s, counting at most 8 words),
-then OK or SHORT (within 0.15 s is fine). Captions are left out.
+merged into one entry, named by the value it lands on, and typed text (one span a character) counts as the
+whole line it types, from its first letter on screen. UIS.count and UIS.type mark their elements, so a count
+to a single digit is never taken for typing. For each text it reports the readable words, the seconds it is on
+screen after the gap trims and the speed-up, and the seconds it needs (0.35 s a word plus 0.6 s, counting at
+most 8 words), then OK or SHORT (within 0.15 s is fine). Captions are left out.
 
 The house limits it checks against: one idea and about six readable words a visual, on screen long enough
 to read. A SHORT row is allowed only when the speech binds it (two cards on one sentence); say so in the
@@ -45,11 +47,22 @@ JS = """([t, minpx]) => {
     if (parseFloat(getComputedStyle(el).fontSize) < minpx) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 4 || r.height < 4 || r.right < 0 || r.left > 1080 || r.bottom < 0 || r.top > 1920) continue;
-    let key = el, text = own;
+    let key = el, text = own, ident = own;
     const par = el.parentElement;
-    if (el.tagName === 'SPAN' && par && (par.querySelectorAll(':scope > span').length >= 5 || (own.length === 1 && par.querySelectorAll(':scope > span').length >= 2))) { key = par; text = '(counter/typed) ' + own; }
+    const kids = el.tagName === 'SPAN' && par ? Array.from(par.querySelectorAll(':scope > span')) : [];
+    // UIS.count and UIS.type mark their elements; one span a character means typing only when nothing says count
+    const counted = kids.length > 0 && par.hasAttribute('data-uis-count');
+    const typed = kids.length > 0 && par.hasAttribute('data-uis-typed');
+    const oneChar = kids.length >= 2 && kids.every(k => Array.from(k.textContent).length <= 1);
+    if (counted || (!typed && !oneChar && kids.length >= 5)) {
+      // a count: one span a value, one shown at a time, so the row is the value it lands on
+      key = par; ident = kids[kids.length - 1].textContent.replace(/\\s+/g, ' ').trim(); text = '(counter) ' + ident;
+    } else if (typed || oneChar) {
+      // typed text: one span a character, so the row is the whole line it types
+      key = par; ident = par.textContent.replace(/\\s+/g, ' ').trim(); text = '(typed) ' + ident;
+    }
     const sc = el.closest('.scene');
-    const id = (key.id || '') + '|' + (sc ? sc.id : '') + '|' + (key.className && key.className.baseVal === undefined ? key.className : '') + '|' + (key.id ? '' : own.slice(0, 40));
+    const id = (key.id || '') + '|' + (sc ? sc.id : '') + '|' + (key.className && key.className.baseVal === undefined ? key.className : '') + '|' + (key.id ? '' : ident.slice(0, 40));
     if (seen.has(id)) continue; seen.add(id);
     out.push({id, text: key === par ? text : own, scene: sc ? sc.id : ''});
   }
@@ -105,7 +118,7 @@ def main():
     short, items = 0, []
     for row in rows.values():
         times = row["t"]
-        plain = row["text"].replace("(counter/typed)", "").strip()
+        plain = re.sub(r"^\((?:typed|counter)\)", "", row["text"]).strip()
         if ignore.search(plain) or (len(plain) <= 2 and not re.search(r"\d|%", plain)):
             continue
         words = [w for w in re.split(r"\s+", plain) if re.search(r"[A-Za-z0-9$%]", w)]

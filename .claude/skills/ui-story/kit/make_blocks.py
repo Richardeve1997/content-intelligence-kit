@@ -19,7 +19,8 @@ chain lifts quiet word tails, so a guard measured on the base can miss them.
         [--speed 1.15] [--loose] [--gap 0.22] [--tail 0.08] [--lead 0.07] [--min-cut 0.08] [--floor -42]
         [--cut S E ...] [--keep S E ...]
 
-It also prints the layout share after the trims and the length the Reel ships at.
+It also prints the layout share after the trims and the length the Reel ships at, and one line saying why
+when the guard left gaps longer than the trims aim for.
 """
 import argparse
 import json
@@ -91,13 +92,14 @@ def main():
                 out.append(k * 0.02)
         return out
 
-    cuts = []
+    cuts, long_gaps, guarded = [], 0, []  # guarded: what is left of each gap the guard kept long
     for p, q in zip(words, words[1:]):
         if q["s"] - p["e"] <= GAP:
             continue
         c0, c1 = p["e"] + TAIL, q["s"] - LEAD
         if any(f0 <= c0 + 0.3 and c1 - 0.3 <= f1 for f0, f1 in forced):
             continue
+        aim = c1 - c0  # the trim this gap gets when nothing is in the way
         # keep the tail of the word before the gap and the attack of the word after it
         k = int(p["e"] / 0.02)
         while k + 1 < len(env) and (env[k] > FLOOR or env[k + 1] > FLOOR):
@@ -118,8 +120,12 @@ def main():
         if any(not (c1 <= k0 or c0 >= k1) for k0, k1 in protect):
             print(f"  (protected window: no trim at {c0:.3f}-{c1:.3f})")
             continue
-        if c1 - c0 >= MINCUT:  # a smaller trim saves nothing and risks a word edge
+        long_gaps += 1
+        cut = c1 - c0 if c1 - c0 >= MINCUT else 0.0  # a smaller trim saves nothing and risks a word edge
+        if cut:
             cuts.append([c0, c1])
+        if aim - cut > 0.1:  # the guard left this gap at least 0.1 s longer than the trims aim for
+            guarded.append(q["s"] - p["e"] - cut)
     cuts += [list(f) for f in forced]
     cuts.sort()
     blocks, cur = [], snap(max(0.0, words[0]["s"] - 0.08))
@@ -142,6 +148,12 @@ def main():
     print("trimmed share %:", {k: round(100 * v / total, 1) for k, v in share.items()} if total else {})
     for c0, c1 in cuts:
         print(f"  cut {c0:7.3f}-{c1:7.3f} ({c1 - c0:.2f}s)")
+    if guarded:
+        lo, hi = min(guarded), max(guarded)
+        span = f"{lo:.2f} s" if hi - lo < 0.005 else f"{lo:.2f} to {hi:.2f} s"
+        print(f"  {len(guarded)} of {long_gaps} gaps over {GAP:g} s were left at {span}, not about {TAIL + LEAD:.2f} s. "
+              f"Sound above {FLOOR:g} dB runs on from a word there, or into the next one (a ringing tail, a breath, "
+              "the room), and the guard never cuts sound that touches a word or sounds like speech.")
     return 0
 
 

@@ -20,13 +20,15 @@
 
 Command line:
 
-    python -m kit.finish <src> <out> [--speed 1.15] [--music auto|none|<file>] [--mood <folder>]
+    python -m kit.finish <src> <out> [--speed 1.15] [--music auto|none|<file>] [--mood <folder>] [--slug <video>]
         [--music-lufs -24] [--mix-peak 0.74] [--fade-in 0.3] [--fade-out 1.2]
     python -m kit.finish measure <file>
 
 `--music auto` keeps the bed this video already has in the ledger, or picks one from the creator's library
 (kit.music.for_video, which skips the last track used), and logs it once: the ledger holds one row per
-video. With an empty library the Reel finishes with no bed.
+video. With an empty library the Reel finishes with no bed. The video is named by --slug, or else by the
+output's folder: auto needs a video name, and a bed file given with --music is logged under one when there
+is one (a folder such as "My Reel" is not one, so that bed is used and not logged, and a line says so).
 """
 
 from __future__ import annotations
@@ -247,6 +249,23 @@ def finish(
     return out
 
 
+def _video_name(args) -> tuple[str | None, str | None]:
+    """The video a bed belongs to: --slug, else the output's folder name. Returns (name, None), or (None, the
+    folder's name) when that folder's name is not a video name. A --slug that is not one is refused by name."""
+    if args.slug is not None:
+        try:
+            config.work_dir(args.slug)
+        except ValueError as problem:
+            raise KitError(f"--slug {problem}") from None
+        return args.slug, None
+    folder = args.out.resolve().parent.name
+    try:
+        config.work_dir(folder)
+    except ValueError:
+        return None, folder
+    return folder, None
+
+
 def main(argv: list[str] | None = None) -> int:
     args_in = sys.argv[1:] if argv is None else argv
     if args_in[:1] == ["measure"]:
@@ -277,21 +296,25 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         bed: Path | None = None
-        slug = None
+        slug, folder = _video_name(args) if args.music != "none" else (None, None)  # checked before the long finish
         if args.music == "auto":
-            slug = args.slug or args.out.resolve().parent.name
+            if slug is None:
+                raise KitError(f"The output folder {folder!r} is not a video name, and --music auto needs one to keep "
+                               "one bed for each video. Pass the video's name with --slug, such as --slug "
+                               "example-reel, or choose the bed with --music <file> or --music none.")
             bed = music.for_video(slug, args.mood)
             if bed is None:
                 where = f"me/music/{args.mood}/" if args.mood else "me/music/"
                 print(f"No track in {where}, so this Reel has no music bed. Add tracks there to give it one.")
         elif args.music != "none":
             bed = Path(args.music)
-            slug = args.slug or args.out.resolve().parent.name
-            config.work_dir(slug)  # check the name before the long finish, not after it
         finish(args.src, args.out, speed=args.speed, music=bed, music_lufs=args.music_lufs, mix_peak=args.mix_peak,
                fade_in=args.fade_in, fade_out=args.fade_out)
-        if bed is not None:
+        if bed is not None and slug is not None:
             music.log(bed, slug)  # one row per video: a second finish of the same video adds nothing
+        elif bed is not None:
+            print(f"The bed was not logged in me/music/MUSIC.md, because the output folder {folder!r} is not a video "
+                  "name. Pass the video's name with --slug to log it.")
     except KitError as problem:
         print(problem)
         return 1

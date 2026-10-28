@@ -198,7 +198,7 @@ def test_tiles_keep_their_times_when_the_picture_starts_after_the_sound(tmp_path
         assert abs(frame - max(0.0, index / fps - 1 / 60) * 60) <= 2.0, (index, frame)
 
 
-# --- what this round of fixes added ------------------------------------------------------------------------
+# --- feedback rules and the steps the ui-story skill spells out --------------------------------------------
 
 
 @pytest.mark.parametrize("name", list(SKILLS))
@@ -209,7 +209,7 @@ def test_feedback_removes_an_older_rule_by_its_number(name):
     assert "kit.rules undo" not in feedback, "undo removes the newest rule, not the one it contradicts"
 
 
-def test_ui_story_states_the_rules_the_review_found_missing():
+def test_ui_story_spells_out_footage_assets_layout_closing_and_shipping():
     body = text(SKILLS["ui-story"])
     assert "The first real footage lands early" in body
     assert "build/hf/assets/" in body and "only loads files inside the project" in body
@@ -243,3 +243,104 @@ def test_prep_makes_the_sources_folder_first(tmp_path, monkeypatch):
         prep.main(["example-reel"])
     assert "no take" in str(caught.value).lower()
     assert (tmp_path / "kit" / "work" / "example-reel" / "build" / "sources").is_dir()
+
+
+# --- a take with no plan, the lint, the cleanup, windows, numbers, the open and the music bed ----------------
+
+
+def test_an_edit_with_no_plan_names_the_video_and_links_the_take_first():
+    """A creator who filmed first and says "edit my take" has no work/<video>/ yet. The steps say how to name the
+    video and link the take before the recipe's prep.py, which expects the take in work/<video>/take/."""
+    steps = text(SKILLS["ui-story"]).split("## Steps")[1].split("## The plan")[0]
+    edit_step = next(line for line in steps.splitlines() if line.startswith("4. For the edit"))
+    assert "no plan" in edit_step, "the edit step covers a take that skipped the plan"
+    assert "video name" in edit_step and "work/<video>/take/" in edit_step and "ln -s" in edit_step, edit_step
+    assert "never" in edit_step and "copy" in edit_step, "the raw take is linked, never copied"
+
+
+def test_the_lint_warnings_the_kit_causes_on_purpose_are_named_as_expected():
+    """Two HyperFrames lint warnings come from the kit's own design: one index.html with one timeline, and a
+    picture shown in two scenes (plain layers carry no start time). The skill names them, so a creator does not
+    chase them, and keeps every other warning worth a look."""
+    notes = text(SKILLS["ui-story"]).split("Notes on the recipe:")[1].split("## The kit")[0]
+    lint = next(line for line in notes.splitlines() if "hyperframes lint" in line)
+    assert "composition_file_too_large" in lint and "index.html" in lint, lint
+    assert "duplicate_media_discovery_risk" in lint and "<img>" in lint, lint
+    assert "expected" in lint and "error" in lint, lint
+    assert "timeline_track_too_dense" not in text(SKILLS["ui-story"]), "the caption track no longer causes it"
+
+
+def test_the_cleanup_waits_for_the_render_gate_and_the_review():
+    """The snapshots were once deleted before the render, because the note said "after the composite passes";
+    snap_render_gate.py needs them after the render, and every ship reads gfx.webm."""
+    notes = text(SKILLS["ui-story"]).split("Notes on the recipe:")[1].split("## The kit")[0]
+    cleanup = next(line for line in notes.splitlines() if "delete `build/gfx.webm`" in line)
+    assert "After the composite passes" not in cleanup, cleanup
+    assert "snap_render_gate.py" in cleanup and "review" in cleanup, cleanup
+    assert cleanup.index("review") < cleanup.index("delete `build/gfx.webm`"), "the order comes first"
+
+
+def test_the_skill_finds_windows_by_name_or_time_never_by_place():
+    body = text(SKILLS["ui-story"])
+    layout_note = next(line for line in body.splitlines() if line.startswith("`build/layout.json` lists"))
+    assert "UIS.win(" in layout_note and '"name"' in layout_note, layout_note
+    assert "never by its place" in layout_note, layout_note
+    assert "{mode, t0, t1, name, at}" in layout_note, "it says what UIS.win returns"
+    assert "{{ w('" in layout_note, "the same lookup for index.src.html"
+    assert '"name":' in body.split('"windows": [')[1].split("```")[0], "the example layout.json shows a name"
+    helpers = next(line for line in body.splitlines() if line.startswith("| `uistory.js` |"))
+    assert "`win`" in helpers, helpers
+
+
+def test_layout_help_wraps_its_usage_example():
+    """A backslash at a line end inside the help text once joined the example into one 186 character line."""
+    from uistory_helpers import run_kit
+
+    lines = run_kit("layout.py", "--help").stdout.splitlines()
+    first = next(i for i, line in enumerate(lines) if "python layout.py --layout" in line)
+    assert "--out layout.resolved.json" not in lines[first], lines[first]
+    assert lines[first].rstrip().endswith("\\"), "the example breaks the way a shell command does"
+    assert lines[first + 1].strip().startswith("--out layout.resolved.json"), lines[first + 1]
+    assert max(len(line) for line in lines) <= 120
+
+
+def test_the_number_rule_reads_the_same_in_the_checklist_and_the_rubric():
+    """The real-things section says the spoken number wins and a fact with no spoken number shows the sourced
+    one. The handover checklist and the review rubric once said only "matches the spoken one"."""
+    ui, review = text(SKILLS["ui-story"]), text(SKILLS["review"])
+    assert "is the one the creator says; a fact they give no number for shows the sourced one" in ui
+    handover = ui.split("## Before handing over")[1]
+    checklist = next(line for line in handover.splitlines() if "number on screen" in line)
+    rubric = review.split("## The rubric")[1].split("## Common mistakes")[0]
+    item6 = next(line for line in rubric.splitlines() if line.startswith("6. "))
+    for line in (checklist, item6):
+        assert "is the one the creator says" in line and "no number for shows the sourced one" in line, line
+    assert "matches the spoken one" not in ui and "matches the number spoken" not in review
+
+
+def test_a_skipped_proof_card_is_allowed_by_the_skill_and_the_rubric():
+    """The proof card has about 1.5 s before the subject card, and seven words need about 3 s to read, so the
+    skill lets it go. The rubric's first item must not then send the open back for lacking one."""
+    ui, review = text(SKILLS["ui-story"]), text(SKILLS["review"])
+    proof = next(line for line in ui.split("### The open")[1].splitlines() if "one proof card" in line)
+    assert "skip it" in proof and "no fact makes the idea clearer" in proof, proof
+    assert "long enough to read" in proof, "a proof card that cannot be read in time is skipped too"
+    rubric = review.split("## The rubric")[1].split("## Common mistakes")[0]
+    item1 = next(line for line in rubric.splitlines() if line.startswith("1. "))
+    assert "no proof card passes" in item1 and "skips" in item1, item1
+    assert "no fact makes the idea clearer" in item1 and "long enough to read" in item1, item1
+
+
+def test_the_music_bed_needs_the_creators_own_tracks_and_setup_says_so():
+    """The kit ships no music, so a bed plays only once the creator adds licensed tracks to me/music/. The
+    ui-story description once promised a bed outright, and setup never named the folder."""
+    description = frontmatter(SKILLS["ui-story"])["description"]
+    assert "me/music/" in description and "licensed tracks" in description and "ships none" in description
+    sound = text(SKILLS["ui-story"]).split("### Sound")[1].split("## The edit")[0]
+    bed = next(line for line in sound.splitlines() if "kit.music.pick()" in line)
+    assert "licensed tracks" in bed and "`me/music/`" in bed and "ships no music" in bed, bed
+    onboard = (ROOT / ".claude" / "skills" / "onboard" / "SKILL.md").read_text(encoding="utf-8")
+    styles = onboard.split("### Step 8: Styles")[1].split("### Step 9")[0]
+    music = [line for line in styles.splitlines() if "me/music/" in line]
+    assert len(music) == 1, music
+    assert "licensed tracks" in music[0] and "ships none" in music[0] and "no bed" in music[0], music[0]

@@ -6,8 +6,11 @@ in me/music/MUSIC.md, newest last, so `pick` never hands back the track the last
 another one is there.
 
 The ledger holds one row per video. A video that is finished again (after a review fix, say) keeps the bed
-it was given: `for_video` returns that track, and `log` leaves the row alone, or updates it in place when
-the video's bed really changed.
+it was given: `for_video` returns that track, and `log` leaves the row alone. When the video's bed really
+changed, its row moves to the end with the new track, since that bed is now the newest use.
+
+A track inside me/music is logged by its path there (calm/morning.mp3). A bed passed as a file from anywhere
+else is logged by its whole path, so the video finds it again on its next finish.
 """
 
 from __future__ import annotations
@@ -32,12 +35,12 @@ def music_dir() -> Path:
 
 
 def _name(track: Path) -> str:
-    """How a track is written in the ledger: its path inside me/music, or its file name."""
-    track = Path(track)
+    """How a track is written in the ledger: its path inside me/music, or its whole path for a file elsewhere."""
+    track = Path(track).resolve()
     try:
-        return track.resolve().relative_to(music_dir().resolve()).as_posix()
+        return track.relative_to(music_dir().resolve()).as_posix()
     except ValueError:
-        return track.name
+        return track.as_posix()
 
 
 def tracks(mood: str | None = None) -> list[Path]:
@@ -93,7 +96,7 @@ def pick(mood: str | None = None) -> Path | None:
 
 
 def chosen(slug: str) -> Path | None:
-    """The bed the ledger gives this video, when that track is still in me/music. Otherwise None."""
+    """The bed the ledger gives this video, when that track is still where the ledger says. Otherwise None."""
     names = [track for _, row_slug, track in _rows() if row_slug == slug]
     if not names:
         return None
@@ -118,7 +121,8 @@ def log(track: Path, slug: str) -> None:
     """Record this video's bed in me/music/MUSIC.md, one row per video (the ledger is started if missing).
 
     Logging the same bed for the same video again changes nothing. A different bed for a video already
-    in the ledger replaces that video's row, so the ledger keeps one row per video.
+    in the ledger takes that video's row out and adds its new row at the end, so the ledger keeps one row per
+    video, newest last, and `pick` skips the bed this video just took.
     """
     config.work_dir(slug)  # the same rule as a video name: refuses anything that would break the table
     ledger = music_dir() / "MUSIC.md"
@@ -136,7 +140,7 @@ def log(track: Path, slug: str) -> None:
         if len(cells) == 3 and cells[0][:4].isdigit() and cells[1] == slug:
             if cells[2] == name:
                 return
-            lines[index] = row
-            ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            return
+            del lines[index]  # the bed changed: this video's row moves to the end, as the newest use
+            text = "\n".join(lines) + "\n"
+            break
     ledger.write_text(text + row + "\n", encoding="utf-8")

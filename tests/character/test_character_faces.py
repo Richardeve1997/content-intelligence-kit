@@ -486,6 +486,38 @@ def test_a_beard_in_the_outline_colour_stays_a_beard_when_the_mouth_opens():
         assert (after != before).any()
 
 
+def test_a_beard_in_the_outline_colour_stays_a_beard_when_the_outline_is_the_darkest_colour(monkeypatch):
+    """An opening mouth is painted over with what surrounds it, leaving out the darkest colour (the mouth's own
+    dark edge), unless that colour is most of the ring round the mouth: a beard drawn in the outline colour. The
+    stand-in's pupils are darker than its outline, so the test above never reaches that rule. Here the pupils are
+    lighter, so the outline is the darkest colour, as it is in most sprites, and the mouth is thick enough that the
+    rounded opening leaves its lower corners as they were painted: the rule is what keeps them beard, not skin."""
+    import character_sprites
+    from character_sprites import OUTLINE
+
+    monkeypatch.setattr(character_sprites, "PUPIL", (72, 66, 80))
+    rgba, _ = draw_figure("idle", hair=OUTLINE, beard=OUTLINE, mouth_size=(14, 5))
+    colours = {tuple(int(v) for v in c) for c in rgba[..., :3][rgba[..., 3] > 0]}
+    lightness = {c: float(faces.art.lab_of(np.array([c]))[0][0]) for c in colours}
+    assert min(lightness, key=lightness.get) == OUTLINE, "the outline must be the sprite's darkest colour here"
+    face = faces.locate(rgba)
+    states = faces.face_states(rgba, face)
+    skin = faces.skin_colours(rgba, face.skin)
+
+    def is_skin(cells):
+        return np.array([[tuple(int(v) for v in c) in skin for c in row] for row in cells[..., :3]])
+
+    for name in ("mouth_mid", "mouth_open"):
+        rect = states.rects[name]
+        before = rgba[rect.y : rect.y1, rect.x : rect.x1]
+        after = states.patches[name]
+        # the closed mouth is painted over with what surrounds it, here the beard, before the opening is drawn:
+        # wherever the opening does not cover it again, skin would show inside the beard
+        new_skin = is_skin(after) & ~is_skin(before)
+        assert not new_skin.any(), f"{name} puts skin at {np.argwhere(new_skin).tolist()} inside the beard"
+        assert (after != before).any()
+
+
 @pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
 @pytest.mark.parametrize("neck", [0, 1, 2], ids=["no neck", "a one-row neck", "a two-row neck"])
 @pytest.mark.parametrize("size", [(12, 4), (14, 5), (16, 6)], ids=["12 x 4", "14 x 5", "16 x 6"])
@@ -669,6 +701,25 @@ def test_the_open_mouth_shows_teeth_under_its_top_edge():
     for y, x in zip(*np.nonzero(teeth)):
         assert y >= 1 and tuple(int(v) for v in open_[y - 1, x, :3]) not in skin, f"the tooth at {(x, y)} is not under the top edge"
     assert not (states.patches["mouth_mid"][..., :3] == EYE_WHITE).all(2).any(), "the half open mouth shows teeth"
+
+
+def test_a_tiny_mouth_shows_teeth_when_open_and_a_normal_mouth_keeps_its_dark_corners():
+    """Teeth go where a column of the opening has room for them, the dark inside and the lip. A tiny mouth (6 x 1
+    at open_rows 2) has room for that nowhere, so it shows a row of teeth over its lip instead of none. A normal
+    mouth keeps the stricter rule, so its shallow corner columns stay dark rather than turning to teeth."""
+    from character_sprites import EYE_WHITE, PUPIL
+
+    tiny, _ = draw_figure("idle", mouth_size=(6, 1))
+    opened = faces.face_states(tiny, faces.locate(tiny), open_rows=2).patches["mouth_open"]
+    assert (opened[..., :3] == EYE_WHITE).all(2).any(), "the tiny mouth opens with no teeth"
+
+    normal, _ = draw_figure("idle")
+    opened = faces.face_states(normal, faces.locate(normal), open_rows=2).patches["mouth_open"]
+    teeth, dark = (opened[..., :3] == EYE_WHITE).all(2), (opened[..., :3] == PUPIL).all(2)
+    columns = np.nonzero(teeth.any(0) | dark.any(0))[0]
+    assert teeth.any(), "the normal mouth opens with no teeth"
+    for x in (columns.min(), columns.max()):
+        assert dark[:, x].any() and not teeth[:, x].any(), f"the corner column {x} lost its dark inside to teeth"
 
 
 def test_the_half_open_mouth_lowers_the_bottom_edge_and_keeps_the_top():

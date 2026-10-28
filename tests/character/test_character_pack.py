@@ -224,6 +224,29 @@ def test_the_held_card_is_the_largest_clear_rectangle_of_one_light_colour_below_
     assert poses.held_card(idle, idle, face, (0, 0)) is None, "the idle drawing holds no card"
 
 
+
+def test_a_raised_hand_is_never_taken_for_a_card(built):
+    """A card is paper: light and nearly colourless. With the card gone from the stand-in's hold_card drawing,
+    its raised hand (light skin, as big as a small card, absent from the idle drawing) once passed for one."""
+    from scipy import ndimage
+
+    folder, _, manifest_path = built
+    x, y, w, h = json.loads(manifest_path.read_text())["poses"]["hold_card"]["frame_info"][0]["card"]
+    canvas = load_rgba(folder / "poses" / "hold_card.png").copy()
+    card_colour = canvas[y + h // 2, x + w // 2, :3].copy()
+    labels, _ = ndimage.label((canvas[..., :3] == card_colour).all(2) & (canvas[..., 3] > 0))
+    canvas[labels == labels[y + h // 2, x + w // 2]] = 0  # the card is gone; the hand that held it stays
+    state = store.load(folder)
+    idle = load_rgba(folder / "poses" / "idle.png")
+    skin = faces.skin_colours(idle, tuple(state["face"]["skin"]))
+    hand = np.array([[tuple(int(v) for v in c) in skin for c in row] for row in canvas[..., :3]]) & (canvas[..., 3] > 0)
+    hand[: state["face"]["neck"]] = False
+    _, _, hand_w, hand_h = poses._largest_rectangle(hand)
+    assert hand_w >= poses.CARD_MIN[0] and hand_h >= poses.CARD_MIN[1], "the hand is big enough to pass by size"
+    face = faces.FaceBox.from_dict(state["face"])
+    assert poses.held_card(canvas, idle, face, state["poses"]["hold_card"].get("offset")) is None
+
+
 def test_the_held_card_is_found_when_the_body_stands_off_the_idle_drawing():
     """The idle comparison follows the head-lock offset: a light top in a pose whose body stands 14 cells off the
     idle drawing is still the top, not a card, and the real card beside it is found. With no card, nothing is."""
@@ -273,6 +296,26 @@ def test_the_poses_board_outlines_the_measured_card(built):
     top = board[tile_y + (cy - y0) * 2, tile_x + (cx - x0) * 2 : tile_x + (cx - x0 + cw) * 2]
     assert (top == np.array(art.INK, np.uint8)).all(1).mean() > 0.9, "the card's top edge is not outlined on the board"
     assert state["poses"]["hold_card"]["approved"]
+
+
+
+def test_the_poses_board_says_no_plain_card_was_found_and_outlines_nothing(built, tmp_path, monkeypatch):
+    """A hold_card drawing with no plain card in it gets the note "no plain card found" on its tile and no
+    outline, so the creator sees before any video that the pose needs drawing again. Here the hold_card drawing
+    is the idle one: hands down, nothing held."""
+    folder, _, _ = built
+    copy = tmp_path / "character"
+    shutil.copytree(folder, copy)
+    shutil.copy(copy / "poses" / "idle.png", copy / "poses" / "hold_card.png")
+
+    cells, outlined = [], []
+    monkeypatch.setattr(poses.art, "board", lambda drawn, **kwargs: cells.extend(drawn) or Image.new("RGB", (8, 8)))
+    monkeypatch.setattr(poses, "outline_card", lambda *args: outlined.append(args))
+    poses.board(copy)
+    notes = {label: note for _, label, note in cells}
+    assert "no plain card found" in notes[poses.LABELS["hold_card"]], notes
+    assert outlined == [], "an outline was drawn round a card that is not there"
+    assert not any("no plain card found" in note for label, note in notes.items() if label != poses.LABELS["hold_card"])
 
 
 def test_the_hold_card_pose_carries_the_clear_face_of_its_card(built):
@@ -330,6 +373,20 @@ def test_the_pack_says_what_card_the_hold_card_pose_holds(built, tmp_path, monke
     said = capsys.readouterr().out
     card = json.loads((copy / "manifest.json").read_text())["poses"]["hold_card"]["frame_info"][0]["card"]
     assert f"holds a card {card[2]} x {card[3]} cells" in said and "write" in said, said
+
+
+
+def test_the_pack_says_a_page_with_a_card_uses_another_pose_when_it_found_no_card(tmp_path):
+    """A mini me page that pairs hold_card with a card is refused when no card was measured, so the pack's
+    message no longer promises a card dropping in beside the character."""
+    from kit.character import __main__ as cli
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"poses": {"hold_card": {"frame_info": [{"card": None}]}}}))
+    said = cli._card_line(manifest)
+    assert "drops in" not in said, said
+    assert "another pose" in said and "draw hold_card again with a large plain white card" in said.lower(), said
+    assert "words go on the card" in said, said
 
 
 def test_a_face_change_on_a_character_that_cannot_be_packed_now_says_the_pack_is_old(built, tmp_path, monkeypatch, capsys):

@@ -25,6 +25,14 @@ TALK_1, GAP, TALK_2 = (0.2, 2.4), (2.4, 4.0), (4.0, 5.8)
 SECONDS = 6.0
 
 
+MADE = 1_700_000_000.0  # file times are set from here, never left to the clock (a coarse filesystem ties them)
+
+
+def stamp(path, seconds_after: float) -> None:
+    """Give a file a time `seconds_after` MADE, so which file is newer never rests on the order of two writes."""
+    os.utime(path, (MADE + seconds_after, MADE + seconds_after))
+
+
 def segment_lufs(path, start: float, end: float) -> float:
     text = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-ss", f"{start}", "-t", f"{end - start}", "-i", str(path),
                            "-vn", "-af", "ebur128", "-f", "null", "-"], capture_output=True, text=True).stderr
@@ -53,7 +61,9 @@ def reel(kit_home, example_me, monkeypatch):
     calm = example_me / "music" / "calm"
     calm.mkdir(parents=True)
     ffmpeg("-f", "lavfi", "-i", "anoisesrc=color=pink:amplitude=0.5:d=8:r=48000", "-ac", 2, calm / "bed.wav")
-    os.utime(build / "picture.mp4")  # rendered after the pages and the voice-over, as in a real build
+    for name in ("vo.m4a", "words.json", "beats.json"):
+        stamp(folder / name, 0)
+    stamp(build / "picture.mp4", 100)  # rendered after the pages and the voice-over, as in a real build
     state = {"checked": [], "problems": [], "refreshed": []}
 
     def refresh(slug):
@@ -163,7 +173,8 @@ def test_a_missing_render_is_a_plain_sentence(reel, capsys):
 
 def test_a_render_older_than_the_pages_is_refused(reel, capsys):
     beats = reel["folder"] / "beats.json"
-    beats.write_text(beats.read_text())  # the pages changed after the render
+    beats.write_text(beats.read_text())
+    stamp(beats, 200)  # the pages changed after the render
     assert ship.main(["example-reel"]) == 1
     out = capsys.readouterr().out
     assert "older than beats.json" in out and "render.py example-reel" in out
@@ -176,7 +187,9 @@ def test_hits_older_than_the_scenes_are_made_again(reel, monkeypatch):
     scenes = build / "hf" / "lib" / "scenes.js"
     scenes.parent.mkdir(parents=True)
     scenes.write_text("/* a stamp added after the last check */\n")
-    os.utime(build / "picture.mp4")  # the render came after the scenes changed
+    stamp(build / "hits.json", 200)
+    stamp(scenes, 300)  # the scenes changed after the last page check
+    stamp(build / "picture.mp4", 400)  # and the render came after that
 
     def refresh(slug):
         reel["refreshed"].append(slug)
@@ -192,6 +205,7 @@ def test_hits_older_than_the_scenes_are_made_again(reel, monkeypatch):
 def test_fresh_hits_are_used_as_they_are(reel):
     build = reel["folder"] / "build"
     (build / "hits.json").write_text(json.dumps({"hits": [{"kind": "whoosh", "t": 3.2, "gain": 0.6}]}))
+    stamp(build / "hits.json", 200)  # the page check came after the pages
     assert ship.main(["example-reel", "--music", "none"]) == 0
     assert reel["refreshed"] == [], "nothing changed since the page check"
 
@@ -202,7 +216,9 @@ def test_stale_hits_that_cannot_be_made_again_are_named(reel, capsys):
     scenes = build / "hf" / "lib" / "scenes.js"
     scenes.parent.mkdir(parents=True)
     scenes.write_text("/* changed after the last page check */\n")
-    os.utime(build / "picture.mp4")
+    stamp(build / "hits.json", 200)
+    stamp(scenes, 300)
+    stamp(build / "picture.mp4", 400)
     assert ship.main(["example-reel", "--music", "none"]) == 0  # the fixture's page check cannot run (no browser)
     out = capsys.readouterr().out
     lines = [line for line in out.splitlines() if "hits.json" in line]
@@ -214,3 +230,28 @@ def test_missing_hits_that_cannot_be_made_say_where_the_sound_comes_from(reel, c
     assert ship.main(["example-reel", "--music", "none"]) == 0
     lines = [line for line in capsys.readouterr().out.splitlines() if "hits.json" in line]
     assert len(lines) == 1 and "missing" in lines[0] and "beats.json" in lines[0], lines
+
+
+def test_a_page_check_with_no_playwright_here_counts_as_one_that_cannot_run(monkeypatch):
+    """Only SystemExit (no browser) used to count as "the page check cannot run here". With Playwright not
+    installed the import fails instead, which is the same case: the sound follows the older hits or the pages."""
+    import check as page_check  # the module refresh_hits imports, beside ship.py
+
+    def no_playwright(slug, at):
+        raise ModuleNotFoundError("No module named 'playwright'")
+
+    monkeypatch.setattr(page_check, "run", no_playwright)
+    assert ship.refresh_hits("example-reel") is False
+
+
+def test_a_page_check_that_breaks_part_way_is_a_plain_sentence(monkeypatch):
+    import check as page_check
+
+    def closed(slug, at):
+        raise RuntimeError("the browser closed while the page loaded")
+
+    monkeypatch.setattr(page_check, "run", closed)
+    with pytest.raises(config.KitError) as caught:
+        ship.refresh_hits("example-reel")
+    said = str(caught.value)
+    assert "the browser closed while the page loaded" in said and "check.py example-reel" in said, said
