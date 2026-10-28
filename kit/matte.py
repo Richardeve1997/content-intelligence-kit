@@ -26,8 +26,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 import warnings
 from pathlib import Path
@@ -55,6 +57,8 @@ SELFIE_MODEL_URL = (
     "selfie_segmenter.tflite"
 )
 SELFIE_MODEL_SHA256 = "191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b"
+# A model download that receives nothing for this long is given up on, so a stalled connection cannot hold a matte.
+DOWNLOAD_TIMEOUT = 60
 Segmenter = Callable[["object"], "object"]  # an RGB frame (H x W x 3, uint8) in, a 0..1 float mask (H x W) out
 
 
@@ -90,11 +94,7 @@ def _rvm_weights() -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Downloading the Robust Video Matting weights (GPL-3.0) into {path.parent} ...", flush=True)
     part = path.with_suffix(".part")
-    try:
-        urllib.request.urlretrieve(RVM_WEIGHTS_URL, part)
-    except OSError as problem:
-        part.unlink(missing_ok=True)
-        raise KitError(f"The Robust Video Matting weights could not be downloaded ({problem}). Check the connection.") from None
+    _fetch(RVM_WEIGHTS_URL, part, "the Robust Video Matting weights")
     if _sha256(part) != RVM_WEIGHTS_SHA256:
         part.unlink(missing_ok=True)
         raise KitError("The Robust Video Matting weights that downloaded are not the expected file, so they were not used.")
@@ -127,6 +127,29 @@ def _rvm_segmenter(device: str | None = None, downsample: float = 0.5) -> tuple[
     return segment, device
 
 
+def _fetch(url: str, part: Path, what: str) -> None:
+    """Download `url` to `part`. A connection that sends nothing for DOWNLOAD_TIMEOUT seconds is given up on. Any
+    failure deletes `part` and is a plain sentence that says what to do."""
+    stalled = (f"The download of {what} stalled: nothing came for {DOWNLOAD_TIMEOUT} seconds, so it was stopped. "
+               "Check the connection, then run the matte again.")
+    try:
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response, open(part, "wb") as out:
+            shutil.copyfileobj(response, out, 1 << 20)
+    except TimeoutError:
+        part.unlink(missing_ok=True)
+        raise KitError(stalled) from None
+    except urllib.error.URLError as problem:
+        part.unlink(missing_ok=True)
+        if isinstance(problem.reason, TimeoutError):
+            raise KitError(stalled) from None
+        raise KitError(f"{what[0].upper()}{what[1:]} could not be downloaded ({problem.reason}). Check the connection, "
+                       "then run the matte again.") from None
+    except OSError as problem:
+        part.unlink(missing_ok=True)
+        raise KitError(f"{what[0].upper()}{what[1:]} could not be downloaded ({problem}). Check the connection, "
+                       "then run the matte again.") from None
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -143,11 +166,7 @@ def _selfie_model() -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Downloading the MediaPipe selfie model (Apache-2.0) into {path.parent} ...", flush=True)
     part = path.with_suffix(".part")
-    try:
-        urllib.request.urlretrieve(SELFIE_MODEL_URL, part)
-    except OSError as problem:
-        part.unlink(missing_ok=True)
-        raise KitError(f"The MediaPipe model could not be downloaded ({problem}). Check the connection.") from None
+    _fetch(SELFIE_MODEL_URL, part, "the MediaPipe model")
     if _sha256(part) != SELFIE_MODEL_SHA256:
         part.unlink(missing_ok=True)
         raise KitError("The MediaPipe model that downloaded is not the expected file, so it was not used.")
@@ -191,11 +210,12 @@ def _choose(backend: str, downsample: float) -> Segmenter:
         except ImportError:
             reason = "torch is not installed"
         except Exception as problem:  # an offline download, a hub error
-            reason = str(problem) or type(problem).__name__
+            reason = str(problem).strip() or type(problem).__name__
+        reason = reason.rstrip(".")  # it may be a whole sentence already: each message below ends once
         if backend == "rvm":
             raise KitError(f"Robust Video Matting could not load: {reason}.")
-        print(f"matte: Robust Video Matting is not available ({reason}), so MediaPipe selfie segmentation "
-              "makes the matte. Its edge is rougher.", flush=True)
+        print("matte: Robust Video Matting could not load, so MediaPipe selfie segmentation makes the matte, and "
+              f"its edge is rougher. What stopped it: {reason}.", flush=True)
     else:
         print("matte: MediaPipe selfie segmentation.", flush=True)
     return _mediapipe_segmenter()
