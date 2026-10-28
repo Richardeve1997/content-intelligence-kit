@@ -190,7 +190,7 @@ def _codex_failure(reply: str, done: subprocess.CompletedProcess) -> ProviderErr
     errors = _codex_errors(done.stderr, done.stdout)
     if any(_CODEX_LIMIT.search(line) for line in errors):
         return ProviderError(
-            "Codex turned the request away because of a limit on your plan, so nothing was drawn. "
+            "Codex is holding requests back for now, so nothing was drawn. "
             f"It said: {'; '.join(errors[-2:])}. Wait a while, then run the same command again."
         )
     said = errors[-3:] or (reply or done.stdout or done.stderr).strip().splitlines()[-6:]

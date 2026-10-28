@@ -414,7 +414,9 @@ def test_codex_turned_away_by_a_limit_says_so_and_what_to_do(me, tmp_path, monke
     message = _codex_fails_with(monkeypatch, tmp_path, ECHOED_PROMPT + f"{line}\n{line}\n")
     assert "raised hand" not in message, "the end of the prompt is not something Codex said"
     assert message.count("429 Too Many Requests") == 1
-    assert "limit" in message and "nothing was drawn" in message and "run the same command again" in message
+    assert "holding requests back for now" in message, "a 429 can be a short rate limit as well as a plan's limit"
+    assert "plan" not in message
+    assert "nothing was drawn" in message and "run the same command again" in message
 
 
 def test_codex_that_fails_another_way_shows_its_own_error_and_not_the_prompt(me, tmp_path, monkeypatch):
@@ -422,6 +424,33 @@ def test_codex_that_fails_another_way_shows_its_own_error_and_not_the_prompt(me,
     assert "raised hand" not in message
     assert "Codex did not make a picture" in message and "500 Internal Server Error" in message
     assert "run the same command again" not in message, "only a limit is worth waiting out"
+
+
+@pytest.mark.parametrize(
+    "reply, stdout, stderr, heard",
+    [
+        ("The image tool is off in this session.", "a line it printed", "", "The image tool is off in this session."),
+        ("", "a line it printed", "something on stderr", "a line it printed"),
+        ("", "", "something on stderr", "something on stderr"),
+    ],
+)
+def test_codex_with_no_error_line_is_heard_through_its_reply_then_what_it_printed(me, tmp_path, monkeypatch, reply, stdout, stderr, heard):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty-home"))
+
+    def fake_run(cmd, **kwargs):
+        if reply:
+            Path(cmd[cmd.index("--output-last-message") + 1]).write_text(reply + "\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr=stderr)
+
+    monkeypatch.setattr(providers.subprocess, "run", fake_run)
+    monkeypatch.setattr(providers.shutil, "which", lambda name: "/usr/local/bin/codex")
+    with pytest.raises(providers.ProviderError) as caught:
+        providers.get("codex").generate("Draw it.", [], tmp_path / "out.png")
+    message = str(caught.value)
+    assert message.startswith("Codex did not make a picture. The last thing it said:")
+    assert message.endswith(heard)
+    for other in {reply, stdout, stderr} - {heard, ""}:
+        assert other not in message
 
 
 def test_codex_counts_as_ready_only_when_signed_in(monkeypatch):
