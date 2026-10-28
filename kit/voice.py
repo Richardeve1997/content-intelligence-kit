@@ -16,21 +16,24 @@ The paths:
   the account's stock voices, chosen the same way every time, so no id is ever written into the kit.
 * from_say(text, slug): a scratch voice from macOS `say`, for test clips and drafts only.
 * clone(name, samples): an ElevenLabs copy of the creator's own voice. It runs only when the profile
-  records their consent (voice_over is "clone"), and saves the new voice in me/voice/elevenlabs.json.
+  records their consent (voice_over is "clone"), and saves the new voice in me/voice/elevenlabs.json. The saved
+  copy is used only while voice_over stays "clone"; with "clone" and no copy yet, auto stops and says so
+  rather than reading in a stock voice.
 
 The pace. The voice-over is made at its final pace before anything is timed to it, so the picture is
 built on the words as they will be heard and the finish runs at 1.0 (FINISH_SPEED). ElevenLabs reads at
 its own speed setting of 1.15 (SYNTH_SPEED), which sounds more natural than stretching the audio after;
 a model without that setting gets the same 1.15 from a pitch-keeping tempo change. A phone recording gets
 that tempo change too (RECORDING_TEMPO, the factor a filmed take is sped up by in the finish). Pauses
-longer than 0.35 s are cut to 0.24 s, because the style has no dead air.
+longer than 0.35 s are cut to 0.24 s, because the style has no dead air. A paced recording prints one line
+saying so; --keep-pace keeps the creator's own pace.
 
 Nothing replaces vo.m4a and words.json until both are made, so a failed run leaves the last voice-over
 and its words together. The work is heavy (an encode and a transcription), so it holds a heavy-job slot.
 
 Command line:
 
-    python -m kit.voice auto <video>                    whatever this video has: a recording in take/,
+    python -m kit.voice auto <video> [--keep-pace]      whatever this video has: a recording in take/,
                                                         else ElevenLabs when the profile chose it
     python -m kit.voice record <video> [<file>]         from a recording (the newest file in take/)
     python -m kit.voice elevenlabs <video> [--voice-id ID]  from the narration in script.md
@@ -71,6 +74,7 @@ __all__ = [
     "WAITING",
     "NoElevenLabsKey",
     "VO",
+    "chosen_voice",
     "clone",
     "from_elevenlabs",
     "from_recording",
@@ -99,6 +103,14 @@ WAITING = 3
 KEY_NAME = "ELEVENLABS_API_KEY"
 API = "https://api.elevenlabs.io"
 NO_KEY = "No ElevenLabs key, so record the voice-over on your phone and drop it in work/{slug}/take/"
+NO_COPY = (
+    "Your profile asks for a copy of your voice, but there is none yet. Make it with: uv run python -m kit.voice clone "
+    "'<your name>' <sample files>, or record the voice-over on your phone and drop it in work/{slug}/take/."
+)
+PACED = (
+    "Your recording was sped up to {tempo:g}x and pauses over {longest:g} s were cut to {keep:g} s, the pace this style "
+    "runs at. To keep your own pace, make the voice-over again with --keep-pace."
+)
 RECORD = "Record the voice-over on your phone and drop it in work/{slug}/take/, then say go on."
 KEY_REFUSED = (
     "ElevenLabs turned down the key in .env ({name}). Check that it is a current API key from your ElevenLabs "
@@ -349,8 +361,10 @@ def from_recording(path: Path, slug: str, *, tempo: float = RECORDING_TEMPO, tig
         raise KitError(f"{path.name} has no sound in it. Record the voice-over again with the microphone on.")
     if not 0.5 <= tempo <= 2.0:
         raise KitError(f"The tempo must be between 0.5 and 2, such as 1.15. It was {tempo}.")
-    return _make(path, slug, clean=True, tighten=tighten, tempo=tempo,
-                 meta={"source": "recording", "file": path.name})
+    made = _make(path, slug, clean=True, tighten=tighten, tempo=tempo, meta={"source": "recording", "file": path.name})
+    if abs(tempo - 1.0) > 1e-6 or tighten:
+        print(PACED.format(tempo=tempo, longest=PAUSE_LONGEST, keep=PAUSE_KEEP))
+    return made
 
 
 # --- ElevenLabs -------------------------------------------------------------------------------------------------------
@@ -627,18 +641,27 @@ def _script(slug: str) -> str:
     return script.read_text(encoding="utf-8")
 
 
-def _auto(slug: str) -> int:
+def chosen_voice(profile) -> str | None:
+    """The voice id the profile allows: the saved copy only while voice_over is "clone", else none (a stock voice)."""
+    return saved_voice() if profile.voice_over == "clone" else None
+
+
+def _auto(slug: str, keep_pace: bool = False) -> int:
     profile = config.load_profile()
     recording = take(slug)
     if recording is not None:
-        _report(from_recording(recording, slug))
+        options = {"tempo": 1.0, "tighten": False} if keep_pace else {}
+        _report(from_recording(recording, slug, **options))
         return 0
     (config.work_dir(slug) / "take").mkdir(parents=True, exist_ok=True)
     if profile.voice_over in ("elevenlabs", "clone"):
         if not config.env(KEY_NAME):
             print(NO_KEY.format(slug=slug))
             return WAITING
-        voice_id = saved_voice() if profile.voice_over == "clone" else None
+        voice_id = chosen_voice(profile)
+        if profile.voice_over == "clone" and voice_id is None:
+            print(NO_COPY.format(slug=slug))  # never a stock voice in place of the copy they asked for
+            return WAITING
         _report(from_elevenlabs(_script(slug), slug, voice_id))
         return 0
     print(RECORD.format(slug=slug))
@@ -650,13 +673,15 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     auto = sub.add_parser("auto", help="the voice-over from whatever this video has")
     auto.add_argument("slug")
+    auto.add_argument("--keep-pace", action="store_true", help="keep a recording's own pace and pauses")
     record = sub.add_parser("record", help="the voice-over from a recording")
     record.add_argument("slug")
     record.add_argument("file", nargs="?", type=Path, help="the recording (default: the newest file in take/)")
     record.add_argument("--keep-pace", action="store_true", help="keep the recording's own pace and pauses")
     eleven = sub.add_parser("elevenlabs", help="the voice-over read by ElevenLabs from script.md")
     eleven.add_argument("slug")
-    eleven.add_argument("--voice-id", help="an ElevenLabs voice id (default: your saved copy, else a stock voice)")
+    eleven.add_argument("--voice-id", help="an ElevenLabs voice id (default: your saved copy when voice_over is clone, "
+                        "else a stock voice)")
     say = sub.add_parser("say", help="a scratch voice-over with macOS say")
     say.add_argument("slug")
     copy = sub.add_parser("clone", help="a copy of your voice, with your consent")
@@ -665,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     try:
         if args.command == "auto":
-            return _auto(args.slug)
+            return _auto(args.slug, args.keep_pace)
         if args.command == "record":
             recording = args.file or take(args.slug)
             if recording is None:
@@ -675,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
             _report(from_recording(recording, args.slug, **options))
             return 0
         if args.command == "elevenlabs":
-            _report(from_elevenlabs(_script(args.slug), args.slug, args.voice_id or saved_voice()))
+            _report(from_elevenlabs(_script(args.slug), args.slug, args.voice_id or chosen_voice(config.load_profile())))
             return 0
         if args.command == "say":
             _report(from_say(_script(args.slug), args.slug))

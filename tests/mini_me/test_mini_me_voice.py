@@ -296,3 +296,53 @@ def test_a_scratch_voice_from_say(kit_home, heard):
     assert vo.audio.is_file() and duration(vo.audio) > 1.0 and vo.words
     meta = json.loads((config.work_dir("example-reel") / "vo.json").read_text())
     assert meta["source"] == "say"
+
+
+# --- the pace line, and the consent the saved voice depends on ---------------------------------------------------------
+
+
+def test_a_paced_recording_says_so_once(recording, heard, capsys):
+    voice.from_recording(recording, "example-reel")
+    out = capsys.readouterr().out
+    assert out.count("sped up to 1.15x") == 1 and "--keep-pace" in out
+    voice.from_recording(recording, "example-reel", tempo=1.0, tighten=False)
+    assert "sped up" not in capsys.readouterr().out, "nothing to say when the pace is kept"
+
+
+def test_auto_can_keep_the_recordings_own_pace(recording, heard):
+    assert voice.main(["auto", "example-reel", "--keep-pace"]) == 0
+    folder = config.work_dir("example-reel")
+    assert duration(folder / "vo.m4a") >= duration(recording) - 0.1
+    meta = json.loads((folder / "vo.json").read_text())
+    assert meta["pace"] == {"tempo": 1.0, "tightened": False}
+
+
+def save_copy(me, voice_id="fake-voice-for-tests"):
+    (me / "voice").mkdir(parents=True, exist_ok=True)
+    (me / "voice" / "elevenlabs.json").write_text(json.dumps({"name": "Example Studio", "voice_id": voice_id}))
+
+
+def test_the_saved_copy_is_used_only_while_the_profile_says_clone(kit_home, example_me, heard, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    save_copy(example_me)
+    script = config.work_dir("example-reel") / "script.md"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# Basil\n\n## Narration\n\nFresh basil in March.\n")
+    for setting, expected in (("elevenlabs", "/v1/text-to-speech/aa-premade"), ("clone", "/v1/text-to-speech/fake-voice-for-tests")):
+        set_voice_over(example_me, setting)
+        api = FakeElevenLabs()
+        monkeypatch.setattr(voice, "_request", api)
+        assert voice.main(["elevenlabs", "example-reel"]) == 0
+        assert [c["path"] for c in api.calls if "text-to-speech" in c["path"]] == [expected], setting
+
+
+def test_clone_with_no_copy_yet_stops_instead_of_using_a_stock_voice(kit_home, example_me, heard, monkeypatch, capsys):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "clone")
+    monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("no stock voice in place of the copy"))
+    script = config.work_dir("example-reel") / "script.md"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# Basil\n\n## Narration\n\nFresh basil in March.\n")
+    assert voice.main(["auto", "example-reel"]) == voice.WAITING
+    out = capsys.readouterr().out
+    assert "copy of your voice" in out and "python -m kit.voice clone" in out and "work/example-reel/take/" in out
