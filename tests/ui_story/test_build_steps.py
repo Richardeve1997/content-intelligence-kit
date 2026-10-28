@@ -12,6 +12,7 @@ import sys
 
 import numpy as np
 import pytest
+from kit import telemetry
 from uistory_helpers import ROOT, ffmpeg, load, run_kit
 
 scaffold = load("scaffold")
@@ -179,7 +180,9 @@ def test_the_caption_track_gives_no_lint_warning(tmp_path, hf_with_layout):
         pytest.skip("needs HyperFrames: npm ci")
     words, _ = word_file(tmp_path)
     run_kit("build_captions.py", "--words", words, "--hf", hf_with_layout, "--layout", tmp_path / "layout.resolved.json")
-    done = subprocess.run([str(hyperframes), "lint", str(hf_with_layout)], capture_output=True, text=True, timeout=120)
+    done = subprocess.run(
+        [str(hyperframes), "lint", str(hf_with_layout)], capture_output=True, text=True, timeout=120, env=telemetry.env()
+    )
     said = done.stdout + done.stderr
     assert "Linting" in said, said
     assert "timeline_track_too_dense" not in said, said
