@@ -219,7 +219,8 @@ def figure(outlines: dict, baseline: int) -> dict:
     The neck is the narrowest row between the head and the body. With the arms down, the silhouette is
     widest where the hands hang, so the waist is the first row under the last row that wide. A big-headed
     character has its waist far below the halfway point, so it is measured, never guessed. A drawing without
-    that shape (hands out of sight) falls back to halfway between the neck and the feet, and says so.
+    that shape (hands out of sight) falls back to halfway between the neck and the feet, with waist_measured
+    false; the stage's audit (check.py) then prints a note to check the frames, because the crop may be off.
     """
     idle = outlines.get("pose:idle") or next(iter(outlines.values()))
     rows, top = idle["rows"], idle["top"]

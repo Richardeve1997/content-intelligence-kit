@@ -318,7 +318,7 @@ PAGES = [
     {"t": 0.0, "text": "BASIL *DIES*", "pose": "point_up", "field": "dark", "prop": "card: Week three"},
     {"t": 1.6, "text": "LOOK AT THIS", "pose": "point_left", "field": "light", "prop": "card: A sunny window"},
     {"t": 3.0, "text": "WATER EARLY", "pose": "point_right", "field": "dark", "prop": "stamp: AM"},
-    {"t": 4.4, "text": "3 PLANTS", "pose": "thumbs_up", "field": "light", "prop": "count"},
+    {"t": 4.4, "text": "3 OF 5", "pose": "thumbs_up", "field": "light", "prop": "count"},
     {"t": 5.6, "text": "COMMENT GROW", "pose": "point_up", "field": "dark", "prop": "cta"},
 ]
 SPOKEN = ("Basil dies in week three. Look at this window. Water it early. Three plants made it. "

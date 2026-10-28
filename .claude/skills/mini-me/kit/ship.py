@@ -6,7 +6,8 @@
 It reads build/picture.mp4 (the HyperFrames render), vo.m4a and words.json, and build/hits.json (written by
 check.py). A render older than beats.json, scenes.js or vo.m4a does not show the latest changes, so it stops and
 asks for a new render. A hits.json that is missing or older than beats.json or scenes.js is made again by the page
-check (check.py); where no browser can run it, the hits come from beats.json. Then:
+check (check.py). Where the page check cannot run (no browser), it says so in one line: an older hits.json is used
+as it is, and with none the hits come from beats.json. Then:
 
   1. The sound effects. kit.sfx makes the whoosh and the thud from numbers, and every hit is placed so its
      loudest moment lands on its time: a whoosh on each field flip, a thud on each stamp and button press.
@@ -72,14 +73,23 @@ def refresh_hits(slug: str) -> bool:
 def hits_for(folder: Path, slug: str | None = None) -> list[sfx.Hit]:
     """The hits from build/hits.json (check.py writes it from the page), else from beats.json.
 
-    With a video name, a hits.json that is missing or older than beats.json or scenes.js is made again first.
+    With a video name, a hits.json that is missing or older than beats.json or scenes.js is made again with the
+    page check first. When the page check cannot run here (no browser), one line says so: an older hits.json is
+    then used as it is, and with none the hits come from beats.json (a whoosh per flip, a thud per stamp page).
     """
     written = folder / "build" / "hits.json"
     if slug is not None:
         sources = [folder / "beats.json", folder / "build" / "hf" / "lib" / "scenes.js"]
-        stale = written.is_file() and newer(written, sources)
-        if (not written.is_file() or stale) and refresh_hits(slug):
-            print(f"build/hits.json was {'older than ' + stale[0].name if stale else 'missing'}, so the page check made it again.")
+        stale = newer(written, sources) if written.is_file() else []
+        if not written.is_file() or stale:
+            what = f"build/hits.json is older than {stale[0].name}" if stale else "build/hits.json is missing"
+            if refresh_hits(slug):
+                print(f"{what}, so the page check made it again.")
+            elif stale:
+                print(f"{what} and the page check could not run here, so the sound follows the page as it was at the last check.")
+            else:
+                print(f"{what} and the page check could not run here, so the sound comes from beats.json: "
+                      "a whoosh on each flip and a thud on each stamp page.")
     if written.is_file():
         data = json.loads(written.read_text(encoding="utf-8"))
         return [sfx.Hit(h["kind"], float(h["t"]), float(h.get("gain", 0.4))) for h in data.get("hits", [])]

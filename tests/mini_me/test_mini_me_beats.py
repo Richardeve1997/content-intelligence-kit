@@ -95,7 +95,7 @@ def test_poses_and_props_follow_the_meaning(words):
     rot = next(p for p in pages if "ROT" in p["text"].split())
     assert rot["pose"] == "facepalm"
     counted = next(p for p in pages if "3" in p["text"])
-    assert counted["prop"] == "count"
+    assert counted["prop"] != "count", "a number under 10 shows whole: counting up to 3 would show 1 and 2 first"
     made = next(p for p in pages if "MADE" in p["text"])
     assert made["pose"] in {"thumbs_up", "celebrate"}
     assert len(by_text) == len(pages), "no two pages share a headline"
@@ -213,3 +213,31 @@ def test_running_it_again_keeps_an_edited_beats_json(kit_home, capsys):
     assert beats.main(["example-reel", "--cta", "follow"]) == 0
     assert (folder / "beats.backup-2.json").is_file(), "an earlier backup is never overwritten"
     assert "beats.backup-2.json" in capsys.readouterr().out
+
+
+def test_only_numbers_of_10_or_more_are_drafted_to_count():
+    pages = beats.build(timed("Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days."), cta="follow")["pages"]
+    by_number = {re.search(r"\d+", p["text"]).group(): p for p in pages if re.search(r"\d", p["text"])}
+    assert by_number["21"]["prop"] == "count" and by_number["40"]["prop"] == "count"
+    assert by_number["3"]["prop"] != "count", "the counted number is the first one, 3, which shows whole"
+
+
+def test_the_first_page_never_counts_so_frame_0_reads_right():
+    pages = beats.build(timed("Basil roots in 21 days. Here is why."), cta="follow")["pages"]
+    assert "21" in pages[0]["text"] and pages[0]["prop"] != "count"
+
+
+def test_the_counted_number_is_the_accented_one_else_the_first():
+    assert beats.counted_number("3 OF *25*") == 25
+    assert beats.counted_number("3 OF 25") == 3
+    assert beats.counted_number("$1,200 *SAVED*") == 1200
+    assert beats.counted_number("50% OFF") == 50
+    assert beats.counted_number("NO NUMBER") is None
+
+
+def test_check_notes_a_count_under_10():
+    pages = [{"t": 0.0, "text": "HELLO", "pose": "wave", "field": "dark", "prop": "none"},
+             {"t": 1.0, "text": "3 OF 5", "pose": "point_up", "field": "light", "prop": "count"},
+             {"t": 2.0, "text": "21 DAYS", "pose": "thumbs_up", "field": "dark", "prop": "count"}]
+    problems = beats.check({"duration": 3.0, "pages": pages})
+    assert problems == ["note: page 2 counts 3, which is under 10, so it shows whole instead."]

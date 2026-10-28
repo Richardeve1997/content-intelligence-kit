@@ -194,3 +194,23 @@ def test_fresh_hits_are_used_as_they_are(reel):
     (build / "hits.json").write_text(json.dumps({"hits": [{"kind": "whoosh", "t": 3.2, "gain": 0.6}]}))
     assert ship.main(["example-reel", "--music", "none"]) == 0
     assert reel["refreshed"] == [], "nothing changed since the page check"
+
+
+def test_stale_hits_that_cannot_be_made_again_are_named(reel, capsys):
+    build = reel["folder"] / "build"
+    (build / "hits.json").write_text(json.dumps({"hits": [{"kind": "whoosh", "t": 3.2, "gain": 0.6}]}))
+    scenes = build / "hf" / "lib" / "scenes.js"
+    scenes.parent.mkdir(parents=True)
+    scenes.write_text("/* changed after the last page check */\n")
+    os.utime(build / "picture.mp4")
+    assert ship.main(["example-reel", "--music", "none"]) == 0  # the fixture's page check cannot run (no browser)
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if "hits.json" in line]
+    assert len(lines) == 1 and "older than scenes.js" in lines[0] and "could not run" in lines[0], out
+    assert json.loads((build / "mix.json").read_text())["hits"] == 1, "the older hits are still used, and said so"
+
+
+def test_missing_hits_that_cannot_be_made_say_where_the_sound_comes_from(reel, capsys):
+    assert ship.main(["example-reel", "--music", "none"]) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if "hits.json" in line]
+    assert len(lines) == 1 and "missing" in lines[0] and "beats.json" in lines[0], lines

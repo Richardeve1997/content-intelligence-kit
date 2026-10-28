@@ -351,15 +351,55 @@ def test_the_cursor_presses_the_button_it_should(stage):
     assert left - 4 <= x <= right + 4 and top - 4 <= y <= bottom + 4, where
 
 
-def test_a_close_that_cannot_reach_scale_10_says_why(tmp_path_factory, browser):
-    """A character whose arms are always out is too wide for a close-up: the close shrinks and says so."""
+@pytest.fixture(scope="module")
+def wide_stage(tmp_path_factory, browser):
     built = project(tmp_path_factory, browser, "wide")
-    info = built["page"].js("Stage.audit()")
+    yield built
+    built["page"].page.close()
+
+
+def test_a_close_that_cannot_reach_scale_10_says_why(wide_stage):
+    """A character whose arms are always out is too wide for a close-up: the close shrinks and says so."""
+    info = wide_stage["page"].js("Stage.audit()")
     close = info["pages"][-1]["char"]
     assert close["scale"] < 10
     notes = [p for p in info["problems"] if "the close uses scale" in p]
     assert len(notes) == 1 and f"scale {close['scale']}" in notes[0] and "safe lines at the sides" in notes[0], notes
-    built["page"].page.close()
+
+
+def test_an_unmeasured_waist_says_to_check_the_crop(wide_stage, stage):
+    """With no hands at its sides the waist is a guess: the audit says so, and only then."""
+    assert wide_stage["page"].js("window.MM_DATA.figure.waist_measured") is False
+    notes = [p for p in wide_stage["page"].js("Stage.audit()")["problems"] if "waist" in p]
+    assert len(notes) == 1 and notes[0].startswith("note:") and "check the frames" in notes[0], notes
+    assert not [p for p in stage["page"].js("Stage.audit()")["problems"] if "waist" in p]
+
+
+def test_a_single_digit_count_shows_whole(stage):
+    """"3 OF 5" never passes through 1 or 2 and keeps its 5: a number under 10 does not count."""
+    page, start = stage["page"], PAGES[3]["t"]
+    for k in range(-2, 54):  # every frame from just before the page to 0.9 s into it
+        page.seek(round(start + k / 60, 4))
+        assert page.js("Array.from(document.querySelectorAll('#mm-p4 .mm-num')).map(e => e.textContent)") == ["3", "5"], k
+    notes = [p for p in page.js("Stage.audit()")["problems"] if "page 4" in p and "under 10" in p]
+    assert len(notes) == 1, page.js("Stage.audit()")["problems"]
+
+
+def test_a_count_from_the_scenes_never_shows_a_single_digit(stage):
+    """Stage.A.count, as scenes.js calls it: a number under 10 stays whole, 10 or more counts up from 10."""
+    page = stage["page"]
+    page.js("""(() => { const box = document.createElement('div'); box.style.display = 'none'; document.body.appendChild(box);
+        for (const [id, to] of [['mm-test-8', '8'], ['mm-test-21', '21']]) {
+          const n = document.createElement('span'); n.id = id; n.setAttribute('data-to', to); n.textContent = to; box.appendChild(n);
+          Stage.A.count(n, 1.0, 0.6); }
+        return true; })()""")
+    seen8, seen21 = set(), []
+    for k in range(-6, 48):
+        page.seek(round(1.0 + k / 60, 4))
+        seen8.add(page.js("document.getElementById('mm-test-8').textContent"))
+        seen21.append(int(page.js("document.getElementById('mm-test-21').textContent")))
+    assert seen8 == {"8"}
+    assert min(seen21) >= 10 and seen21[-1] == 21 and seen21 == sorted(seen21), seen21
 
 
 def profile_with(me, **handles):
