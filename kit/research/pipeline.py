@@ -99,11 +99,11 @@ def run(*, offline: bool = False, no_apify: bool = False, no_transcribe: bool = 
         else:
             history = brain.load_history()
             watchlist = scrape.load_watchlist()
-            pull = scrape.pull(profile, watchlist, token=config.env("APIFY_TOKEN"), use_apify=not no_apify)
+            pull = scrape.pull(profile, watchlist, token=config.key("APIFY_TOKEN"), use_apify=not no_apify)
             if not any(watchlist.values()):
                 pull.notices.append(EMPTY_WATCHLIST)
             posts = x_posts.read_posts(links)
-            results = performance.collect(profile, key=config.env("ZERNIO_API_KEY"), now=now)
+            results = performance.collect(profile, key=config.key("ZERNIO_API_KEY"), now=now)
 
         scored = rank.score(pull.items, history, now=now)
         videos = scored.videos

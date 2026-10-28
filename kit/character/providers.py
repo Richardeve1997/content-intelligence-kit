@@ -292,7 +292,7 @@ def _http_post(url: str, **kwargs: Any):
 
 
 def _key(tool: str) -> str:
-    value = config.env(KEYS[tool])
+    value = config.key(KEYS[tool])
     if not value:
         raise ProviderError(f"{KEYS[tool]} is not set in .env, so the {tool} image tool cannot draw.")
     return value
@@ -424,7 +424,7 @@ def ready(name: str) -> tuple[bool, str]:
     if name == "codex":
         return _codex_ready()
     if name in KEYS:
-        return (True, "") if config.env(KEYS[name]) else (False, f"{KEYS[name]} is not set in .env")
+        return (True, "") if config.key(KEYS[name]) else (False, f"{KEYS[name]} is not set in .env")
     return False, f"{name} is not an image tool this kit knows"
 
 

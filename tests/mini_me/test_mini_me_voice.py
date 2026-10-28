@@ -23,6 +23,11 @@ from kit.config import KitError  # noqa: E402
 from kit.transcribe import Word  # noqa: E402
 
 FAKE_KEY = "not-a-real-key"
+
+
+def key_in_dotenv(root) -> None:
+    """The creator's ElevenLabs key, where the kit reads it: .env in the (throwaway) kit folder, never the shell."""
+    (root / ".env").write_text(f"ELEVENLABS_API_KEY={FAKE_KEY}\n", encoding="utf-8")
 NO_KEY = "No ElevenLabs key, so record the voice-over on your phone and drop it in work/example-reel/take/"
 
 
@@ -147,7 +152,7 @@ def test_no_elevenlabs_uses_recording(kit_home, example_me, heard, capsys):
 
 def test_a_dropped_recording_wins_over_elevenlabs(kit_home, example_me, recording, heard, monkeypatch):
     set_voice_over(example_me, "elevenlabs")
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("no ElevenLabs call when a recording is there"))
     assert voice.main(["auto", "example-reel"]) == 0
     assert (config.work_dir("example-reel") / "vo.m4a").is_file()
@@ -155,7 +160,7 @@ def test_a_dropped_recording_wins_over_elevenlabs(kit_home, example_me, recordin
 
 def test_a_voice_named_for_a_video_with_a_recording_says_the_recording_is_used(kit_home, example_me, recording, heard,
                                                                                monkeypatch, capsys):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "elevenlabs")
     monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("a recording needs no ElevenLabs call"))
     assert voice.main(["auto", "example-reel", "--voice", "Ash"]) == 0
@@ -164,7 +169,7 @@ def test_a_voice_named_for_a_video_with_a_recording_says_the_recording_is_used(k
 
 
 def test_record_with_nothing_dropped_asks_for_the_recording(kit_home, capsys, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)  # a key alone does not override the creator's choice
+    key_in_dotenv(kit_home)  # a key alone does not override the creator's choice
     assert voice.main(["auto", "example-reel"]) == voice.WAITING
     out = capsys.readouterr().out
     assert "record the voice-over on your phone" in out.lower() and "work/example-reel/take/" in out
@@ -214,7 +219,7 @@ class FakeElevenLabs:
 
 
 def test_from_elevenlabs_uses_a_stock_voice_when_there_is_no_clone(kit_home, heard, monkeypatch, capsys):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     api = FakeElevenLabs()
     monkeypatch.setattr(voice, "_request", api)
     vo = voice.from_elevenlabs("Fresh basil in March, and it took ten minutes.", "example-reel")
@@ -230,7 +235,7 @@ def test_from_elevenlabs_uses_a_stock_voice_when_there_is_no_clone(kit_home, hea
 
 
 def test_a_named_voice_skips_the_stock_choice(kit_home, heard, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     api = FakeElevenLabs()
     monkeypatch.setattr(voice, "_request", api)
     voice.from_elevenlabs("Fresh basil.", "example-reel", voice_id="mine")
@@ -239,7 +244,7 @@ def test_a_named_voice_skips_the_stock_choice(kit_home, heard, monkeypatch):
 
 
 def test_a_model_without_speed_gets_the_same_pace_from_the_tempo(kit_home, heard, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     api = FakeElevenLabs(models=("eleven_multilingual_v2", "eleven_v3"))
     monkeypatch.setattr(voice, "_request", api)
     voice.from_elevenlabs("Fresh basil.", "example-reel")
@@ -250,7 +255,7 @@ def test_a_model_without_speed_gets_the_same_pace_from_the_tempo(kit_home, heard
 
 
 def test_a_rejected_key_is_a_plain_sentence_without_the_key(kit_home, heard, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     monkeypatch.setattr(voice, "_request", FakeElevenLabs(status=401))
     with pytest.raises(KitError) as caught:
         voice.from_elevenlabs("Fresh basil.", "example-reel")
@@ -270,7 +275,7 @@ def samples(tmp_path, count=2):
 
 
 def test_clone_needs_consent(kit_home, example_me, tmp_path, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("nothing is sent without consent"))
     set_voice_over(example_me, "elevenlabs")
     with pytest.raises(KitError, match="consent"):
@@ -278,7 +283,7 @@ def test_clone_needs_consent(kit_home, example_me, tmp_path, monkeypatch):
 
 
 def test_clone_with_consent_returns_the_voice_id(kit_home, example_me, tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "clone")
     api = FakeElevenLabs()
     monkeypatch.setattr(voice, "_request", api)
@@ -294,7 +299,7 @@ def test_clone_with_consent_returns_the_voice_id(kit_home, example_me, tmp_path,
 
 
 def test_clone_needs_enough_of_the_voice(kit_home, example_me, tmp_path, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "clone")
     monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("too little to send"))
     short = write_wav(speech_samples([("talk", 5.0)]), tmp_path / "short.wav")
@@ -338,7 +343,7 @@ def save_copy(me, voice_id="fake-voice-for-tests"):
 
 
 def test_the_saved_copy_is_used_only_while_the_profile_says_clone(kit_home, example_me, heard, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     save_copy(example_me)
     script = config.work_dir("example-reel") / "script.md"
     script.parent.mkdir(parents=True, exist_ok=True)
@@ -352,7 +357,7 @@ def test_the_saved_copy_is_used_only_while_the_profile_says_clone(kit_home, exam
 
 
 def test_clone_with_no_copy_yet_stops_instead_of_using_a_stock_voice(kit_home, example_me, heard, monkeypatch, capsys):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "clone")
     monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("no stock voice in place of the copy"))
     script = config.work_dir("example-reel") / "script.md"
@@ -377,7 +382,7 @@ def test_with_no_pick_the_voice_step_says_which_voice_it_used_and_how_to_choose(
                                                                                   capsys):
     """With no voice picked, the first stock voice by name reads it, as before, and one sentence says so and how
     to choose another. A voice given by its id is named as such."""
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "elevenlabs")
     a_narration()
     monkeypatch.setattr(voice, "_request", FakeElevenLabs())
@@ -394,7 +399,7 @@ def test_voices_lists_the_stock_voices_with_labels_and_previews_and_nothing_else
                                                                                 capsys):
     """Each stock voice by name, with what ElevenLabs says about it and a link to hear it. No voice id, and never a
     copy of a voice or a professional one."""
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     monkeypatch.setattr(voice, "_request", FakeElevenLabs())
     assert voice.main(["voices"]) == 0
     out = capsys.readouterr().out
@@ -406,7 +411,7 @@ def test_voices_lists_the_stock_voices_with_labels_and_previews_and_nothing_else
 
 
 def test_a_picked_voice_is_saved_by_name_and_read_in_from_then_on(kit_home, example_me, heard, monkeypatch, capsys):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "elevenlabs")
     monkeypatch.setattr(voice, "_request", FakeElevenLabs())
     assert voice.main(["pick", "zed"]) == 0, "the short name works, in any case"
@@ -424,7 +429,7 @@ def test_a_picked_voice_is_saved_by_name_and_read_in_from_then_on(kit_home, exam
 
 
 def test_a_voice_named_for_one_video_wins_over_the_pick(kit_home, example_me, heard, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "elevenlabs")
     (example_me / "voice").mkdir(parents=True, exist_ok=True)
     (example_me / "voice" / "elevenlabs.json").write_text(json.dumps({"stock": "Zed - Calm, Low"}))
@@ -439,7 +444,7 @@ def test_a_voice_named_for_one_video_wins_over_the_pick(kit_home, example_me, he
 
 @pytest.mark.parametrize("name", ["Nobody", "My clone", "Studio Pro"])
 def test_only_a_stock_voice_in_the_account_can_be_picked(kit_home, example_me, monkeypatch, capsys, name):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     monkeypatch.setattr(voice, "_request", FakeElevenLabs())
     assert voice.main(["pick", name]) == 1
     out = capsys.readouterr().out
@@ -448,7 +453,7 @@ def test_only_a_stock_voice_in_the_account_can_be_picked(kit_home, example_me, m
 
 
 def test_a_saved_pick_the_account_no_longer_has_stops_with_a_sentence(kit_home, example_me, heard, monkeypatch, capsys):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "elevenlabs")
     (example_me / "voice").mkdir(parents=True, exist_ok=True)
     (example_me / "voice" / "elevenlabs.json").write_text(json.dumps({"stock": "Gone - Retired"}))
@@ -460,7 +465,7 @@ def test_a_saved_pick_the_account_no_longer_has_stops_with_a_sentence(kit_home, 
 
 
 def test_a_copy_of_the_voice_keeps_the_stock_pick(kit_home, example_me, tmp_path, monkeypatch):
-    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    key_in_dotenv(kit_home)
     set_voice_over(example_me, "clone")
     (example_me / "voice").mkdir(parents=True, exist_ok=True)
     (example_me / "voice" / "elevenlabs.json").write_text(json.dumps({"stock": "Zed - Calm, Low"}))

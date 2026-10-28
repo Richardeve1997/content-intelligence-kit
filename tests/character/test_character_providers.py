@@ -33,8 +33,8 @@ def _png_bytes(size=(8, 6)) -> bytes:
 
 @pytest.fixture
 def no_tools(monkeypatch):
-    """No key in the environment or .env, and no codex on this machine."""
-    monkeypatch.setattr(config, "env", lambda name: None)
+    """No key in .env, the only place the kit reads one, and no codex on this machine."""
+    monkeypatch.setattr(config, "key", lambda name: None)
     monkeypatch.setattr(providers.shutil, "which", lambda name: None)
     providers._codex_ready.cache_clear()
     yield
@@ -131,7 +131,7 @@ def test_choosing_manual_on_purpose_says_nothing(me, no_tools):
 
 
 def test_the_chosen_tool_is_used_when_it_is_ready(me, monkeypatch, no_tools):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY if name == "GEMINI_API_KEY" else None)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY if name == "GEMINI_API_KEY" else None)
     choice = providers.choose("gemini")
     assert (choice.name, choice.message) == ("gemini", None)
     # with no preference the first ready tool is used
@@ -139,7 +139,7 @@ def test_the_chosen_tool_is_used_when_it_is_ready(me, monkeypatch, no_tools):
 
 
 def test_a_chosen_tool_that_is_not_ready_names_the_one_that_is(me, monkeypatch, no_tools):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY if name == "OPENAI_API_KEY" else None)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY if name == "OPENAI_API_KEY" else None)
     choice = providers.choose("gemini")
     assert choice.name == "manual"
     assert "GEMINI_API_KEY" in choice.message and "openai" in choice.message
@@ -173,7 +173,7 @@ class FakeResponse:
 
 
 def test_openai_sends_the_reference_images_and_reads_the_picture(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY if name == "OPENAI_API_KEY" else None)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY if name == "OPENAI_API_KEY" else None)
     picture = _png_bytes((16, 9))
     sent = {}
 
@@ -199,7 +199,7 @@ def test_openai_sends_the_reference_images_and_reads_the_picture(me, tmp_path, m
 
 
 def test_openai_with_no_reference_uses_the_generation_endpoint(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY)
     sent = {}
 
     def fake_post(url, **kwargs):
@@ -213,7 +213,7 @@ def test_openai_with_no_reference_uses_the_generation_endpoint(me, tmp_path, mon
 
 
 def test_an_openai_error_is_a_plain_sentence_without_the_key(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY)
     monkeypatch.setattr(
         providers, "_http_post", lambda url, **kw: FakeResponse(400, {"error": {"message": "Your prompt was rejected."}})
     )
@@ -226,7 +226,7 @@ def test_an_openai_error_is_a_plain_sentence_without_the_key(me, tmp_path, monke
 @pytest.mark.parametrize("code", [401, 403])
 def test_a_refused_key_is_reported_without_the_services_words(me, tmp_path, monkeypatch, code):
     """The service's own message for a bad key can repeat part of the key, so it is left out."""
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY)
     echo = {"error": {"message": f"Incorrect API key provided: {FAKE_KEY[:6]}****"}}
     monkeypatch.setattr(providers, "_http_post", lambda url, **kw: FakeResponse(code, echo))
     with pytest.raises(providers.ProviderError) as caught:
@@ -237,7 +237,7 @@ def test_a_refused_key_is_reported_without_the_services_words(me, tmp_path, monk
 
 
 def test_openai_without_a_key_says_which_setting_is_missing(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: None)
+    monkeypatch.setattr(config, "key", lambda name: None)
     with pytest.raises(providers.ProviderError) as caught:
         providers.get("openai").generate("Draw it.", [], tmp_path / "out.png")
     assert "OPENAI_API_KEY" in str(caught.value) and ".env" in str(caught.value)
@@ -247,7 +247,7 @@ def test_openai_without_a_key_says_which_setting_is_missing(me, tmp_path, monkey
 
 
 def test_gemini_sends_text_and_images_and_finds_the_picture_in_the_reply(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY if name == "GEMINI_API_KEY" else None)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY if name == "GEMINI_API_KEY" else None)
     picture = _png_bytes((20, 10))
     sent = {}
 
@@ -279,7 +279,7 @@ def test_gemini_sends_text_and_images_and_finds_the_picture_in_the_reply(me, tmp
 
 
 def test_gemini_also_reads_the_older_reply_shape(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY)
     picture = base64.b64encode(_png_bytes((7, 7))).decode()
     reply = {"candidates": [{"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": picture}}]}}]}
     monkeypatch.setattr(providers, "_http_post", lambda url, **kw: FakeResponse(200, reply))
@@ -289,7 +289,7 @@ def test_gemini_also_reads_the_older_reply_shape(me, tmp_path, monkeypatch):
 
 
 def test_gemini_with_no_picture_in_the_reply_is_a_plain_error(me, tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "env", lambda name: FAKE_KEY)
+    monkeypatch.setattr(config, "key", lambda name: FAKE_KEY)
     monkeypatch.setattr(providers, "_http_post", lambda url, **kw: FakeResponse(200, {"steps": []}))
     with pytest.raises(providers.ProviderError) as caught:
         providers.get("gemini").generate("Draw it.", [], tmp_path / "out.png")

@@ -13,8 +13,8 @@ How it behaves:
 * A failure is a ZernioError. Its message is one plain sentence with Zernio's own reason and never
   the key. `uncertain` says whether Zernio may still have acted: a dropped connection, a timeout
   and a server error leave that open, while a rejected request does not.
-* `Client.from_env()` reads ZERNIO_API_KEY from the environment or from .env, and raises NoZernio
-  when there is none.
+* `Client.from_env()` reads ZERNIO_API_KEY from .env, the only place the kit reads a key, and raises
+  NoZernio when there is none there.
 """
 
 from __future__ import annotations
@@ -106,8 +106,8 @@ class Client:
 
     @classmethod
     def from_env(cls, base: str = API) -> Client:
-        """A client for the key in ZERNIO_API_KEY (the environment first, then .env). Raises NoZernio without one."""
-        key = config.env("ZERNIO_API_KEY")
+        """A client for the key in ZERNIO_API_KEY in .env, the only place the kit reads it. Raises NoZernio without one."""
+        key = config.key("ZERNIO_API_KEY")
         if not key:
             raise NoZernio()
         return cls(key, base)

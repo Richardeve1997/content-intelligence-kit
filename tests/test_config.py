@@ -477,18 +477,54 @@ def test_env_reads_dotenv_without_logging(tmp_path, monkeypatch, capsys, caplog)
     assert secret not in caplog.text and other not in caplog.text
 
 
-def test_env_prefers_the_real_environment(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("APIFY_TOKEN=from-file\n")
-    monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
-    monkeypatch.setenv("APIFY_TOKEN", "from-environment")
-    assert config.env("APIFY_TOKEN") == "from-environment"
+KEY_NAMES = ("APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY")
 
 
-def test_a_blank_environment_variable_falls_back_to_the_file(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("APIFY_TOKEN=from-file\n")
+def test_the_kit_knows_its_five_keys_and_they_match_the_example_file():
+    assert config.KEYS == KEY_NAMES
+    example = (Path(__file__).resolve().parent.parent / ".env.example").read_text(encoding="utf-8")
+    assert [line.split("=")[0] for line in example.splitlines() if "=" in line] == list(KEY_NAMES)
+
+
+@pytest.mark.parametrize("name", KEY_NAMES)
+def test_a_key_comes_from_dotenv_only_never_from_the_environment(tmp_path, monkeypatch, name):
+    # An agent's shell can carry a key the creator never gave the kit, so the environment is never read for one.
     monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
-    monkeypatch.setenv("APIFY_TOKEN", "   ")
-    assert config.env("APIFY_TOKEN") == "from-file"
+    monkeypatch.setenv(name, "from-the-environment")
+    assert config.key(name) is None and config.env(name) is None
+    (tmp_path / ".env").write_text(f"{name}=from-the-file\n")
+    assert config.key(name) == "from-the-file" and config.env(name) == "from-the-file"
+
+
+def test_only_the_five_keys_are_read_through_the_key_helper(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
+    with pytest.raises(ValueError):
+        config.key("CODEX_IMAGE_MODEL")
+
+
+def test_a_setting_that_is_not_a_key_still_prefers_the_environment(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("CODEX_IMAGE_MODEL=from-file\n")
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
+    monkeypatch.setenv("CODEX_IMAGE_MODEL", "from-environment")
+    assert config.env("CODEX_IMAGE_MODEL") == "from-environment"
+    monkeypatch.setenv("CODEX_IMAGE_MODEL", "   ")
+    assert config.env("CODEX_IMAGE_MODEL") == "from-file", "a blank one falls back to the file"
+
+
+def test_no_provider_takes_a_key_from_the_environment(tmp_path, monkeypatch, example_me):
+    from kit import voice, zernio
+    from kit.character import providers
+
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
+    for name in KEY_NAMES:
+        monkeypatch.setenv(name, "from-the-environment")
+    with pytest.raises(zernio.NoZernio):
+        zernio.Client.from_env()
+    assert providers.ready("openai")[0] is False and providers.ready("gemini")[0] is False
+    with pytest.raises(voice.NoElevenLabsKey):
+        voice._key("example-reel")
+    with pytest.raises(KitError):
+        voice.stock_voices()
 
 
 def test_env_without_a_dotenv_file_is_none(tmp_path, monkeypatch):

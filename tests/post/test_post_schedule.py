@@ -313,8 +313,13 @@ def test_the_manual_file_will_not_hold_a_caption_that_breaks_a_rule(reel):
     assert not (reel.folder / "post" / "manual.md").exists()
 
 
-def test_a_key_in_the_environment_is_used(reel, stub, when, monkeypatch):
-    monkeypatch.setenv("ZERNIO_API_KEY", KEY)
+def test_the_key_in_dotenv_is_used_and_one_only_in_the_environment_is_not(reel, stub, when, monkeypatch):
+    monkeypatch.setenv("ZERNIO_API_KEY", KEY)  # an agent's shell can carry a key the creator never gave the kit
+    captions.approve(reel.slug)
+    with pytest.raises(NoZernio):
+        post.schedule(reel.slug, ["instagram"], when)
+    (config.kit_root() / ".env").write_text(f"ZERNIO_API_KEY={KEY}\n", encoding="utf-8")
+    assert Client.from_env().key == KEY
     monkeypatch.setattr(Client, "from_env", classmethod(lambda cls, base=zernio.API: stub.client()))
     captions.approve(reel.slug)
     (result,) = post.schedule(reel.slug, ["instagram"], when)

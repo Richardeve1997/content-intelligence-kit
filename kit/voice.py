@@ -429,7 +429,7 @@ def _call(method: str, path: str, key: str, **options) -> tuple[Any, bytes]:
 
 
 def _key(slug: str) -> str:
-    key = config.env(KEY_NAME)
+    key = config.key(KEY_NAME)
     if not key:
         raise NoElevenLabsKey(slug)
     return key
@@ -477,7 +477,7 @@ def _stock_voice(key: str, name: str | None = None) -> tuple[str, str, bool]:
 def stock_voices() -> list[dict]:
     """The account's stock voices for the creator to choose from: {"name", "labels", "preview", "picked"} each, the
     labels as ElevenLabs gives them (gender, age, accent, what it suits). Never an id."""
-    key = config.env(KEY_NAME)
+    key = config.key(KEY_NAME)
     if not key:
         raise KitError(NO_KEY_TO_LIST)
     picked = _plain(saved_stock() or "")
@@ -492,7 +492,7 @@ def stock_voices() -> list[dict]:
 
 def pick(name: str) -> str:
     """Save the stock voice called `name` (checked against the account) as the creator's voice, by its whole name."""
-    key = config.env(KEY_NAME)
+    key = config.key(KEY_NAME)
     if not key:
         raise KitError(NO_KEY_TO_LIST)
     found = _find(_stock_list(key), name)
@@ -677,7 +677,7 @@ def clone(name: str, samples: list[Path]) -> str:
     if profile.voice_over != "clone":
         raise KitError("A copy of your voice needs your consent first. Say yes to it in setup, which sets "
                        'voice_over to "clone" in me/profile.json, then try again.')
-    key = config.env(KEY_NAME)
+    key = config.key(KEY_NAME)
     if not key:
         raise KitError("No ElevenLabs key, so a copy of your voice cannot be made. Add ELEVENLABS_API_KEY to .env, "
                        "or record the voice-overs on your phone.")
@@ -757,7 +757,7 @@ def _auto(slug: str, keep_pace: bool = False, voice: str | None = None) -> int:
         return 0
     (config.work_dir(slug) / "take").mkdir(parents=True, exist_ok=True)
     if profile.voice_over in ("elevenlabs", "clone"):
-        if not config.env(KEY_NAME):
+        if not config.key(KEY_NAME):
             print(NO_KEY.format(slug=slug))
             return WAITING
         voice_id = None if voice else chosen_voice(profile)  # a voice named for this video is asked for outright

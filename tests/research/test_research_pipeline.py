@@ -453,7 +453,7 @@ def test_the_apify_token_is_read_from_the_env_file(kit_tree, me, web, capsys):
 
 
 def test_no_apify_with_a_token_leaves_apify_alone(kit_tree, me, web, monkeypatch):
-    monkeypatch.setenv("APIFY_TOKEN", TOKEN)
+    (kit_tree / ".env").write_text(f"APIFY_TOKEN={TOKEN}\n", encoding="utf-8")
     write_watchlist(me, instagram=["@example_gardener_one"])
     pipeline.run(no_apify=True, no_transcribe=True, say=lambda *a, **k: None)
     assert "Instagram and TikTok skipped: this run was started with --no-apify" in items_of(kit_tree)["notices"]
@@ -464,7 +464,7 @@ def test_no_apify_with_a_token_leaves_apify_alone(kit_tree, me, web, monkeypatch
 
 
 def test_performance_is_included_when_the_key_is_set(kit_tree, me, fake_zernio, monkeypatch):
-    monkeypatch.setenv("ZERNIO_API_KEY", TOKEN)
+    (kit_tree / ".env").write_text(f"ZERNIO_API_KEY={TOKEN}\n", encoding="utf-8")
     write_watchlist(me)
     when = (NOW - timedelta(days=7)).isoformat()
     post = {"publishedAt": when, "mediaType": "video", "platformPostUrl": "https://www.instagram.com/reel/ABC/", "content": "Reel about basil",

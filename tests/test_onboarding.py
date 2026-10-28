@@ -1417,8 +1417,9 @@ def test_a_key_that_zernio_turns_away_is_a_sentence_on_the_error_stream(me, monk
     assert "did not accept the key" in err
 
 
-def test_the_accounts_command_never_shows_the_key(me, monkeypatch, capsys):
-    monkeypatch.setenv("ZERNIO_API_KEY", "not-a-real-key")
+def test_the_accounts_command_never_shows_the_key(me, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(config, "kit_root", lambda: tmp_path)
+    (tmp_path / ".env").write_text("ZERNIO_API_KEY=not-a-real-key\n", encoding="utf-8")  # where the kit reads keys
     zernio_says(monkeypatch)
     code, out, err = run(["accounts"], capsys)
     assert "not-a-real-key" not in out + err

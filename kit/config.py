@@ -48,6 +48,8 @@ __all__ = [
     "research_dir",
     "load_profile",
     "profile_problems",
+    "KEYS",
+    "key",
     "env",
     "bundled_fonts",
     "bundled_font",
@@ -168,7 +170,7 @@ def research_dir() -> Path:
     return kit_root() / "research"
 
 
-# --- keys and settings from the environment ---------------------------------------------------
+# --- keys from .env, and settings from the environment ----------------------------------------
 
 _ENV_LINE = re.compile(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)")
 
@@ -203,11 +205,30 @@ def _read_dotenv() -> dict[str, str]:
     return values
 
 
+# The kit's optional keys, the names .env.example lists. They are read from <kit root>/.env and nowhere else: an
+# agent's shell can carry a key the creator never gave the kit, so a key in the process environment is never used.
+KEYS: tuple[str, ...] = ("APIFY_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY")
+
+
+def key(name: str) -> str | None:
+    """One of the kit's keys, from <kit root>/.env only. None when .env does not set it, whatever the environment holds.
+
+    Every part of the kit that uses a key reads it here. The value is returned and nothing else: it is never
+    printed or logged here.
+    """
+    if name not in KEYS:
+        raise ValueError(f"{name} is not one of the kit's keys ({', '.join(KEYS)}). Read a setting with env().")
+    return _read_dotenv().get(name)
+
+
 def env(name: str) -> str | None:
     """A setting from the environment, or else from <kit root>/.env. None when it is unset or blank.
 
-    The value is returned and nothing else: it is never printed or logged here.
+    A key is the exception: it comes from .env only, through key(). The value is returned and nothing else: it
+    is never printed or logged here.
     """
+    if name in KEYS:
+        return key(name)
     value = os.environ.get(name)
     if value is not None and value.strip():
         return value

@@ -755,12 +755,32 @@ def test_the_footer_lists_only_the_keys_that_are_not_set_and_never_a_value(docto
     assert secret not in text
 
 
-def test_a_key_in_the_environment_counts_too(doctor, fake, capsys):
+ENV_NOTE_END = "but not in .env, and the kit uses .env only."
+
+
+def test_a_key_only_in_the_environment_is_not_set_and_gets_one_note(doctor, fake, capsys):
+    # The kit reads its keys from .env alone, so a key an agent's shell happens to carry is not set for the kit.
     probe = fake()
-    probe.env = {"OPENAI_API_KEY": "not-a-real-key", "ELEVENLABS_API_KEY": "   "}
+    probe.env = {"OPENAI_API_KEY": "not-a-real-key", "GEMINI_API_KEY": "not-a-real-key", "ELEVENLABS_API_KEY": "   "}
+    probe.texts[".env"] = "GEMINI_API_KEY=fake-value-for-tests\n"
     text = table_text(doctor, probe, capsys)
-    assert footer_names(text) == ["APIFY_TOKEN", "GEMINI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"]
-    assert "not-a-real-key" not in text
+    assert footer_names(text) == ["APIFY_TOKEN", "OPENAI_API_KEY", "ELEVENLABS_API_KEY", "ZERNIO_API_KEY"]
+    notes = [line for line in text.splitlines() if line.endswith(ENV_NOTE_END)]
+    assert notes == ["OPENAI_API_KEY is set in this shell " + ENV_NOTE_END], "one note, naming only the one .env lacks"
+    lines = text.splitlines()
+    assert lines.index(notes[0]) == next(i for i, line in enumerate(lines) if line.startswith(FOOTER_START)) + 1
+    assert "not-a-real-key" not in text and "fake-value-for-tests" not in text
+
+
+def test_two_keys_only_in_the_environment_share_the_note(doctor, fake, capsys):
+    probe = fake()
+    probe.env = {"APIFY_TOKEN": "not-a-real-key", "ZERNIO_API_KEY": "not-a-real-key"}
+    text = table_text(doctor, probe, capsys)
+    assert "APIFY_TOKEN and ZERNIO_API_KEY are set in this shell " + ENV_NOTE_END in text.splitlines()
+
+
+def test_no_environment_note_when_the_shell_holds_no_key(doctor, fake, capsys):
+    assert ENV_NOTE_END not in table_text(doctor, fake(), capsys)
 
 
 def test_a_later_blank_line_in_dotenv_clears_an_earlier_value(doctor, fake, capsys):

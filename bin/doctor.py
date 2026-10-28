@@ -15,7 +15,8 @@ Each row is {"check": ..., "status": "ok" | "missing" | "warn", "fix": ...}.
 
 Under the table, one line names the optional keys that are not set yet (Apify, an image model,
 ElevenLabs, Zernio). A key that is not set is not a problem, so it is a line and not a row, and
-the JSON holds the rows only.
+the JSON holds the rows only. The kit reads its keys from .env alone, so a key counts as set only
+when .env sets it. When this shell's environment holds one that .env lacks, one more line says so.
 
 The command exits 0 when no row is missing and 1 otherwise. Rows come in the order the fixes have to
 be made, so working down the table works.
@@ -448,34 +449,41 @@ def key_names(example: Optional[str]) -> List[str]:
 
 
 def keys_that_are_set(probe: Probe, names: Sequence[str]) -> List[str]:
-    """Which of the keys have a value, from the environment or from .env. The values themselves are never kept."""
+    """Which of the keys have a value in .env, the only place the kit reads them. The values are never kept."""
     present = {}
     for name, raw in _dotenv_lines(probe.read_text(".env")):
         present[name] = _has_value(raw)  # a later line wins, so a blank line clears an earlier value
-    found = []
-    for name in names:
-        from_environment = (probe.environ(name) or "").strip()
-        if from_environment or present.get(name):
-            found.append(name)
-    return found
+    return [name for name in names if present.get(name)]
 
 
 def optional_keys_not_set(probe: Probe) -> List[str]:
-    """The optional keys that have no value yet, by name and in the order .env.example lists them."""
+    """The optional keys that .env gives no value yet, by name and in the order .env.example lists them."""
     names = key_names(probe.read_text(".env.example"))
     have = set(keys_that_are_set(probe, names))
     return [name for name in names if name not in have]
 
 
+def keys_only_in_the_environment(probe: Probe, missing: Sequence[str]) -> List[str]:
+    """The keys .env lacks that this shell's environment holds. An agent's shell can carry a key the creator never
+    gave the kit, and the kit does not use it."""
+    return [name for name in missing if (probe.environ(name) or "").strip()]
+
+
 def footer_line(probe: Probe) -> Optional[str]:
-    """The one line under the table about optional keys, or None when every one of them is set."""
+    """The lines under the table about optional keys, or None when every one of them is set."""
     try:
         missing = optional_keys_not_set(probe)
+        elsewhere = keys_only_in_the_environment(probe, missing)
     except Exception:  # the footer is a courtesy and must never stop the checks
         return None
     if not missing:
         return None
-    return "Optional keys not set: " + ", ".join(missing) + ". Add them to .env when you want those features."
+    line = "Optional keys not set: " + ", ".join(missing) + ". Add them to .env when you want those features."
+    if elsewhere:
+        names = elsewhere[0] if len(elsewhere) == 1 else ", ".join(elsewhere[:-1]) + " and " + elsewhere[-1]
+        verb = "is" if len(elsewhere) == 1 else "are"
+        line += f"\n{names} {verb} set in this shell but not in .env, and the kit uses .env only."
+    return line
 
 
 # --- putting the rows together --------------------------------------------------------------------------------

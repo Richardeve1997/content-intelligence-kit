@@ -337,7 +337,7 @@ def test_the_test_clip_never_reads_a_stock_voice_in_place_of_a_missing_copy(kit_
     profile = json.loads((example_me / "profile.json").read_text())
     profile["voice_over"] = "clone"
     (example_me / "profile.json").write_text(json.dumps(profile))
-    monkeypatch.setenv("ELEVENLABS_API_KEY", "not-a-real-key")
+    (kit_home / ".env").write_text("ELEVENLABS_API_KEY=not-a-real-key\n", encoding="utf-8")  # where the kit reads keys
     monkeypatch.setattr(voice, "from_elevenlabs", lambda *a, **k: pytest.fail("no stock voice in place of the copy"))
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/say" if name == "say" else None)
 

@@ -27,9 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
-def keyed(stub, monkeypatch):
-    """A key is set and every Zernio call goes to the stand-in."""
-    monkeypatch.setenv("ZERNIO_API_KEY", KEY)
+def keyed(stub, studio, monkeypatch):
+    """A key is set in the throwaway kit's .env, where the kit reads it, and every Zernio call goes to the stand-in."""
+    (studio / ".env").write_text(f"ZERNIO_API_KEY={KEY}\n", encoding="utf-8")
     monkeypatch.setattr(Client, "from_env", classmethod(lambda cls, base=zernio.API: stub.client()))
     return stub
 

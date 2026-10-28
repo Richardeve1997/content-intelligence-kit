@@ -243,8 +243,12 @@ def test_a_client_needs_a_key():
 # --- where the key comes from -----------------------------------------------------------------------
 
 
-def test_from_env_reads_the_key_from_the_environment(studio, monkeypatch):
+def test_from_env_never_takes_the_key_from_the_environment(studio, monkeypatch):
+    # An agent's shell can carry a key the creator never gave the kit, so only .env counts.
     monkeypatch.setenv("ZERNIO_API_KEY", KEY)
+    with pytest.raises(NoZernio):
+        Client.from_env()
+    (studio / ".env").write_text(f"ZERNIO_API_KEY={KEY}\n", encoding="utf-8")
     client = Client.from_env()
     assert client.base == "https://zernio.com/api/v1"
     assert KEY not in repr(client)
