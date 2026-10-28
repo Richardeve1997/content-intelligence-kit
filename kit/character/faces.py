@@ -876,6 +876,9 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
         out = rgba.copy()
         out[..., :3][drawn] = surround
         lowest = min(rgba.shape[0], face.neck)
+        # teeth need room for a row of them, the dark inside and the lip; a tiny mouth with no room for all three in
+        # its middle still shows teeth over the lip
+        teeth_depth = 3 * unit if bottom_mid - top_mid >= 3 * unit else 2 * unit
         for x in range(first, last + 1):
             u = abs(x - centre) / (half + 0.5)
             depth = int(round((bottom_mid - top_mid) * float(np.sqrt(max(0.0, 1.0 - u * u)))))
@@ -890,7 +893,7 @@ def face_states(sprite: np.ndarray, face: FaceBox, *, open_rows: int = 3) -> Fac
                 for y in range(edge + depth - unit + 1, min(lowest, edge + depth + 1)):
                     if rgba[y, x, 3]:
                         out[y, x, :3] = lip
-            if teeth and depth >= 3 * unit:
+            if teeth and depth >= teeth_depth:
                 for y in range(edge + 1, min(lowest, edge + unit + 1)):
                     if rgba[y, x, 3]:
                         out[y, x, :3] = lightest
