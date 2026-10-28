@@ -9,14 +9,21 @@
 # (kit/vendor at the repo root). If gsap.min.js is already there and not empty, nothing is done.
 # The downloaded file is gitignored and never committed.
 #
-# The package is checked before anything is written: its checksum against the one the registry
-# publishes for that version, the version inside it, and the header of gsap.min.js. A failure
-# prints one plain sentence and leaves no file behind. Compositions load the local file with a
-# relative <script src>, never a CDN.
+# The package is checked before anything is written. For the pinned version its sha512 must match
+# PINNED_INTEGRITY below, so a registry that serves a changed package is caught. For any other
+# version the only digest available is the one the registry publishes, and the script says so.
+# Either way the version inside the package and the header of gsap.min.js must agree with the
+# version asked for. A failure prints one plain sentence and leaves no file behind. Compositions
+# load the local file with a relative <script src>, never a CDN.
 
 set -euo pipefail
 
-GSAP_VERSION="${GSAP_VERSION:-3.15.0}"
+# The version this kit uses, and the sha512 of its package on npm (npm view gsap@3.15.0 dist.integrity).
+# Change both together, and the GSAP version in THIRD_PARTY.md with them.
+PINNED_VERSION="3.15.0"
+PINNED_INTEGRITY="sha512-dMW4CWBTUK1AEEDeZc1g4xpPGIrSf9fJF960qbTZmN/QwZIWY5wgliS6JWl9/25fpTGJrMRtSjGtOmPnfjZB+A=="
+
+GSAP_VERSION="${GSAP_VERSION:-$PINNED_VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="${1:-${VENDOR_DIR:-"$SCRIPT_DIR/../kit/vendor"}}"
 DEST="$DEST_DIR/gsap.min.js"
@@ -47,8 +54,9 @@ for cmd in curl python3; do
   command -v "$cmd" >/dev/null 2>&1 || stop "bin/fetch_gsap.sh needs $cmd and could not find it. Install it, then run bash bin/fetch_gsap.sh again."
 done
 
+PART="$DEST.part"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP"; rm -f "$PART"' EXIT
 
 # fetch URL FILE: save the answer, stay quiet, and turn any failure into one plain sentence.
 fetch() {
@@ -80,14 +88,21 @@ PY
 
 fetch "$TARBALL_URL" "$TMP/gsap.tgz"
 
-python3 - "$TMP/meta.json" "$TMP/gsap.tgz" "$GSAP_VERSION" "$TMP/gsap.min.js" <<'PY'
+EXPECTED=""
+if [ "$GSAP_VERSION" = "$PINNED_VERSION" ]; then
+  EXPECTED="$PINNED_INTEGRITY"
+else
+  echo "fetch_gsap: GSAP $GSAP_VERSION is not the pinned $PINNED_VERSION, so the download was checked against the registry's own digest only."
+fi
+
+python3 - "$TMP/meta.json" "$TMP/gsap.tgz" "$GSAP_VERSION" "$TMP/gsap.min.js" "$EXPECTED" <<'PY'
 import base64
 import hashlib
 import json
 import sys
 import tarfile
 
-meta_path, tgz_path, version, out_path = sys.argv[1:5]
+meta_path, tgz_path, version, out_path, pinned = sys.argv[1:6]
 
 
 def stop(message):
@@ -95,7 +110,8 @@ def stop(message):
     sys.exit(1)
 
 
-# 1. The download must match the checksum the registry publishes for this version.
+# 1. The download must match a checksum. For the pinned version that is the one recorded in this
+#    script. For another version it is the one the registry publishes, which is all there is.
 try:
     with open(meta_path, encoding="utf-8") as handle:
         dist = json.load(handle)["dist"]
@@ -104,9 +120,13 @@ try:
 except Exception:
     stop(f"Could not download GSAP {version}. Check your internet connection and run bash bin/fetch_gsap.sh again.")
 
+if pinned:
+    entries, shasum, source = pinned.split(), None, "this kit has recorded for it"
+else:
+    entries, shasum, source = str(dist.get("integrity") or "").split(), dist.get("shasum"), "npm publishes for it"
 matched = False
 checked = False
-for entry in str(dist.get("integrity") or "").split():
+for entry in entries:
     algorithm, _, expected = entry.partition("-")
     if algorithm in ("sha512", "sha384", "sha256"):
         checked = True
@@ -114,14 +134,14 @@ for entry in str(dist.get("integrity") or "").split():
         matched = digest == expected
         if algorithm == "sha512":
             break
-if not checked and dist.get("shasum"):
+if not checked and shasum:
     checked = True
-    matched = hashlib.sha1(data).hexdigest() == dist["shasum"]
+    matched = hashlib.sha1(data).hexdigest() == shasum
 if not checked:
     stop(f"npm publishes no checksum for GSAP {version}, so the download could not be checked and was thrown away.")
 if not matched:
     stop(
-        f"The GSAP {version} download did not match the checksum npm publishes for it, so it was thrown away. "
+        f"The GSAP {version} download did not match the checksum {source}, so it was thrown away. "
         "Run bash bin/fetch_gsap.sh again."
     )
 
@@ -142,6 +162,6 @@ with open(out_path, "wb") as handle:
 PY
 
 mkdir -p "$DEST_DIR" || stop "Could not create $DEST_DIR. Check that you can save files there."
-cp "$TMP/gsap.min.js" "$DEST.part" || stop "Could not write $DEST. Check that you can save files in that folder."
-mv -f "$DEST.part" "$DEST"
+cp "$TMP/gsap.min.js" "$PART" || stop "Could not write $SHOWN. Check that you can save files in that folder."
+mv -f "$PART" "$DEST" || stop "Could not write $SHOWN. Check that you can save files in that folder."
 echo "fetch_gsap: wrote $SHOWN ($(wc -c < "$DEST" | tr -d ' ') bytes, GSAP ${GSAP_VERSION})"

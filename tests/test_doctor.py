@@ -803,15 +803,29 @@ case "$url" in
   *.tgz) served="$FAKE_CURL_DIR/gsap.tgz" ;;
   *) served="$FAKE_CURL_DIR/meta.json" ;;
 esac
-if [ -n "$out" ]; then cp "$served" "$out"; else cat "$served"; fi
+if [ -n "$out" ]; then cat "$served" > "$out"; else cat "$served"; fi
 reply 200
+"""
+
+# A stand-in for cp that writes half the file and then fails, as a full disk would.
+FAILING_CP = """#!/bin/bash
+for last; do :; done
+printf 'half of a file' > "$last"
+exit 1
 """
 
 DIST = "/*! GSAP {version} | https://gsap.com | a stand-in build for tests */\nvar gsap = {{}};\n"
 
 
-def make_registry(folder: Path, version: str, *, tarball_version=None, integrity=None, dist=None) -> Path:
-    """The two files the fake curl serves for one GSAP version."""
+def digest_of(path: Path) -> str:
+    return "sha512-" + base64.b64encode(hashlib.sha512(path.read_bytes()).digest()).decode()
+
+
+def make_registry(folder: Path, version: str, *, tarball_version=None, integrity=None, dist=None) -> str:
+    """The two files the fake curl serves for one GSAP version. Returns the real digest of the package it made.
+
+    The metadata file carries that digest unless `integrity` says otherwise.
+    """
     folder.mkdir(parents=True, exist_ok=True)
     body = (dist if dist is not None else DIST.format(version=version)).encode()
     package = json.dumps({"name": "gsap", "version": tarball_version or version}).encode()
@@ -820,25 +834,30 @@ def make_registry(folder: Path, version: str, *, tarball_version=None, integrity
             info = tarfile.TarInfo(name)
             info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
-    digest = hashlib.sha512((folder / "gsap.tgz").read_bytes()).digest()
+    real = digest_of(folder / "gsap.tgz")
     meta = {
         "name": "gsap",
         "version": version,
         "dist": {
             "tarball": f"https://registry.npmjs.org/gsap/-/gsap-{version}.tgz",
-            "integrity": integrity or "sha512-" + base64.b64encode(digest).decode(),
+            "integrity": integrity or real,
         },
     }
     (folder / "meta.json").write_text(json.dumps(meta))
-    return folder
+    return real
 
 
 @pytest.fixture
 def gsap_run(tmp_path):
-    """Run a copy of the script against a fake curl. The real kit/vendor is never touched."""
+    """Run a copy of the script against a fake curl. The real kit/vendor is never touched.
+
+    The copy can be given another pinned checksum with run.pin(...), so a stand-in package can be tested
+    as if it were the real one. The script itself has no switch for that.
+    """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    shutil.copy(FETCH, bin_dir / "fetch_gsap.sh")
+    script = bin_dir / "fetch_gsap.sh"
+    shutil.copy(FETCH, script)
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     (fake_bin / "curl").write_text(FAKE_CURL)
@@ -848,8 +867,8 @@ def gsap_run(tmp_path):
     scratch.mkdir()
 
     def run(*args, mode="ok", **env):
-        done = subprocess.run(
-            ["bash", str(bin_dir / "fetch_gsap.sh"), *args],
+        return subprocess.run(
+            ["bash", str(script), *args],
             env={
                 "PATH": f"{fake_bin}:/usr/bin:/bin",
                 "FAKE_CURL_DIR": str(registry),
@@ -862,24 +881,43 @@ def gsap_run(tmp_path):
             text=True,
             stdin=subprocess.DEVNULL,
         )
-        return done
 
+    def pin(integrity: str) -> None:
+        text = script.read_text()
+        changed = re.sub(r'^PINNED_INTEGRITY=".*"$', f'PINNED_INTEGRITY="{integrity}"', text, flags=re.M)
+        assert changed != text, "the script has no PINNED_INTEGRITY line to replace"
+        script.write_text(changed)
+
+    run.pin = pin
     run.registry = registry
+    run.fakebin = fake_bin
     run.vendor = tmp_path / "kit" / "vendor"
     run.scratch = scratch
     run.requests = lambda: (registry / "requests.log").read_text().split() if (registry / "requests.log").exists() else []
     return run
 
 
+def test_the_pinned_checksum_is_a_sha512_and_the_notes_name_its_version():
+    text = FETCH.read_text(encoding="utf-8")
+    pinned = re.search(r'^PINNED_INTEGRITY="(sha512-[A-Za-z0-9+/]{86}==)"$', text, re.M)
+    version = re.search(r'^PINNED_VERSION="(\d+\.\d+\.\d+)"$', text, re.M)
+    assert pinned and version, "the script records one sha512 and the version it belongs to"
+    assert len(base64.b64decode(pinned.group(1)[len("sha512-") :])) == 64
+    notes = (ROOT / "THIRD_PARTY.md").read_text(encoding="utf-8")
+    assert version.group(1) in notes.split("## GSAP", 1)[1].split("\n## ", 1)[0]
+    assert re.search(r'GSAP_VERSION="\$\{GSAP_VERSION:-\$PINNED_VERSION\}"', text), "the default version is the pinned one"
+
+
 def test_fetch_gsap_downloads_the_pinned_version_and_checks_it(gsap_run):
-    make_registry(gsap_run.registry, "3.15.0")
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
 
     done = gsap_run()
 
     assert (done.returncode, done.stderr) == (0, "")
     target = gsap_run.vendor / "gsap.min.js"
     assert target.read_text() == DIST.format(version="3.15.0")
-    assert "wrote" in done.stdout and "3.15.0" in done.stdout
+    assert done.stdout.count("\n") == 1 and "wrote" in done.stdout and "3.15.0" in done.stdout
+    assert "registry's own digest" not in done.stdout
     assert gsap_run.requests() == [
         "https://registry.npmjs.org/gsap/3.15.0",
         "https://registry.npmjs.org/gsap/-/gsap-3.15.0.tgz",
@@ -888,16 +926,62 @@ def test_fetch_gsap_downloads_the_pinned_version_and_checks_it(gsap_run):
     assert list(gsap_run.scratch.iterdir()) == [], "the temporary folder is removed"
 
 
-def test_fetch_gsap_version_can_be_overridden_by_the_environment(gsap_run):
+def test_fetch_gsap_refuses_a_tampered_package_even_when_the_registry_digest_matches_it(gsap_run):
+    # The registry is lying: its metadata carries the digest of the changed package, so it agrees with the download.
+    # The script is not fooled, because the pinned version is checked against the digest recorded in the script.
+    make_registry(gsap_run.registry, "3.15.0", dist=DIST.format(version="3.15.0") + "stealTheKeys();\n")
+
+    done = gsap_run()
+
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == (
+        "The GSAP 3.15.0 download did not match the checksum this kit has recorded for it, so it was thrown away. "
+        "Run bash bin/fetch_gsap.sh again.\n"
+    )
+    assert not (gsap_run.vendor / "gsap.min.js").exists()
+    assert list(gsap_run.scratch.iterdir()) == []
+
+
+def test_fetch_gsap_ignores_the_registry_digest_for_the_pinned_version(gsap_run):
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0", integrity="sha512-" + base64.b64encode(b"x" * 64).decode()))
+    done = gsap_run()
+    assert done.returncode == 0, done.stderr
+    assert (gsap_run.vendor / "gsap.min.js").is_file()
+    assert "registry's own digest" not in done.stdout
+
+
+def test_fetch_gsap_version_can_be_overridden_and_says_which_digest_it_used(gsap_run):
     make_registry(gsap_run.registry, "3.14.2")
+
     done = gsap_run(GSAP_VERSION="3.14.2")
+
     assert done.returncode == 0, done.stderr
     assert gsap_run.requests()[0] == "https://registry.npmjs.org/gsap/3.14.2"
     assert "3.14.2" in (gsap_run.vendor / "gsap.min.js").read_text()
+    first, second = done.stdout.splitlines()
+    assert first == (
+        "fetch_gsap: GSAP 3.14.2 is not the pinned 3.15.0, so the download was checked against the registry's own digest only."
+    )
+    assert second.startswith("fetch_gsap: wrote ")
+
+
+def test_fetch_gsap_refuses_another_version_that_does_not_match_the_registry_digest(gsap_run):
+    make_registry(gsap_run.registry, "3.14.2", integrity="sha512-" + base64.b64encode(b"x" * 64).decode())
+
+    done = gsap_run(GSAP_VERSION="3.14.2")
+
+    assert done.returncode == 1
+    assert done.stderr == (
+        "The GSAP 3.14.2 download did not match the checksum npm publishes for it, so it was thrown away. "
+        "Run bash bin/fetch_gsap.sh again.\n"
+    )
+    assert not (gsap_run.vendor / "gsap.min.js").exists()
+    assert list(gsap_run.scratch.iterdir()) == []
 
 
 def test_fetch_gsap_can_write_to_another_folder(gsap_run, tmp_path):
-    make_registry(gsap_run.registry, "3.15.0")
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
     other = tmp_path / "elsewhere"
     done = gsap_run(str(other))
     assert done.returncode == 0, done.stderr
@@ -939,22 +1023,8 @@ def test_fetch_gsap_says_when_the_version_does_not_exist(gsap_run):
     assert done.stderr == "The npm registry has no GSAP 3.99.9. Check the version number in GSAP_VERSION.\n"
 
 
-def test_fetch_gsap_refuses_a_download_that_does_not_match_the_registry_checksum(gsap_run):
-    make_registry(gsap_run.registry, "3.15.0", integrity="sha512-" + base64.b64encode(b"x" * 64).decode())
-
-    done = gsap_run()
-
-    assert done.returncode == 1
-    assert done.stderr == (
-        "The GSAP 3.15.0 download did not match the checksum npm publishes for it, so it was thrown away. "
-        "Run bash bin/fetch_gsap.sh again.\n"
-    )
-    assert not (gsap_run.vendor / "gsap.min.js").exists()
-    assert list(gsap_run.scratch.iterdir()) == []
-
-
 def test_fetch_gsap_refuses_a_package_of_another_version(gsap_run):
-    make_registry(gsap_run.registry, "3.15.0", tarball_version="3.12.0")
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0", tarball_version="3.12.0"))
     done = gsap_run()
     assert done.returncode == 1
     assert done.stderr == "The package that came down is GSAP 3.12.0, not 3.15.0, so it was thrown away.\n"
@@ -962,7 +1032,7 @@ def test_fetch_gsap_refuses_a_package_of_another_version(gsap_run):
 
 
 def test_fetch_gsap_refuses_a_file_that_is_not_gsap(gsap_run):
-    make_registry(gsap_run.registry, "3.15.0", dist="console.log('hello');\n")
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0", dist="console.log('hello');\n"))
     done = gsap_run()
     assert done.returncode == 1
     assert "does not look like GSAP 3.15.0" in done.stderr
@@ -978,10 +1048,23 @@ def test_fetch_gsap_refuses_a_version_that_is_not_plain_numbers(gsap_run, versio
 
 
 def test_fetch_gsap_treats_an_empty_version_as_not_set(gsap_run):
-    make_registry(gsap_run.registry, "3.15.0")
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
     done = gsap_run(GSAP_VERSION="")
     assert done.returncode == 0, done.stderr
     assert gsap_run.requests()[0] == "https://registry.npmjs.org/gsap/3.15.0"
+
+
+def test_a_failed_copy_leaves_no_part_file_behind(gsap_run):
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
+    (gsap_run.fakebin / "cp").write_text(FAILING_CP)
+    (gsap_run.fakebin / "cp").chmod(0o755)
+
+    done = gsap_run()
+
+    assert done.returncode == 1
+    assert done.stderr == "Could not write kit/vendor/gsap.min.js. Check that you can save files in that folder.\n"
+    assert sorted(p.name for p in gsap_run.vendor.iterdir()) == [], "neither gsap.min.js nor gsap.min.js.part is left"
+    assert list(gsap_run.scratch.iterdir()) == []
 
 
 def test_fetch_gsap_leaves_an_existing_file_alone(gsap_run):
@@ -1013,8 +1096,8 @@ def test_fetch_gsap_stays_quiet_when_the_file_that_is_there_is_the_pinned_versio
     assert done.stdout.count("\n") == 1 and "Nothing to do" in done.stdout
 
 
-def test_third_party_notes_record_the_gsap_version_the_script_fetches(gsap_run):
-    make_registry(gsap_run.registry, "3.15.0")
+def test_third_party_notes_record_the_gsap_version_and_how_it_is_checked(gsap_run):
+    gsap_run.pin(make_registry(gsap_run.registry, "3.15.0"))
     gsap_run()
     version = re.search(r"/gsap/(\d+\.\d+\.\d+)$", gsap_run.requests()[0]).group(1)
     assert version == "3.15.0"
@@ -1023,5 +1106,7 @@ def test_third_party_notes_record_the_gsap_version_the_script_fetches(gsap_run):
     assert version in gsap_section
     assert "bin/fetch_gsap.sh" in gsap_section and "kit/vendor/" in gsap_section
     assert "https://gsap.com/standard-license" in gsap_section
+    assert "sha512" in gsap_section and "holds" in gsap_section, "the notes say the script holds the checksum"
+    assert "registry itself publishes" in gsap_section, "and that another version is checked against the registry only"
     for earlier in ("## HyperFrames", "## Fonts", "## Humanizer"):
         assert earlier in notes, "the other sections stay"
