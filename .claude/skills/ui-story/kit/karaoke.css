@@ -1,0 +1,25 @@
+/* Karaoke captions for the UI story kit. Link it after uistory.css. build_captions.py writes the
+   caption clips (class "cap k") and UIS.captions(tl) steps the plate from word to word.
+
+   One line, centred at y 1570 in every layout, in the creator's display font at weight 600.
+   Dark theme (split and face, where the caption sits over the creator): white type with a soft ink
+   halo, and the word being spoken re-set in ink on a plate in the canvas colour.
+   Light theme (.cap.k.light, canvas, over the light grid): ink type with a soft light lift, and the
+   spoken word in white on an ink plate. Groups swap hard; the plate steps word to word. No accent. */
+:root{
+  --k-size: 84px;
+  --k-plate: var(--canvas);
+  --k-ink: var(--ink);
+  --k-halo: 0 0 17px color-mix(in srgb, var(--ink) 75%, transparent), 0 3px 10px color-mix(in srgb, var(--ink) 60%, transparent);
+  --k-lift: 0 0 14px color-mix(in srgb, var(--canvas) 75%, transparent), 0 0 5px color-mix(in srgb, var(--canvas) 60%, transparent);
+}
+.cap.k{top:calc(var(--cap-y) - 60px);height:120px;align-items:center}
+.cap.k span{display:initial;align-items:initial;height:auto;padding:0;border-radius:0;background:none;box-shadow:none;
+  text-transform:none;letter-spacing:inherit;font:inherit;color:inherit}
+.cap.k .line{display:inline-flex;gap:.24em;white-space:nowrap;font-family:var(--font-display);font-weight:600;
+  font-size:var(--k-size);line-height:1;letter-spacing:-.018em}
+.cap.k .w{position:relative;color:#fff;text-shadow:var(--k-halo)}
+.cap.k .w>.pl{position:absolute;left:-.14em;right:-.14em;top:-.13em;bottom:-.13em;border-radius:14px;background:var(--k-plate);
+  color:var(--k-ink);text-shadow:none;display:flex;align-items:center;justify-content:center;z-index:2;opacity:0}
+.cap.k.light .w{color:var(--k-ink);text-shadow:var(--k-lift)}
+.cap.k.light .w>.pl{background:var(--k-ink);color:#fff}

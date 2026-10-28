@@ -1,0 +1,178 @@
+"""kit.matte: a greyscale matte of the speaker, frame for frame with the input.
+
+Robust Video Matting is loaded through torch.hub at run time (its weights are cached outside the
+repo). MediaPipe is the fallback. Either way the matte says which backend made it.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+from uistory_helpers import ffmpeg
+
+from kit import matte, media
+
+
+def tiny_clip(path, seconds=0.5, size="96x160", rate=10):
+    ffmpeg("-f", "lavfi", "-i", f"testsrc2=s={size}:r={rate}:d={seconds}", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+           path)
+    return path
+
+
+def frames(path):
+    """(frame count, width, height) of a video."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+         "stream=nb_read_frames,width,height", "-of", "json", str(path)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    stream = json.loads(out)["streams"][0]
+    return int(stream["nb_read_frames"]), int(stream["width"]), int(stream["height"])
+
+
+class FakeSegmenter:
+    """Stands in for the MediaPipe model: the left half is the person."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, rgb: np.ndarray) -> np.ndarray:
+        self.calls += 1
+        mask = np.zeros(rgb.shape[:2], np.float32)
+        mask[:, : rgb.shape[1] // 2] = 1.0
+        return mask
+
+
+def test_matte_fallback(tmp_path, monkeypatch, capsys):
+    """With torch unavailable, the matte comes from MediaPipe and says so."""
+    monkeypatch.setitem(sys.modules, "torch", None)  # `import torch` now raises ImportError
+    fake = FakeSegmenter()
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", lambda: fake)
+    src = tiny_clip(tmp_path / "take.mp4")
+
+    out = matte.matte(src, tmp_path / "matte.mp4")
+
+    printed = capsys.readouterr().out
+    assert out == tmp_path / "matte.mp4"
+    assert "MediaPipe" in printed and "torch" in printed
+    assert fake.calls == 5
+    assert frames(out) == (5, 96, 160)
+
+    # white on the person, black elsewhere
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(out), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    grey = np.frombuffer(raw, np.uint8).reshape(160, 96)
+    assert grey[:, 10:38].mean() > 200 and grey[:, 58:86].mean() < 40
+
+
+def test_rvm_is_tried_first_and_named(tmp_path, monkeypatch, capsys):
+    class FakeRvm:
+        backend = "Robust Video Matting"
+
+        def __call__(self, rgb):
+            return np.ones(rgb.shape[:2], np.float32)
+
+    monkeypatch.setattr(matte, "_rvm_segmenter", lambda **kwargs: (FakeRvm(), "cpu"))
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", lambda: pytest.fail("MediaPipe must not load when RVM works"))
+    out = matte.matte(tiny_clip(tmp_path / "take.mp4"), tmp_path / "matte.mp4")
+    printed = capsys.readouterr().out
+    assert "Robust Video Matting" in printed and "torch.hub" in printed
+    assert out.is_file()
+
+
+def test_a_failed_download_also_falls_back(tmp_path, monkeypatch, capsys):
+    def offline(**kwargs):
+        raise RuntimeError("could not reach github.com")
+
+    monkeypatch.setattr(matte, "_rvm_segmenter", offline)
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", FakeSegmenter)
+    matte.matte(tiny_clip(tmp_path / "take.mp4"), tmp_path / "matte.mp4")
+    printed = capsys.readouterr().out
+    assert "MediaPipe" in printed and "could not reach github.com" in printed
+
+
+def test_matting_holds_a_heavy_slot(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", FakeSegmenter)
+    monkeypatch.setitem(sys.modules, "torch", None)
+
+    real = media.heavy_slot
+
+    def watching(*args, **kwargs):
+        seen.append("slot")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(matte.media, "heavy_slot", watching)
+    matte.matte(tiny_clip(tmp_path / "take.mp4"), tmp_path / "matte.mp4")
+    assert seen == ["slot"]
+
+
+def test_the_model_cache_is_outside_the_repo(monkeypatch, tmp_path):
+    from kit import config
+
+    assert config.kit_root() not in matte.model_cache().parents
+    monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
+    assert matte.model_cache() == tmp_path / "models"
+
+
+def test_a_missing_input_is_a_plain_sentence(tmp_path):
+    with pytest.raises(matte.KitError) as caught:
+        matte.matte(tmp_path / "nope.mp4", tmp_path / "matte.mp4")
+    assert "nope.mp4" in str(caught.value)
+
+
+def test_a_mask_with_a_channel_axis_is_flattened(tmp_path, monkeypatch):
+    """MediaPipe returns its confidence mask as H x W x 1. The matte must still come out H x W."""
+
+    def with_channel(rgb):
+        mask = np.zeros((*rgb.shape[:2], 1), np.float32)
+        mask[:, : rgb.shape[1] // 2, 0] = 1.0
+        return mask
+
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", lambda: with_channel)
+    out = matte.matte(tiny_clip(tmp_path / "take.mp4"), tmp_path / "matte.mp4")
+    assert frames(out) == (5, 96, 160)
+
+
+def test_the_model_downloads_are_pinned():
+    import re
+
+    repo, _, ref = matte.RVM_REPO.partition(":")
+    assert repo == "PeterL1n/RobustVideoMatting"
+    assert re.fullmatch(r"[0-9a-f]{40}", ref), "a full commit, not a branch"
+    assert "/latest/" not in matte.SELFIE_MODEL_URL and "/float16/1/" in matte.SELFIE_MODEL_URL
+    assert re.fullmatch(r"[0-9a-f]{64}", matte.SELFIE_MODEL_SHA256)
+
+
+def test_a_model_download_that_is_not_the_pinned_file_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
+    monkeypatch.setattr(matte.urllib.request, "urlretrieve", lambda url, to: Path(to).write_bytes(b"not the model"))
+    with pytest.raises(matte.KitError) as caught:
+        matte._selfie_model()
+    assert "not the expected file" in str(caught.value)
+    assert list((tmp_path / "models").iterdir()) == [], "nothing half-downloaded is left behind"
+
+
+def test_the_pinned_model_is_used_from_the_cache_without_a_download(tmp_path, monkeypatch):
+    import hashlib
+
+    content = b"pretend model bytes"
+    monkeypatch.setattr(matte, "SELFIE_MODEL_SHA256", hashlib.sha256(content).hexdigest())
+    monkeypatch.setenv("KIT_MODEL_CACHE", str(tmp_path / "models"))
+    calls = []
+
+    def fetch(url, to):
+        calls.append(url)
+        Path(to).write_bytes(content)
+
+    monkeypatch.setattr(matte.urllib.request, "urlretrieve", fetch)
+    first = matte._selfie_model()
+    second = matte._selfie_model()
+    assert first == second and first.read_bytes() == content
+    assert calls == [matte.SELFIE_MODEL_URL], "downloaded once, then read from the cache"

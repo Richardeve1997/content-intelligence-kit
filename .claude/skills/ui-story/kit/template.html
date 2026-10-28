@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="uistory.css">
+<link rel="stylesheet" href="karaoke.css">
+<style>
+/* Styles for this Reel's own mockups go here. Keep every element inside x 90..990.
+   Set the split card zone from the measured crown (measure_crowns.py prints the line):
+   :root{--zone-bottom: <predicted crown - 35>px} */
+</style>
+<script src="vendor/gsap.min.js"></script>
+<script src="uistory.js"></script>
+<script src="lib/words.js"></script>
+<script src="lib/layout.js"></script>
+<script src="lib/capwords.js"></script>
+</head><body>
+<!-- data-duration = base duration + 2 frames (the trailing partial frame renders blank) -->
+<!-- This layer is TRANSPARENT everywhere. composite_v2.py draws the grid canvas, the rounded PIP with the
+     head breaking out (split), the grid alone (canvas) and the creator full screen with zooms (face) under it,
+     from lib/layout.js. Author each scene for the layout its window is in (UIS.modeAt(t)):
+       split   cards inside .zone-split (x 90..990, y 190..--zone-bottom)
+       canvas  content inside .zone-full (y 220..1480)
+       face    nothing over the face; at most a small chip or logo in .zone-face (y 190..490) -->
+<div id="root" data-composition-id="main" data-width="1080" data-height="1920" data-duration="__DURATION__">
+
+  <!-- SCENES: plain absolutely positioned layers switched with UIS.show (hard cuts), times from UIS.cue. -->
+  <!-- PRODUCT IN USE: a .vidcard with a timed <video id="..." class="clip" ... muted playsinline> inside .zoomer;
+       data-start/data-duration are composition seconds, data-media-start the offset into the source. -->
+
+  <!-- CAPTIONS:BEGIN -->
+  <!-- CAPTIONS:END -->
+</div>
+<script>
+window.__timelines = window.__timelines || {};
+const tl = gsap.timeline({paused: true});
+const C = UIS.cue, E = UIS.cueEnd;
+// ---- scene tweens (absolute composition time) ----
+
+UIS.captions(tl);   // karaoke word plates (lib/capwords.js from build_captions.py)
+
+window.__timelines.main = tl;
+</script>
+</body></html>
