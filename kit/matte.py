@@ -7,7 +7,8 @@ video it was made from.
 Two ways to make it:
 
 * Robust Video Matting (the default). Loaded through torch.hub when it runs, so neither its code nor its
-  weights are in this repo; torch keeps them in its own cache in your home folder. It is GPL-3.0
+  weights are in this repo; torch keeps them in its own cache in your home folder. The weights are
+  downloaded once and checked against a pinned SHA-256 before the model loads them. It is GPL-3.0
   licensed. It keeps a clean hair edge and runs on the Apple GPU (mps) when there is one.
 * MediaPipe selfie segmentation (the fallback, when torch is missing or the download fails). Its model
   file is downloaded once into a cache outside the repo (KIT_MODEL_CACHE moves it). The edge is rougher,
@@ -35,15 +36,19 @@ from typing import Callable
 from kit import media
 from kit.config import KitError
 
-__all__ = ["KitError", "RVM_REPO", "SELFIE_MODEL_SHA256", "SELFIE_MODEL_URL", "main", "matte", "model_cache"]
+__all__ = ["KitError", "RVM_REPO", "RVM_WEIGHTS_SHA256", "RVM_WEIGHTS_URL", "SELFIE_MODEL_SHA256",
+           "SELFIE_MODEL_URL", "main", "matte", "model_cache"]
 
-# Both downloads are pinned, so every machine runs the same code and weights.
+# Every download is pinned, so every machine runs the same code and weights.
 # Robust Video Matting: the upstream repo at a fixed commit (the head of master when this was written). Its
 # v1.0.0 tag cannot be used: that code imports a torchvision helper newer torchvision no longer has. torch.hub
 # checks a ref against the repo's branch and tag heads, which a fixed commit stops being once master moves,
-# so the load skips that check; the full commit id is what ties it to the upstream repo. The weights come
-# from the repo's v1.0.0 release.
+# so the load skips that check; the full commit id is what ties it to the upstream repo.
 RVM_REPO = "PeterL1n/RobustVideoMatting:53d74c6826735f01f4406b5ca9075eee27bec094"
+# Its weights: the file that commit's hubconf.py loads, from the repo's v1.0.0 release. torch.hub would fetch it
+# with no check, so the kit downloads it into torch's own cache, checks this SHA-256, and gives the model that file.
+RVM_WEIGHTS_URL = "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3.pth"
+RVM_WEIGHTS_SHA256 = "3c7c1d92033f7c38d6577c481d13a195d7d80a159b960f4f3119ac7b534cf4f8"
 # MediaPipe selfie segmenter: version 1 of the float16 model, checked against this SHA-256 after download.
 SELFIE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/"
@@ -74,14 +79,41 @@ def _device(preference: str | None):
     return "cpu"
 
 
+def _rvm_weights() -> Path:
+    """The pinned Robust Video Matting weights in torch's own cache, downloaded once and checked against their
+    SHA-256. A file there that does not match is downloaded again."""
+    import torch
+
+    path = Path(torch.hub.get_dir()) / "checkpoints" / RVM_WEIGHTS_URL.rsplit("/", 1)[1]
+    if path.is_file() and _sha256(path) == RVM_WEIGHTS_SHA256:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading the Robust Video Matting weights (GPL-3.0) into {path.parent} ...", flush=True)
+    part = path.with_suffix(".part")
+    try:
+        urllib.request.urlretrieve(RVM_WEIGHTS_URL, part)
+    except OSError as problem:
+        part.unlink(missing_ok=True)
+        raise KitError(f"The Robust Video Matting weights could not be downloaded ({problem}). Check the connection.") from None
+    if _sha256(part) != RVM_WEIGHTS_SHA256:
+        part.unlink(missing_ok=True)
+        raise KitError("The Robust Video Matting weights that downloaded are not the expected file, so they were not used.")
+    part.replace(path)
+    return path
+
+
 def _rvm_segmenter(device: str | None = None, downsample: float = 0.5) -> tuple[Segmenter, str]:
-    """Robust Video Matting (mobilenetv3) through torch.hub, with its recurrent state kept between frames."""
+    """Robust Video Matting (mobilenetv3) through torch.hub, with its recurrent state kept between frames. The
+    model is built without weights and given the checked file (_rvm_weights), so torch.hub never fetches its own."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         import torch
 
         device = _device(device)
-        model = torch.hub.load(RVM_REPO, "mobilenetv3", trust_repo=True, skip_validation=True, verbose=False)
+        weights = _rvm_weights()
+        model = torch.hub.load(RVM_REPO, "mobilenetv3", pretrained=False, trust_repo=True, skip_validation=True,
+                               verbose=False)
+        model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
         model = model.eval().to(device)
     state = [None, None, None, None]
 

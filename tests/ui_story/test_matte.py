@@ -243,3 +243,83 @@ def test_the_pinned_model_is_used_from_the_cache_without_a_download(tmp_path, mo
     second = matte._selfie_model()
     assert first == second and first.read_bytes() == content
     assert calls == [matte.SELFIE_MODEL_URL], "downloaded once, then read from the cache"
+
+
+# --- the Robust Video Matting weights ----------------------------------------------------------------------------
+
+
+def test_the_rvm_weights_are_pinned_to_the_file_the_hub_code_names():
+    """The pinned hub code loads its weights from the repo's v1.0.0 release; the kit downloads that one file
+    itself and checks its SHA-256, as it does for MediaPipe and GSAP."""
+    import re
+
+    assert matte.RVM_WEIGHTS_URL == (
+        "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3.pth")
+    assert re.fullmatch(r"[0-9a-f]{64}", matte.RVM_WEIGHTS_SHA256)
+
+
+def test_rvm_weights_that_are_not_the_pinned_file_are_refused(tmp_path, monkeypatch):
+    pytest.importorskip("torch")
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    monkeypatch.setattr(matte.urllib.request, "urlretrieve", lambda url, to: Path(to).write_bytes(b"not the weights"))
+    with pytest.raises(matte.KitError) as caught:
+        matte._rvm_weights()
+    assert "not the expected file" in str(caught.value)
+    assert list((tmp_path / "torch" / "hub" / "checkpoints").iterdir()) == [], "nothing half-downloaded is left"
+
+
+def test_the_pinned_rvm_weights_are_used_from_torchs_cache_without_a_download(tmp_path, monkeypatch):
+    import hashlib
+
+    pytest.importorskip("torch")
+    content = b"pretend weights"
+    monkeypatch.setattr(matte, "RVM_WEIGHTS_SHA256", hashlib.sha256(content).hexdigest())
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    calls = []
+
+    def fetch(url, to):
+        calls.append(url)
+        Path(to).write_bytes(content)
+
+    monkeypatch.setattr(matte.urllib.request, "urlretrieve", fetch)
+    first = matte._rvm_weights()
+    second = matte._rvm_weights()
+    assert first == second == tmp_path / "torch" / "hub" / "checkpoints" / "rvm_mobilenetv3.pth"
+    assert first.read_bytes() == content
+    assert calls == [matte.RVM_WEIGHTS_URL], "downloaded once, then read from torch's cache"
+
+
+def test_rvm_loads_the_checked_weights_and_never_downloads_its_own(tmp_path, monkeypatch):
+    """torch.hub would fetch the weights itself with no checksum. The model is built without them and given
+    the file the kit checked."""
+    torch = pytest.importorskip("torch")
+    checked = tmp_path / "checked.pth"
+    checked.write_bytes(b"checked weights")
+    seen = {}
+
+    class Model:
+        def load_state_dict(self, state):
+            seen["state"] = state
+
+        def eval(self):
+            return self
+
+        def to(self, device):
+            return self
+
+    def fake_hub_load(repo, entry, *args, **kwargs):
+        seen["hub"] = (repo, entry, kwargs)
+        return Model()
+
+    def fake_torch_load(path, **kwargs):
+        seen["loaded"] = (Path(path), kwargs)
+        return {"weights": "from the checked file"}
+
+    monkeypatch.setattr(matte, "_rvm_weights", lambda: checked)
+    monkeypatch.setattr(torch.hub, "load", fake_hub_load)
+    monkeypatch.setattr(torch, "load", fake_torch_load)
+    matte._rvm_segmenter("cpu")
+    repo, entry, kwargs = seen["hub"]
+    assert (repo, entry) == (matte.RVM_REPO, "mobilenetv3") and kwargs.get("pretrained") is False, kwargs
+    assert seen["loaded"][0] == checked and seen["loaded"][1].get("weights_only") is True
+    assert seen["state"] == {"weights": "from the checked file"}
