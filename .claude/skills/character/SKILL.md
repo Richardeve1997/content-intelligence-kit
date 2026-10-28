@@ -62,6 +62,7 @@ The creator picked an image tool during setup (`image_provider` in `me/profile.j
    - Approve the good ones by name, for example `uv run python -m kit.character approve poses talking wave thumbs_up`, or all of them with `approve poses all`.
    - For each one they reject, ask what to change and mark it: `uv run python -m kit.character redraw shrug --note 'Raise both hands higher.'`. Then run `poses` again. Only the marked poses are drawn, up to three to a call, each with its note, and the others stay as they are.
    - The board marks a pose "own face" when its head could not be matched to the front view. That pose keeps its own face, and its mouth does not move. It marks a pose "cut off" when it did not fit the canvas. Offer to draw either again.
+   - On the hold_card tile the board outlines the clear face of the card the character holds up and says its size; a mini me video writes its card words there. When the outline is missing ("no plain card found") or sits on the wrong thing, draw hold_card again with a large plain white card.
 
    Repeat until all 14 poses are approved.
 7. The face states were built when the sheet was approved. If the open mouth drops too far or not far enough, run `uv run python -m kit.character faces --open 2` (or `--open 4`) and show `me/character/faces/board.png` again.

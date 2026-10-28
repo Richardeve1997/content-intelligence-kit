@@ -58,8 +58,8 @@ CARD_SAME = 0.5  # a light patch the idle drawing has in the same place (a light
 
 __all__ = [
     "POSE_NAMES", "MOVE_NAMES", "LABELS", "FACE_MODE", "BATCHES", "Result", "Match", "match_face", "head_lock",
-    "front_view", "fix_figure", "snap_strip", "hand_patches", "hand_anchor", "held_card", "make", "approve", "redraw",
-    "board",
+    "front_view", "fix_figure", "snap_strip", "hand_patches", "hand_anchor", "held_card", "outline_card", "make", "approve",
+    "redraw", "board",
 ]  # fmt: skip
 
 
@@ -229,10 +229,10 @@ def held_card(canvas: np.ndarray, idle: np.ndarray, face: FaceBox, offset: Seque
     """The clear face of the card a pose holds up, as [x, y, w, h] in canvas cells, or None when the drawing holds
     no card worth writing on.
 
-    A card is a patch of one light colour below the head that the idle drawing does not have in the same place, so
-    a light top is never taken for one. Its clear face is the largest rectangle inside the patch, which leaves out
-    the thumbs holding it where they cut into its edges. The biggest clear face wins, when it is at least CARD_MIN
-    cells wide and tall."""
+    A card is a patch of one light colour below the head that the idle drawing does not have in the same place (the
+    place is read through the pose's offset from the front view), so a light top is never taken for one. Its clear
+    face is the largest rectangle inside the patch, which leaves out the thumbs holding it where they cut into its
+    edges. The biggest clear face wins, when it is at least CARD_MIN cells wide and tall."""
     solid = canvas[..., 3] > 0
     if not solid.any():
         return None
@@ -240,10 +240,10 @@ def held_card(canvas: np.ndarray, idle: np.ndarray, face: FaceBox, offset: Seque
     grid = np.where(solid, inverse.reshape(canvas.shape[:2]), -1)
     labs = art.lab_of(colours.astype(np.float64))
     if offset is not None:
-        oy = int(offset[1])
+        ox, oy = int(offset[0]), int(offset[1])
     else:  # an own-face pose: line the front view's head up with the top of this figure
         box = art.content_box(canvas)
-        oy = (box[1] - face.top) if box else 0
+        ox, oy = 0, (box[1] - face.top) if box else 0
     head_end = max(0, face.neck + oy)
     best, best_area = None, 0
     for index in np.nonzero(labs[:, 0] >= CARD_LIGHT)[0]:
@@ -262,12 +262,37 @@ def held_card(canvas: np.ndarray, idle: np.ndarray, face: FaceBox, offset: Seque
             x, y, w, h = found
             if w < CARD_MIN[0] or h < CARD_MIN[1] or w * h <= best_area:
                 continue
-            there = idle[y : y + h, x : x + w]
-            same = (there[..., :3] == colours[index]).all(2) & (there[..., 3] > 0)
-            if same.mean() >= CARD_SAME:
+            if _share_of(idle, colours[index], x - ox, y - oy, w, h) >= CARD_SAME:
                 continue
             best, best_area = [int(x), int(y), int(w), int(h)], w * h
     return best
+
+
+def _share_of(idle: np.ndarray, colour: np.ndarray, x: int, y: int, w: int, h: int) -> float:
+    """The share of the w x h window at (x, y) on the idle drawing that is `colour`; outside the drawing counts as not."""
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(idle.shape[1], x + w), min(idle.shape[0], y + h)
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    there = idle[y0:y1, x0:x1]
+    same = (there[..., :3] == colour).all(2) & (there[..., 3] > 0)
+    return float(same.sum()) / float(w * h)
+
+
+def outline_card(tile: np.ndarray, card: Sequence[int], origin: tuple[int, int]) -> None:
+    """Draw a one-cell outline in ink just inside the clear face of a card on a board tile, in place. `origin` is the
+    canvas cell at the tile's top-left corner."""
+    x, y, w, h = (int(v) for v in card)
+    x0, y0 = x - origin[0], y - origin[1]
+    x1, y1 = x0 + w - 1, y0 + h - 1
+    rows, cols = tile.shape[:2]
+    ink = np.array(art.INK, np.uint8)
+    for row in (y0, y1):
+        if 0 <= row < rows:
+            tile[row, max(0, x0) : min(cols, x1 + 1), :3] = ink
+    for col in (x0, x1):
+        if 0 <= col < cols:
+            tile[max(0, y0) : min(rows, y1 + 1), col, :3] = ink
 
 
 # --- drawing and fixing a pose ----------------------------------------------------------------------------------------
@@ -517,8 +542,16 @@ def board(folder: Path) -> Path:
             extra.append("own face")
         if entry.get("clipped"):
             extra.append("cut off")
-        note = status + (f", {', '.join(extra)}" if extra else "")
         tile = art.flatten(canvases[name][y0 : art.CANVAS_H, x0:x1], art.BOARD_BG)
+        if name == "hold_card" and state.get("face") and "idle" in canvases:
+            # the clear face of the card it holds up, outlined, so a wrong measure is seen before any render
+            card = held_card(canvases[name], canvases["idle"], FaceBox.from_dict(state["face"]), entry.get("offset"))
+            if card:
+                outline_card(tile, card, (x0, y0))
+                extra.append(f"card {card[2]} x {card[3]} cells")
+            else:
+                extra.append("no plain card found")
+        note = status + (f", {', '.join(extra)}" if extra else "")
         cells.append((tile, LABELS[name], note))
     path = folder / "poses" / "board.png"
     if cells:
