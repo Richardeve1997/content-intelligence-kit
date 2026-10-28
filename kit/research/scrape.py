@@ -24,7 +24,8 @@ from kit.research import common
 APIFY_MISSING = "Instagram and TikTok skipped: add APIFY_TOKEN to .env to include them"
 APIFY_OFF = "Instagram and TikTok skipped: this run was started with --no-apify"
 API = "https://api.apify.com/v2"
-BUDGET_SECONDS = 120.0  # how long a run waits for all three platforms
+BUDGET_SECONDS = 120.0  # how long a run waits for all three platforms, unless the profile says otherwise
+MIN_SECONDS, MAX_SECONDS = 10.0, 1800.0  # the range a profile may ask for
 MIN_WAIT = 5.0  # the least a step waits on yt-dlp, even when the budget is nearly spent
 YOUTUBE_FIX = "uv sync --group research --inexact"
 
@@ -59,6 +60,17 @@ class ApifyLimit(Exception):
 
 class ApifyRunError(Exception):
     """An Apify run ended badly. The message is a plain clause such as "the Apify run failed"."""
+
+
+def scrape_seconds(profile) -> float:
+    """How long a pull waits for the platforms: research.scrape_seconds in the profile when it is set, else two minutes.
+
+    A setting that is not a number from 10 to 1800 is ignored, so an odd profile never stops a run.
+    """
+    value = getattr(getattr(profile, "research", None), "scrape_seconds", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not MIN_SECONDS <= value <= MAX_SECONDS:
+        return BUDGET_SECONDS
+    return float(value)
 
 
 # --- the watch list -------------------------------------------------------------------------------------
@@ -520,11 +532,14 @@ def _youtube(creators: list[str], deadline: float) -> tuple[list, dict, str | No
 # --- the pull ---------------------------------------------------------------------------------------------
 
 
-def pull(profile, watchlist: dict, *, token, use_apify: bool = True, budget: float = BUDGET_SECONDS) -> Pull:
-    """Pull the watch list. Platforms run together; one that cannot run is skipped with a sentence and the rest carry on."""
+def pull(profile, watchlist: dict, *, token, use_apify: bool = True, budget: float | None = None) -> Pull:
+    """Pull the watch list. Platforms run together; one that cannot run is skipped with a sentence and the rest carry on.
+
+    `budget` is how many seconds to wait. Without it the profile's research.scrape_seconds is used, else 120.
+    """
     lists = _tidy(watchlist)
     token = (token or "").strip() or None
-    deadline = time.monotonic() + budget
+    deadline = time.monotonic() + (scrape_seconds(profile) if budget is None else budget)
     result = Pull(sources={p: {"status": "skipped", "tool": "", "creators": [], "videos": 0} for p in common.RESEARCH_PLATFORMS})
 
     jobs: dict[str, object] = {}

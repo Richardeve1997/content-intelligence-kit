@@ -106,3 +106,33 @@ def test_the_skill_leaves_out_what_does_not_belong_in_a_public_kit(text):
 def test_the_skill_says_what_to_do_when_a_key_is_missing(text):
     assert "Instagram and TikTok skipped: add APIFY_TOKEN to .env to include them" in text
     assert "Performance skipped: add ZERNIO_API_KEY to .env to include your own results" in text
+
+
+def test_a_thin_pull_has_a_step_of_its_own(text):
+    steps = sections(text)["Steps"]
+    assert re.search(r"^\d+\. If the pull is thin", steps, re.M)
+    thin = re.search(r"^\d+\. If the pull is thin.*?(?=^\d+\. )", steps, re.M | re.S).group(0)
+    for needed in ("no `APIFY_TOKEN`", "`me/ideas.md`", "X posts that were read", "Never invent evidence", "fewer than five"):
+        assert needed in thin, needed
+
+
+def test_the_skill_says_the_first_transcription_downloads_a_speech_model(text):
+    assert "downloads a speech model" in text
+    assert "first time" in text
+
+
+def test_the_skill_says_where_it_really_writes(text):
+    assert "work/.slots" in text
+    assert "writes only inside" not in text.lower()  # the claim it replaces
+
+
+def test_the_install_sentence_always_keeps_the_research_tools(text):
+    assert "Speech to text skipped: install the video tools with uv sync --group video --inexact" in text
+    for line in text.splitlines():
+        if "uv sync --group video" in line:
+            assert "--inexact" in line, line  # without it uv removes yt-dlp
+
+
+def test_the_skill_explains_the_notices_about_creators_and_spending_caps(text):
+    assert "returned nothing" in text
+    assert "`research.cost_cap.<platform>`" in text

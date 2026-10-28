@@ -76,7 +76,7 @@ def _scored(base: dict, key, *, median, count, low, now, source: str) -> dict:
         creator_median=median,
         creator_n=count,
         low_sample=low,
-        outlier=(own / median) if median > 0 else None,
+        outlier=outlier(video.get("comments"), video.get("likes"), median) if median > 0 else None,
         in_window=recent,
         young=bool(posted and posted > now - timedelta(hours=common.YOUNG_HOURS)),
         set="recent" if recent else "earlier",

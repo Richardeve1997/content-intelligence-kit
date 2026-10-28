@@ -10,8 +10,8 @@ from kit.research import ideas
 
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)  # written as code points so this file holds no dash
 
-# The shape the other skills read, as pinned for the whole kit.
-PINNED = [
+# The shape the other skills read, as agreed for the whole kit.
+AGREED = [
     {
         "n": 1,
         "title": "Why windowsill basil dies in week three",
@@ -25,7 +25,7 @@ PINNED = [
 
 
 def idea(n=1, **changes):
-    entry = copy.deepcopy(PINNED[0])
+    entry = copy.deepcopy(AGREED[0])
     entry["n"] = n
     entry.update(changes)
     return entry
@@ -37,10 +37,10 @@ def idea(n=1, **changes):
 def test_ideas_schema():
     schema = json.loads(ideas.SCHEMA_PATH.read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
-    assert list(Draft202012Validator(schema).iter_errors(PINNED)) == []
-    assert ideas.validate(PINNED) == []
+    assert list(Draft202012Validator(schema).iter_errors(AGREED)) == []
+    assert ideas.validate(AGREED) == []
 
-    # the pinned fields, no more and no fewer
+    # the agreed fields, no more and no fewer
     item = schema["items"]
     assert set(item["required"]) == {"n", "title", "angle", "why", "format", "evidence", "hooks"}
     assert set(item["properties"]) == set(item["required"])
@@ -119,9 +119,9 @@ def test_every_problem_is_reported_not_just_the_first():
 
 def test_reading_ideas_from_a_run_folder(tmp_path):
     assert ideas.read(tmp_path) == (None, [])  # nothing written yet
-    (tmp_path / "ideas.json").write_text(json.dumps(PINNED), encoding="utf-8")
+    (tmp_path / "ideas.json").write_text(json.dumps(AGREED), encoding="utf-8")
     found, problems = ideas.read(tmp_path)
-    assert found == PINNED and problems == []
+    assert found == AGREED and problems == []
 
 
 def test_broken_json_is_explained(tmp_path):
@@ -251,7 +251,7 @@ def test_an_x_post_in_the_evidence_is_quoted():
 
 def test_asking_for_an_idea_that_is_not_there(tmp_path):
     with pytest.raises(ValueError) as caught:
-        ideas.find(PINNED, 7, run_label="research/runs/2026-10-28")
+        ideas.find(AGREED, 7, run_label="research/runs/2026-10-28")
     assert str(caught.value) == "There is no idea number 7 in research/runs/2026-10-28. It has idea 1."
     several = [idea(1), idea(2), idea(3)]
     with pytest.raises(ValueError) as caught:

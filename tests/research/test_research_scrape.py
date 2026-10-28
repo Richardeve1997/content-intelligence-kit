@@ -1,6 +1,8 @@
 """kit.research.scrape: Apify for Instagram and TikTok, yt-dlp for YouTube, and what happens when they cannot run."""
 
 import sys
+import time
+import types
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -29,6 +31,44 @@ def profile(example_me):
 def charge_cap(web, actor):
     (url,) = [u for u in web.urls("POST") if actor in u]
     return float(parse_qs(urlparse(url).query)["maxTotalChargeUsd"][0])
+
+
+# --- the time limit -----------------------------------------------------------------------------------------
+
+
+def with_seconds(profile, value):
+    """A profile whose research settings carry scrape_seconds, as they will once the profile format allows it."""
+    return types.SimpleNamespace(research=types.SimpleNamespace(cost_cap=profile.research.cost_cap, scrape_seconds=value))
+
+
+def test_the_time_limit_is_two_minutes_unless_the_profile_says_otherwise(profile):
+    assert scrape.BUDGET_SECONDS == 120.0
+    assert scrape.scrape_seconds(profile) == 120.0  # an existing profile has no such setting
+
+
+@pytest.mark.parametrize("value, expected", [(45, 45.0), (45.5, 45.5), (10, 10.0), (1800, 1800.0), (300, 300.0)])
+def test_a_profile_can_set_the_time_limit(profile, value, expected):
+    assert scrape.scrape_seconds(with_seconds(profile, value)) == expected
+
+
+@pytest.mark.parametrize("value", [None, 0, 5, -30, 5000, "60", True, float("nan"), [60]])
+def test_a_time_limit_that_makes_no_sense_falls_back_to_the_default(profile, value):
+    assert scrape.scrape_seconds(with_seconds(profile, value)) == 120.0
+
+
+def test_a_pull_waits_as_long_as_the_profile_allows(profile, monkeypatch):
+    seen = []
+
+    def fake_youtube(creators, deadline):
+        seen.append(deadline - time.monotonic())
+        return [], {"status": "failed", "tool": "", "creators": [], "videos": 0}, None
+
+    monkeypatch.setattr(scrape, "_youtube", fake_youtube)
+    watch = {"instagram": [], "tiktok": [], "youtube": ["@example_channel"]}
+    scrape.pull(with_seconds(profile, 45), watch, token=None)
+    scrape.pull(profile, watch, token=None)
+    scrape.pull(with_seconds(profile, 45), watch, token=None, budget=30)  # a limit given to the call wins
+    assert 44 < seen[0] <= 45 and 119 < seen[1] <= 120 and 29 < seen[2] <= 30
 
 
 # --- no key, no Apify -----------------------------------------------------------------------------

@@ -190,6 +190,28 @@ def test_only_the_best_few_earlier_standouts_are_kept(video):
     assert min(v["outlier"] for v in earlier) >= rank.EARLIER_MIN_OUTLIER
 
 
+def test_scoring_uses_the_one_outlier_function(video, monkeypatch):
+    # the formula lives in rank.outlier, so score() must call it and not repeat the sum
+    seen = []
+    real = rank.outlier
+
+    def spy(comments, likes, creator_median):
+        seen.append((comments, likes, creator_median))
+        return real(comments, likes, creator_median)
+
+    monkeypatch.setattr(rank, "outlier", spy)
+    scored = rank.score([video("a", likes=100, comments=10), video("b", likes=300, comments=0), video("c", likes=50, comments=5)])
+    assert len(seen) == 3
+    assert (10, 100, 130) in seen  # the median of 130, 300 and 65
+    assert [round(v["outlier"], 3) for v in scored.videos] == [round(300 / 130, 3), 1.0, 0.5]
+
+
+def test_a_creator_with_no_median_is_not_sent_to_the_outlier_function(video, monkeypatch):
+    monkeypatch.setattr(rank, "outlier", lambda *a: pytest.fail("outlier() cannot score against a median of zero"))
+    scored = rank.score([video(f"z{n}", likes=0, comments=0) for n in range(3)])
+    assert all(v["outlier"] is None for v in scored.videos)
+
+
 def test_odd_history_records_are_ignored(video):
     history = history_of({"id": "ig:ok", "likes": 50, "comments": 0, "posted_at": "2026-08-01T10:00:00+00:00"})
     history[("instagram", "alpha")]["junk"] = "not a record"
