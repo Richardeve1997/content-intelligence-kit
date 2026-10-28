@@ -299,6 +299,147 @@ def test_the_head_lock_never_pastes_the_front_views_body_over_a_pose(look, scale
         assert not changed[body:].any(), f"{pose}: {int(changed[body:].sum())} cells of the body changed"
 
 
+# --- what sits under the chin: tops near the beard's colour, short beards, collars, scarves, short tops ------------------
+
+TOPS_NEAR_THE_BEARD = {
+    "a dark brown beard over a black top": dict(hair=(60, 40, 30), beard=(60, 40, 30), shirt=(28, 28, 32)),
+    "a black beard over a black top": dict(hair=(30, 26, 28), beard=(30, 26, 28), shirt=(28, 28, 32)),
+    "a dark brown beard over a dark brown top": dict(hair=(60, 40, 30), beard=(60, 40, 30), shirt=(72, 52, 40)),
+    "a white beard over a white top": dict(beard=(235, 235, 235), shirt=(240, 240, 240)),
+}
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("neck", [0, 1, 2], ids=["no neck", "a one-row neck", "a two-row neck"])
+@pytest.mark.parametrize("look", list(TOPS_NEAR_THE_BEARD))
+def test_a_top_close_in_colour_to_the_beard_never_swallows_it(look, neck, scale):
+    """A top in a colour near the beard's, right under the chin or after a neck too short to narrow the figure, is
+    not part of the beard. The beard keeps its own colours, the mouth inside it is found, and the head ends at
+    the chin."""
+    rgba, drawn = _scaled(*draw_figure("idle", neck=neck, **TOPS_NEAR_THE_BEARD[look]), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin, body = drawn["face"][3], drawn["body"][1]
+    assert chin < face.neck <= min(body, chin + 1 + 2 * scale), (face.neck, chin, body)
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("wide", [False, True], ids=["8 wide", "14 wide"])
+@pytest.mark.parametrize("cheeks", [True, False], ids=["skin cheeks", "flat top"])
+@pytest.mark.parametrize("last_row", [30, 31, 32], ids=["to the mouth", "a row under it", "two rows under it"])
+def test_a_short_beard_ending_on_the_mouths_rows_keeps_the_mouth(last_row, cheeks, wide, scale):
+    """A moustache with mutton chops: the beard ends on or just under the mouth's rows, so the mouth covers a fair
+    share of the beard's cells. It is still the mouth, not one of the beard's colours."""
+    figure = draw_figure("idle", hair=BEARD, beard=BEARD, beard_cheeks=cheeks, beard_end=last_row, mouth_wide=wide)
+    rgba, drawn = _scaled(*figure, scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+COLLARS = {
+    "a cream collar": (236, 228, 210),
+    "a red collar": (176, 44, 44),
+    "a green collar": (60, 150, 80),
+}
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("neck", [5, 3], ids=["a full neck", "a short neck"])
+@pytest.mark.parametrize("look", list(COLLARS))
+def test_a_collar_in_its_own_colour_is_not_a_beard(look, neck, scale):
+    """A turtleneck in a colour the head does not have, touching the chin and more than half the face wide, is
+    clothing: the mouth is drawn in the skin above it, so the head ends at the chin, not under the collar."""
+    rgba, drawn = _scaled(*draw_figure("idle", neck=neck, collar=COLLARS[look]), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("colour", [(236, 228, 210), (176, 44, 44)], ids=["cream", "red"])
+def test_a_scarf_hanging_from_the_chin_is_not_a_beard(colour, scale):
+    """A scarf nearly as wide as the face, hanging six rows from the chin over the neck and the top, is clothing
+    too: the head ends at the chin."""
+    rgba, drawn = _scaled(*draw_figure("idle", scarf=colour, scarf_rows=6), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("look", ["a cream collar", "a red scarf"])
+def test_the_head_lock_keeps_the_body_under_a_collar_or_a_scarf(look, scale):
+    from kit.character import poses
+
+    kw = dict(collar=COLLARS["a cream collar"]) if look == "a cream collar" else dict(scarf=(176, 44, 44), scarf_rows=6)
+    idle, drawn = _scaled(*draw_figure("idle", **kw), scale)
+    face = faces.locate(idle)
+    body = drawn["body"][1]
+    for pose in ("thumbs_up", "shrug", "hold_card", "wave"):
+        before, _ = _scaled(*draw_figure(pose, **kw), scale)
+        after = before.copy()
+        poses.head_lock(after, idle, face, 0, 0)
+        changed = (after != before).any(2)
+        assert not changed[body:].any(), f"{pose}: {int(changed[body:].sum())} cells of the body changed"
+
+
+@pytest.mark.parametrize("scale", [1, 2], ids=["1x", "2x"])
+@pytest.mark.parametrize("rows", [6, 10, 14], ids=["6 rows", "10 rows", "14 rows"])
+@pytest.mark.parametrize("shirt", [None, (240, 240, 240), (176, 44, 44)], ids=["blue", "white", "red"])
+def test_a_short_top_right_under_the_chin_is_not_a_beard(shirt, rows, scale):
+    """A top with no neck above it that ends inside the rows searched for a beard is still clothing, because the
+    mouth is drawn in the skin above it: the head ends at the chin."""
+    kw = dict(neck=0, top_rows=rows)
+    if shirt is not None:
+        kw["shirt"] = shirt
+    rgba, drawn = _scaled(*draw_figure("idle", **kw), scale)
+
+    face = faces.locate(rgba)
+
+    assert _close(face.left_eye, drawn["left_eye"]) and _close(face.right_eye, drawn["right_eye"])
+    assert _close(face.mouth, drawn["mouth"]), (face.mouth, drawn["mouth"])
+    chin = drawn["face"][3]
+    assert chin < face.neck <= chin + 1 + 2 * scale, (face.neck, chin)
+
+
+def test_the_board_mentions_a_beard_only_when_one_was_found_or_dropped():
+    """A beardless character gets no beard advice. The note shows when a beard was measured, and says what to mark
+    when one was found but its end was not."""
+    details = {}
+    face, _ = faces.measure(draw_figure("idle")[0], None, details)
+    assert face is not None and details["beard"] is None
+    assert not any("beard" in line for line in faces.board_notes(face, marked=False, beard=details["beard"]))
+
+    face, _ = faces.measure(draw_figure("idle", hair=BEARD, beard=BEARD)[0], None, details)
+    assert details["beard"] == "found"
+    found = [line for line in faces.board_notes(face, marked=False, beard="found") if "beard" in line]
+    assert found and all("--neck" in line or "neck" in line for line in found)
+
+    face, _ = faces.measure(draw_figure("idle", hair=BEARD, beard=BEARD, beard_length=12)[0], None, details)
+    assert face is not None and details["beard"] == "dropped"
+    assert _close(face.mouth, draw_figure("idle", hair=BEARD, beard=BEARD, beard_length=12)[1]["mouth"]), (
+        "the mouth inside a beard whose end was not found is still measured"
+    )
+    dropped = [line for line in faces.board_notes(face, marked=False, beard="dropped") if "beard" in line]
+    assert dropped and any("mark" in line and "neck" in line for line in dropped)
+
+
 # --- marking the face by hand -------------------------------------------------------------------------------------------
 
 

@@ -147,6 +147,11 @@ def draw_figure(
     collar: tuple[int, int, int] | None = None,
     beard_cheeks: bool = True,
     beard_length: int = 0,
+    beard_end: int = 36,
+    mouth_wide: bool = False,
+    scarf: tuple[int, int, int] | None = None,
+    scarf_rows: int = 3,
+    top_rows: int | None = None,
 ) -> tuple[np.ndarray, dict]:
     """One figure on a 120 x 170 transparent canvas. Returns (RGBA uint8 array, info).
 
@@ -156,15 +161,21 @@ def draw_figure(
 
     Options draw other looks:
     - `skin`, `hair` and `mouth` colours (the cheeks are a shade of the skin) and `shirt`, the colour of the top;
+      `mouth_wide` draws a mouth 14 cells wide instead of 8;
     - `glasses`, dark frames round both eyes joined by a bridge and running out to the hair, so the eyes are not
       closed in by skin;
     - `beard`, a beard in that colour over the jaw and chin with a moustache and the mouth showing through. With
       `beard_cheeks` False it starts across the whole face in one row, with no skin cheeks above the moustache,
-      and `beard_length` rows of it hang below the chin, in front of the neck and the top;
+      and `beard_length` rows of it hang below the chin, in front of the neck and the top. `beard_end` is the
+      last face row it covers (36, the chin; a smaller row leaves the skin bare below it, like a moustache with
+      mutton chops);
     - `hat`, a hat that many rows tall on top of the hair, with a brim, in `hat_colour`;
     - `neck`, how many rows of neck show between the chin and the top (5, or fewer for a short neck, 0 for none:
       the body moves up to meet the head), and `collar`, a high collar in that colour over the neck, wider than
-      the neck and touching the chin, like a turtleneck.
+      the neck and touching the chin, like a turtleneck;
+    - `scarf`, a scarf in that colour, `scarf_rows` tall and nearly as wide as the face, hanging from the chin
+      over the neck and the top;
+    - `top_rows`, a top only that many rows tall: the rest of it is in the trousers' colour.
     """
     body: dict[tuple[int, int], tuple[int, int, int]] = {}
     air = 10 if pose == "celebrate" else 0
@@ -175,6 +186,7 @@ def draw_figure(
     mouth = MOUTH if mouth is None else mouth
     sleeve = SHIRT_SHADE if shirt is None else tuple(int(c * 0.85) for c in shirt)
     shirt = SHIRT if shirt is None else shirt
+    mouth_box = (21, 29, 34, 30) if mouth_wide else MOUTH_BODY
     # head
     _box(body, 8, 0, 47, 8, hair)
     _box(body, 8, 9, 10, 26, hair)
@@ -190,7 +202,7 @@ def draw_figure(
         _box(body, 36, 18, 37, 19, PUPIL)
         _box(body, 14, 25, 16, 26, blush)
         _box(body, 39, 25, 41, 26, blush)
-        _box(body, *MOUTH_BODY, mouth)
+        _box(body, *mouth_box, mouth)
         if glasses:
             for x0, x1 in ((15, 22), (33, 40)):
                 _box(body, x0, 16, x1, 16, OUTLINE)
@@ -201,13 +213,14 @@ def draw_figure(
             _box(body, 11, 18, 14, 18, OUTLINE)  # the arms, out to the hair
             _box(body, 41, 18, 44, 18, OUTLINE)
         if beard is not None:
-            for y in range(26, 37):
+            for y in range(26, beard_end + 1):
                 for x in range(11, 45):
                     if beard_cheeks and y <= 27 and 17 < x < 38:
                         continue  # the cheeks above the moustache stay skin
                     body[(x, y)] = beard
-            _box(body, 22, 28, 33, 28, beard)  # the moustache
-            _box(body, *MOUTH_BODY, mouth)  # the mouth shows through the beard
+            if beard_end >= 28:
+                _box(body, 22, 28, 33, 28, beard)  # the moustache
+            _box(body, *mouth_box, mouth)  # the mouth shows through the beard
     else:
         _box(body, *FACE_BODY, hair)
     if hat:
@@ -221,6 +234,10 @@ def draw_figure(
     lower: dict[tuple[int, int], tuple[int, int, int]] = {}
     _box(lower, 15, 42, 40, 77, shirt)
     _arms(lower, pose, step, skin, sleeve)
+    if top_rows is not None:  # a short top: below its last row the shirt and the sleeves are trousers
+        for (x, y), colour in list(lower.items()):
+            if y >= 42 + top_rows and colour in (shirt, sleeve):
+                lower[(x, y)] = TROUSERS
     _box(lower, 16, 78, 39, 101, TROUSERS)
     for y in range(88, 102):
         lower.pop((27, y), None)
@@ -232,6 +249,8 @@ def draw_figure(
         body[(x, y - lift)] = colour
     if beard is not None and beard_length and pose != "back":
         _box(body, 16, 37, 39, 36 + beard_length, beard)  # hangs from the chin, in front of the neck and the top
+    if scarf is not None:
+        _box(body, 12, 37, 43, 36 + scarf_rows, scarf)  # hangs from the chin over the neck and the top
 
     rgba = np.zeros((CANVAS_H, CANVAS_W, 4), np.uint8)
     for (x, y), colour in body.items():
@@ -257,7 +276,7 @@ def draw_figure(
         "face": canvas_box(FACE_BODY),
         "left_eye": canvas_box(LEFT_EYE_BODY),
         "right_eye": canvas_box(RIGHT_EYE_BODY),
-        "mouth": canvas_box(MOUTH_BODY),
+        "mouth": canvas_box(mouth_box),
         "body": canvas_box((15, 42 - lift, 40, 77 - lift)),
         "air": air,
     }
