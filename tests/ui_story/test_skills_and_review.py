@@ -327,3 +327,18 @@ def test_a_skipped_proof_card_is_allowed_by_the_skill_and_the_rubric():
     item1 = next(line for line in rubric.splitlines() if line.startswith("1. "))
     assert "no proof card passes" in item1 and "skips" in item1, item1
     assert "no fact makes the idea clearer" in item1 and "long enough to read" in item1, item1
+
+
+def test_the_music_bed_needs_the_creators_own_tracks_and_setup_says_so():
+    """The kit ships no music, so a bed plays only once the creator adds licensed tracks to me/music/. The
+    ui-story description once promised a bed outright, and setup never named the folder."""
+    description = frontmatter(SKILLS["ui-story"])["description"]
+    assert "me/music/" in description and "licensed tracks" in description and "ships none" in description
+    sound = text(SKILLS["ui-story"]).split("### Sound")[1].split("## The edit")[0]
+    bed = next(line for line in sound.splitlines() if "kit.music.pick()" in line)
+    assert "licensed tracks" in bed and "`me/music/`" in bed and "ships no music" in bed, bed
+    onboard = (ROOT / ".claude" / "skills" / "onboard" / "SKILL.md").read_text(encoding="utf-8")
+    styles = onboard.split("### Step 8: Styles")[1].split("### Step 9")[0]
+    music = [line for line in styles.splitlines() if "me/music/" in line]
+    assert len(music) == 1, music
+    assert "licensed tracks" in music[0] and "ships none" in music[0] and "no bed" in music[0], music[0]

@@ -191,6 +191,8 @@ Mini me builds a character from 3 to 5 photos of them, or from a description if 
 
 The character itself is built after the profile is written, further down.
 
+Both styles can lay a music bed under the voice, and the kit ships none: tell them a bed plays once they add licensed tracks to a mood folder in `me/music/`, such as `me/music/calm/`, and until then their videos have no bed.
+
 ```bash
 uv run python -m kit.onboarding save styles - <<'EOF'
 {"styles": ["ui-story", "mini-me"], "voice_over": "record", "image_provider": "manual"}
