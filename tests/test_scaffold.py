@@ -204,6 +204,26 @@ def test_readme_has_the_planned_headings():
     assert found == README_HEADINGS
 
 
+def test_every_relative_link_in_the_readme_leads_to_a_file():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    targets = [t for t in re.findall(r"\]\(([^)\s]+)\)", text) if not t.startswith(("http://", "https://", "#"))]
+    assert "docs/media/ui-story-layouts.svg" in targets, "the README shows the UI story layouts"
+    for target in targets:
+        assert (ROOT / target).is_file(), f"README.md links to {target}, which is not in the repo"
+
+
+def test_readme_says_how_to_start_and_carries_the_credit_line_once():
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    sub_headings = re.findall(r"^### (.+)$", text, re.M)
+    assert "Clone it, don't fork it" in sub_headings and "This repo takes no pull requests" in sub_headings
+    assert "git clone https://github.com/" in text and 'say "set me up"' in text
+    assert "Use this template" in text and "npm ci" in text
+    # The holder and handle are written backwards so they appear in plain text only in README.md and LICENSE.
+    holder, handle = "evE drahciR"[::-1], "ia.elbissopehtfotra"[::-1]
+    credit = f"Built by {holder} ([@{handle}](https://www.instagram.com/{handle}/))."
+    assert text.splitlines().count(credit) == 1
+
+
 def test_fetch_gsap_targets_kit_vendor(tmp_path):
     script = ROOT / "bin" / "fetch_gsap.sh"
     assert script.stat().st_mode & 0o111, "bin/fetch_gsap.sh must be executable"
