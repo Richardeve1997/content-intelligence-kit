@@ -242,3 +242,40 @@ def test_contrast_of_the_light_caption_plate(example_me):
 def test_check_static_reads_the_canvas_colour_from_the_tokens():
     text = (KIT / "check_static.py").read_text()
     assert "load_profile" in text or "colour_tokens" in text
+
+
+# --- the reading-load audit -----------------------------------------------------------------------------------
+
+
+def _audit_page(tmp_path, scene, timeline, seconds=5.0):
+    """A scaffolded project with one scene and its timeline lines, plus the trims and words the audit reads."""
+    pytest.importorskip("playwright.sync_api")
+    hf = tmp_path / "hf"
+    scaffold.scaffold(hf, seconds)
+    page = (hf / "index.html").read_text()
+    page = page.replace("  <!-- CAPTIONS:BEGIN -->", f"  {scene}\n  <!-- CAPTIONS:BEGIN -->")
+    page = page.replace("// ---- scene tweens (absolute composition time) ----",
+                        "// ---- scene tweens (absolute composition time) ----\n" + timeline)
+    (hf / "index.html").write_text(page)
+    blocks, words = tmp_path / "blocks.json", tmp_path / "base.words.json"
+    blocks.write_text(json.dumps({"A": [[0, "end"]]}))
+    words.write_text(json.dumps({"dur": seconds, "words": []}))
+    done = run_kit("audit_dom.py", hf / "index.html", blocks, words)
+    if done.returncode != 0 and "No browser" in done.stdout:
+        pytest.skip(done.stdout.strip())
+    assert done.returncode == 0, done.stdout + done.stderr
+    return [line for line in done.stdout.splitlines() if line.startswith("| s-")]
+
+
+def test_the_reading_load_audit_counts_typed_text_by_its_words(tmp_path, example_me):
+    """Typed text arrives one character at a time, so the audit once kept only its first letter and dropped
+    the row as too short to count. The whole typed line is what the viewer reads."""
+    scene = ('<div class="scene" id="s-typed"><div id="typed" style="position:absolute;left:120px;top:400px;'
+             'font-size:48px"></div></div>')
+    timeline = "UIS.show(tl, '#s-typed', 0, 5.0);\nUIS.type(tl, '#typed', 'fix the payments step', 1.0, 22);"
+    rows = _audit_page(tmp_path, scene, timeline)
+    typed = [row for row in rows if "fix the payments step" in row]
+    assert len(typed) == 1, rows
+    cells = [cell.strip() for cell in typed[0].strip("|").split("|")]
+    assert cells[2] == "4", "four words, counted from the whole typed line"
+    assert float(cells[3]) >= 3.0 and cells[5] == "yes", cells
