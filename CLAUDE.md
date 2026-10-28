@@ -6,7 +6,7 @@ The creator talks in plain language and never types a slash command, so choose t
 
 ## First run
 
-Setup is checked for you. Claude Code runs `bin/session_start.sh` when a session starts, and Codex runs it by hand as its first action: `bash bin/session_start.sh`. If it prints "This kit is not set up yet. Say: set me up.", or `kit.config.load_profile()` raises `NotOnboarded` anywhere, offer onboarding before anything else. Tell the creator to say: "set me up", and start the `onboard` skill when they do. A `ProfileError` carries a message that lists each problem in plain words. Show it, and offer to fix the problems through onboarding. If a `uv run` command fails because `uv` is not installed, say so and offer onboarding too, since onboarding checks the machine.
+`bin/session_start.sh` checks whether the kit is set up. Claude Code runs it when a session starts, and Codex runs it by hand as its first action: `bash bin/session_start.sh`. If it prints "This kit is not set up yet. Say: set me up.", or `kit.config.load_profile()` raises `NotOnboarded` anywhere, offer onboarding before anything else. Tell the creator to say: "set me up", and start the `onboard` skill when they do. A `ProfileError` carries a message that lists each problem in plain words. Show it, and offer to fix the problems through onboarding. If a `uv run` command fails because `uv` is not installed, say so and offer onboarding too, since onboarding checks the machine.
 
 ## What they say
 

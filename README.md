@@ -28,7 +28,7 @@ UI story is for talking-head Reels. You film yourself talking, and the edit puts
 
 ![The three UI story layouts. Split puts real footage and graphics on a grid above you, with your head breaking out of a rounded frame at the bottom. Canvas is the grid alone, for a diagram or a list. Face is you full screen, with punch-ins.](docs/media/ui-story-layouts.svg)
 
-A new visual lands about every two seconds, the captions light up word by word in your fonts, and motion graphics come in your accent colour. The Reel closes on your call to action and plays at 1.15x speed, over your own music bed or none.
+A new visual lands about every two seconds, the captions light up word by word in your fonts, and motion graphics come in your accent colour. The Reel closes on your call to action and plays at 1.15x speed. The kit ships no music, so a bed plays under the Reel only once you add tracks you have the right to use.
 
 ### Mini me
 
