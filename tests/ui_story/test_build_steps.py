@@ -163,17 +163,23 @@ def test_caption_size_is_measured_with_the_creators_display_font(tmp_path, examp
 # --- gap trims -----------------------------------------------------------------------------------------------
 
 
-def speech_audio(path, words_path):
-    """A tone burst under each word and silence in the gaps, so the energy guard has something to hear."""
+def speech_audio(path, words_path, ring_after=()):
+    """A tone burst under each word and silence in the gaps, so the energy guard has something to hear.
+    After each word index in `ring_after` the room rings on: noise decaying from -20 dB, above the guard's
+    -42 dB floor for about 0.55 s."""
     data = json.loads(words_path.read_text())
     sr = 48000
     audio = np.zeros(int(data["dur"] * sr), np.float32)
-    for w in data["words"]:
+    for i, w in enumerate(data["words"]):
         a, b = int(w["s"] * sr), int(w["e"] * sr)
         t = np.arange(b - a) / sr
         # a voiced sound: a 180 Hz pitch with even harmonics up to 1.8 kHz, like a vowel
         voice = sum(np.sin(2 * np.pi * 180 * k * t) for k in range(1, 11))
         audio[a:b] = 0.3 * voice / np.abs(voice).max()
+        if i in ring_after:
+            n = int(0.6 * sr)
+            tail = np.random.default_rng(i).standard_normal(n) * 0.1 * np.exp(-np.arange(n) / sr / 0.217)
+            audio[b : b + n] += tail.astype(np.float32)[: len(audio) - b]
     raw = path.with_suffix(".f32")
     raw.write_bytes(audio.tobytes())
     ffmpeg("-f", "f32le", "-ar", sr, "-ac", 1, "-i", raw, "-c:a", "pcm_s16le", path)
@@ -200,6 +206,26 @@ def test_make_blocks_cuts_long_gaps_tight_and_the_trim_check_passes(tmp_path):
         assert (gap_end - gap_start) - removed == pytest.approx(0.15, abs=0.08)
     check = run_kit("check_trims.py", "--audio", audio, "--blocks", blocks)
     assert check.returncode == 0, check.stdout
+    assert "ringing tail" not in done.stdout, "no gap was kept, so there is nothing to explain"
+
+
+def test_make_blocks_says_once_why_it_kept_a_ringing_tail(tmp_path):
+    """A breathy take rings on after a word, above the guard's floor, so the guard leaves that gap long. The
+    report says why, once, instead of leaving the creator to wonder why a pause survived."""
+    words, duration = word_file(tmp_path, gaps={3: 0.5, 6: 0.5, 9: 0.6})
+    audio = speech_audio(tmp_path / "clean.wav", words, ring_after=(3, 6))
+    (tmp_path / "layout.resolved.json").write_text(json.dumps(
+        {"duration": duration, "windows": [{"mode": "split", "t0": 0, "t1": duration}]}))
+    blocks = tmp_path / "blocks.json"
+    done = run_kit("make_blocks.py", audio, words, tmp_path / "layout.resolved.json", blocks)
+    assert done.returncode == 0, done.stderr
+    why = [line for line in done.stdout.splitlines() if "ringing tail" in line]
+    assert len(why) == 1, done.stdout
+    assert why[0].strip().startswith("2 of 3 gaps over 0.22 s"), why[0]
+    assert "-42 dB" in why[0] and "never cuts" in why[0], why[0]
+    lines = done.stdout.splitlines()
+    assert lines.index(why[0]) > next(i for i, line in enumerate(lines) if line.startswith("blocks ")), \
+        "it is said where the trim is reported"
 
 
 def test_check_trims_catches_a_cut_through_a_word(tmp_path):
