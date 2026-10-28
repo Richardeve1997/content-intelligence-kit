@@ -54,6 +54,7 @@ AIR_SLACK = 3  # a figure this close to the ground line is standing on it
 HAND_MIN_CELLS = 12  # a patch of bare skin smaller than this is a speck or a bit of ear, not a hand
 CARD_MIN = (12, 8)  # the clear face of a held card is at least this many cells wide and tall, so words fit on it
 CARD_LIGHT = 70.0  # Lab lightness: a card is light enough for ink to read on
+CARD_CHROMA = 6.0  # Lab chroma: a card is paper, nearly colourless; even very pale skin sits near 8, cream paper too
 CARD_SAME = 0.5  # a light patch the idle drawing has in the same place (a light top) is not a card
 
 __all__ = [
@@ -229,10 +230,11 @@ def held_card(canvas: np.ndarray, idle: np.ndarray, face: FaceBox, offset: Seque
     """The clear face of the card a pose holds up, as [x, y, w, h] in canvas cells, or None when the drawing holds
     no card worth writing on.
 
-    A card is a patch of one light colour below the head that the idle drawing does not have in the same place (the
-    place is read through the pose's offset from the front view), so a light top is never taken for one. Its clear
-    face is the largest rectangle inside the patch, which leaves out the thumbs holding it where they cut into its
-    edges. The biggest clear face wins, when it is at least CARD_MIN cells wide and tall."""
+    A card is a patch of one paper-like colour (light, CARD_LIGHT, and nearly colourless, CARD_CHROMA, so a raised
+    hand or any skin never counts) below the head that the idle drawing does not have in the same place (the place
+    is read through the pose's offset from the front view), so a light top is never taken for one. Its clear face is
+    the largest rectangle inside the patch, which leaves out the thumbs holding it where they cut into its edges.
+    The biggest clear face wins, when it is at least CARD_MIN cells wide and tall."""
     solid = canvas[..., 3] > 0
     if not solid.any():
         return None
@@ -246,7 +248,8 @@ def held_card(canvas: np.ndarray, idle: np.ndarray, face: FaceBox, offset: Seque
         ox, oy = 0, (box[1] - face.top) if box else 0
     head_end = max(0, face.neck + oy)
     best, best_area = None, 0
-    for index in np.nonzero(labs[:, 0] >= CARD_LIGHT)[0]:
+    paper = (labs[:, 0] >= CARD_LIGHT) & (np.hypot(labs[:, 1], labs[:, 2]) <= CARD_CHROMA)
+    for index in np.nonzero(paper)[0]:
         cells = grid == index
         cells[:head_end] = False
         if cells.sum() < CARD_MIN[0] * CARD_MIN[1]:
