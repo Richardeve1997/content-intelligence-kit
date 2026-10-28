@@ -42,7 +42,7 @@ Everything for one video lives in `work/<video>/`:
    - Short phrases. Every phrase becomes a page with at most four words on it, so write phrases of three to six words with a comma or a full stop between them.
    - One idea per sentence. About 60 to 110 words, which is 20 to 40 seconds at the style's pace.
    - Name real things: the product, the number, the place. Each fact needs a source; list them under `## Notes` with what each page could show.
-   - Write numbers as digits when they matter on screen ("3 of my 5 plants", "21 days"). A number of 10 or more can count up on its page; 1 to 9 show whole, because counting up to 3 would flash 1 and 2 under the words first.
+   - Write numbers as digits when they matter on screen ("3 of my 5 plants", "21 days"). A number of 20 or more can count up on its page, from 10; 1 to 19 show whole, because counting up to 3 would flash 1 and 2 under the words first, and counting to 12 would flash 10 and 11.
    - End on the closing line from the brief. A comment call to action says the keyword ("Comment GROW and I'll send you the checklist."); a follow says "Follow for more." in the creator's words. That line becomes the closing page.
 3. Put the narration through the `humanizer` skill in embedded mode. Keep every fact, number, name and the call-to-action wording. Use no em or en dashes.
 4. Save `work/<video>/script.md` in the shape the brief prints and show it to the creator.
@@ -101,7 +101,7 @@ Props:
 |---|---|
 | `card: <a few words>` or `card: assets/<file>.png` | a white receipt card from the side the pose points to, or dropping from the top |
 | `stamp` or `stamp: <TEXT>` | a stamp slams down beside the head with a thud (the page's accent word by default) |
-| `count` | one number in the headline counts up: the accented one, or the first. Only a number of 10 or more counts, and it counts up from 10; 1 to 9 show whole, and so does any number on the first page, so frame 0 reads right. `check.py` notes a count it left whole |
+| `count` | one number in the headline counts up: the accented one, or the first. Only a number of 20 or more counts, and it counts up from 10; 1 to 19 show whole, and so does any number on the first page, so frame 0 reads right. `check.py` notes a count it left whole |
 | `burst` | sparkles burst around the head |
 | `bubble: <text>` | a speech bubble by the head, such as `?` or `!` |
 | `cta` | the closing call to action (one page, made from the closing line) |
@@ -136,7 +136,7 @@ Stage.page(5, { lines: ["3 OF 5", "*PLANTS*"], char: { pose: "celebrate" } });
 
 - `c.T("word")` is when a word is said (`"phrase#2"` for its second time, `c.T.e(...)` for its end); `c.keyAt` is when the pose lands; `c.t0` and `c.t1` are the page's start and end. Time everything from these, never from typed seconds.
 - `c.zone` is the free space between the headline and the head. `c.side` is where the pose points. `c.back` is behind the character and `c.front` in front of it.
-- `Stage.card`, `Stage.stamp`, `Stage.bubble` and `Stage.chip` build and animate in one call. `c.A` has the motion helpers (`pop`, `rise`, `slide`, `drop`, `slam`, `punch`, `shake`, `count`, `burst`). `c.A.count` follows the same rule as the prop: under 10 it leaves the number whole, and 10 or more counts up from 10, unless you give it a starting number. `c.hit("thud", t)` adds a sound to `hits.json`.
+- `Stage.card`, `Stage.stamp`, `Stage.bubble` and `Stage.chip` build and animate in one call. `c.A` has the motion helpers (`pop`, `rise`, `slide`, `drop`, `slam`, `punch`, `shake`, `count`, `burst`). `c.A.count` follows the same rule as the prop: under 20 it leaves the number whole, and 20 or more counts up from 10, unless you give it a starting number. `c.hit("thud", t)` adds a sound to `hits.json`.
 - Every motion is a `fromTo` with both ends given. A value set only in the from-vars never applies in the render.
 - Keep everything inside x 90 to 990. The receipt layers are clipped just inside those lines, so anything that strays shows cut off.
 - A picture a scene uses is saved under `build/sources/` with its URL and date in `build/sources/SOURCES.md`, then copied into `build/hf/assets/`: HyperFrames loads only files inside the project folder.

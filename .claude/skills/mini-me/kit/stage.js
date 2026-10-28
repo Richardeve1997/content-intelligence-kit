@@ -27,7 +27,7 @@
  *     back    layer behind the character (cards tuck behind the head); front: in front (stamps, bursts)
  *     T(cue)  seconds of a spoken word: a word index, "phrase" or "phrase#2"; T.e(cue) is its end
  *     A       motion helpers (all fromTo with both ends given): pop rise slide drop slam punch shake out count burst;
- *             count leaves a number under 10 whole and counts a bigger one up from 10, unless given a start
+ *             count leaves a number under 20 whole and counts a bigger one up from 10, unless given a start
  *     win(el, a, b)  show an element only from a to b      hit(kind, t)  a whoosh or thud at t (written to hits.json)
  *
  *   Helpers that build and animate in one call: Stage.card(c, o), Stage.stamp(c, text, o), Stage.bubble(c, text, o),
@@ -39,7 +39,7 @@
 (function () {
   "use strict";
   var W = 1080, H = 1920, SAFE_L = 92, SAFE_R = 988, RING = 12, EDGE = 3, OUT = RING + EDGE;
-  var HEAD_TOP = 190, HEAD_BOTTOM = 620, FIT_W = 884, MAX_SIZE = 240, MIN_SIZE = 84, LEAD_KEY = 0.15, COUNT_FROM = 10;
+  var HEAD_TOP = 190, HEAD_BOTTOM = 620, FIT_W = 884, MAX_SIZE = 240, MIN_SIZE = 84, LEAD_KEY = 0.15, COUNT_FROM = 10, COUNT_MIN = 20;
   // a page shows the character down to its waist, at the largest scale that keeps the crown at y 960 or lower
   var PAGE_SCALES = [8, 7, 6, 5, 4], CROWN_MIN = 960, CROWN_MAX = 1320;
   // the close: scale 10 to 12 with the mouth's bottom edge at y 1660, clear of the phone's caption area
@@ -149,14 +149,15 @@
     },
     out: function (n, t, o) { o = o || {}; tl.fromTo(n, { opacity: 1, scale: 1 }, { opacity: 0, scale: o.to != null ? o.to : 0.4, duration: o.d || 0.18, ease: "power2.in", immediateRender: false }, t); },
     /** count a number up to the one written in the element, landing exactly on it. Without `from`, a number under
-     *  10 stays whole (counting to 3 would show 1 and 2 first) and a bigger one counts up from 10, so no single
-     *  digit ever shows under the words. Returns false when it left the number whole. */
+     *  20 stays whole (counting to 3 would show 1 and 2 first, and 12 would show 10 and 11 under the spoken word)
+     *  and a bigger one counts up from 10, so no single digit ever shows and a count has at least ten steps.
+     *  Returns false when it left the number whole. */
     count: function (n, t, d, from) {
       var text = n.getAttribute("data-to") || n.textContent, m = /^(\D*)([\d,]*\.?\d+)(.*)$/.exec(text);
       if (!m) return false;
       var target = parseFloat(m[2].replace(/,/g, "")), decimals = (m[2].split(".")[1] || "").length, commas = m[2].indexOf(",") >= 0;
       if (from == null) {
-        if (target < COUNT_FROM) return false;
+        if (target < COUNT_MIN) return false;
         from = COUNT_FROM;
       }
       var fmt = function (v) {
@@ -450,12 +451,12 @@
     var kind = String(s.prop).split(":")[0].trim().toLowerCase(), what = content(s.prop);
     if (kind === "stamp") stamp(c, what || headWord(s));
     else if (kind === "count") {
-      // one number counts: the accented one, else the first, and only when it is 10 or more ("3 OF 5" stays whole)
+      // one number counts: the accented one, else the first, and only when it is 20 or more ("3 OF 5" and "12 YEARS" stay whole)
       var num = s.pageEl.querySelector(".mm-acc .mm-num") || s.pageEl.querySelector(".mm-num");
       if (!num) PROBLEMS.push("note: page " + s.n + " counts, but its headline has no number.");
       else if (s.i === 0) PROBLEMS.push("note: page 1 shows its number whole, so the first frame reads right.");
       else if (!A.count(num, s.t0 + 0.02, Math.min(0.7, s.dur * 0.6))) {
-        PROBLEMS.push("note: page " + s.n + " counts " + num.textContent + ", which is under 10, so it shows whole instead.");
+        PROBLEMS.push("note: page " + s.n + " counts " + num.textContent + ", which is under 20, so it shows whole instead.");
       }
     }
     else if (kind === "burst") A.burst(c.front, c.char.x, c.char.crown + 140, c.keyAt + 0.05, { r: 260 });

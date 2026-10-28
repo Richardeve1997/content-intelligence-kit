@@ -16,8 +16,8 @@ beats.json is {"duration": seconds, "pages": [...]}, and every page is
   pose   one of the 14 core poses, chosen for what the phrase says; never the same twice in a row. The closing
          page is idle: the close is a big head-and-shoulders punch-in where the mouth does the work
   field  dark or light, taking turns, so the background flips on every page
-  prop   what arrives because of the pose: none, stamp[: TEXT], count (a number of 10 or more counts up;
-         1 to 9 show whole, and so does any number on the first page), burst, bubble: TEXT,
+  prop   what arrives because of the pose: none, stamp[: TEXT], count (a number of 20 or more counts up from
+         10; 1 to 19 show whole, and so does any number on the first page), burst, bubble: TEXT,
          card: <a few words or assets/<file>>, or cta (the closing call to action)
 
 How a phrase is found: the words break at the end of a sentence or clause, at a pause of 0.25 s or more,
@@ -282,7 +282,8 @@ def _pose(words, group: list[int], index: int, previous: str | None) -> str:
 
 
 NUMBER = re.compile(r"^\$?(\d[\d,]*(?:\.\d+)?)%?$")
-COUNT_FROM = 10  # a number under 10 shows whole: counting up to 3 would show 1 and 2 under the words first
+COUNT_FROM = 10  # where a count starts
+COUNT_MIN = 20  # a number under this shows whole: counting to 3 would show 1 and 2 first, and 12 would show 10 and 11
 
 
 def counted_number(text: str) -> float | None:
@@ -305,7 +306,7 @@ def counted_number(text: str) -> float | None:
 
 def _prop(text: str, pose: str, first_page: bool = False) -> str:
     number = counted_number(text)
-    if number is not None and number >= COUNT_FROM and not first_page:
+    if number is not None and number >= COUNT_MIN and not first_page:
         return "count"
     return PROP_FOR_POSE.get(pose, "none")
 
@@ -402,8 +403,8 @@ def check(beats: dict) -> list[str]:
                 problems.append(f"note: page {n} counts, but its headline has no number.")
             elif n == 1:
                 problems.append("note: page 1 shows its number whole, so the first frame reads right.")
-            elif number < COUNT_FROM:
-                problems.append(f"note: page {n} counts {number}, which is under 10, so it shows whole instead.")
+            elif number < COUNT_MIN:
+                problems.append(f"note: page {n} counts {number}, which is under 20, so it shows whole instead.")
         elif kind in ("card", "bubble") and ":" not in str(page["prop"]):
             problems.append(f"note: page {n} has a {kind} with nothing on it yet. Name what it shows, "
                             f"such as {kind}: <a few words>" + (" or card: assets/<file>.png." if kind == "card" else "."))

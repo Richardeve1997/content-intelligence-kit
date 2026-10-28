@@ -257,11 +257,13 @@ def test_running_it_again_keeps_an_edited_beats_json(kit_home, capsys):
     assert "beats.backup-2.json" in capsys.readouterr().out
 
 
-def test_only_numbers_of_10_or_more_are_drafted_to_count():
-    pages = beats.build(timed("Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days."), cta="follow")["pages"]
+def test_only_numbers_of_20_or_more_are_drafted_to_count():
+    pages = beats.build(timed("Pick 3 of 25 leaves. Basil roots in 21 days. It took 40 days. Mine took 12 days."),
+                        cta="follow")["pages"]
     by_number = {re.search(r"\d+", p["text"]).group(): p for p in pages if re.search(r"\d", p["text"])}
     assert by_number["21"]["prop"] == "count" and by_number["40"]["prop"] == "count"
     assert by_number["3"]["prop"] != "count", "the counted number is the first one, 3, which shows whole"
+    assert by_number["12"]["prop"] != "count", "counting 12 up from 10 would show 10 and 11 under the words first"
 
 
 def test_the_first_page_never_counts_so_frame_0_reads_right():
@@ -277,9 +279,11 @@ def test_the_counted_number_is_the_accented_one_else_the_first():
     assert beats.counted_number("NO NUMBER") is None
 
 
-def test_check_notes_a_count_under_10():
+def test_check_notes_a_count_under_20():
     pages = [{"t": 0.0, "text": "HELLO", "pose": "wave", "field": "dark", "prop": "none"},
              {"t": 1.0, "text": "3 OF 5", "pose": "point_up", "field": "light", "prop": "count"},
-             {"t": 2.0, "text": "21 DAYS", "pose": "thumbs_up", "field": "dark", "prop": "count"}]
-    problems = beats.check({"duration": 3.0, "pages": pages})
-    assert problems == ["note: page 2 counts 3, which is under 10, so it shows whole instead."]
+             {"t": 2.0, "text": "21 DAYS", "pose": "thumbs_up", "field": "dark", "prop": "count"},
+             {"t": 3.0, "text": "12 YEARS", "pose": "point_up", "field": "light", "prop": "count"}]
+    problems = beats.check({"duration": 4.0, "pages": pages})
+    assert problems == ["note: page 2 counts 3, which is under 20, so it shows whole instead.",
+                        "note: page 4 counts 12, which is under 20, so it shows whole instead."]

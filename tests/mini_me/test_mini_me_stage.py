@@ -381,7 +381,7 @@ def test_a_single_digit_count_shows_whole(stage):
     for k in range(-2, 54):  # every frame from just before the page to 0.9 s into it
         page.seek(round(start + k / 60, 4))
         assert page.js("Array.from(document.querySelectorAll('#mm-p4 .mm-num')).map(e => e.textContent)") == ["3", "5"], k
-    notes = [p for p in page.js("Stage.audit()")["problems"] if "page 4" in p and "under 10" in p]
+    notes = [p for p in page.js("Stage.audit()")["problems"] if "page 4" in p and "under 20" in p]
     assert len(notes) == 1, page.js("Stage.audit()")["problems"]
 
 
@@ -400,6 +400,20 @@ def test_a_count_from_the_scenes_never_shows_a_single_digit(stage):
         seen21.append(int(page.js("document.getElementById('mm-test-21').textContent")))
     assert seen8 == {"8"}
     assert min(seen21) >= 10 and seen21[-1] == 21 and seen21 == sorted(seen21), seen21
+
+
+def test_a_count_in_the_teens_shows_whole(stage):
+    """Counting 12 up from 10 would show 10 and 11 under the words first, so a number under 20 stays whole."""
+    page = stage["page"]
+    left_whole = page.js("""(() => { const box = document.createElement('div'); box.style.display = 'none'; document.body.appendChild(box);
+        const n = document.createElement('span'); n.id = 'mm-test-12'; n.setAttribute('data-to', '12'); n.textContent = '12'; box.appendChild(n);
+        return !Stage.A.count(n, 1.0, 0.6); })()""")
+    assert left_whole is True
+    seen = set()
+    for k in range(-6, 48):
+        page.seek(round(1.0 + k / 60, 4))
+        seen.add(page.js("document.getElementById('mm-test-12').textContent"))
+    assert seen == {"12"}, seen
 
 
 def profile_with(me, **handles):
