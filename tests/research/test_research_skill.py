@@ -116,6 +116,13 @@ def test_a_thin_pull_has_a_step_of_its_own(text):
         assert needed in thin, needed
 
 
+def test_the_mix_rule_says_what_to_do_when_fewer_than_two_recent_videos_ran_2x(text):
+    picking = sections(text)["Picking the five ideas"]
+    mix = next(line for line in picking.splitlines() if line.startswith("- Mix the sources"))
+    assert "fewer than two" in mix, "the rule needs two strong recent videos, and a run can have fewer"
+    assert "best-scoring recent videos" in mix and "`why`" in mix
+
+
 def test_the_skill_says_the_first_transcription_downloads_a_speech_model(text):
     assert "downloads a speech model" in text
     assert "first time" in text

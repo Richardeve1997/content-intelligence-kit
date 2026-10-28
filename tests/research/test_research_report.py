@@ -280,6 +280,16 @@ def test_a_video_with_no_transcript_shows_its_caption_and_says_so(offline_run):
     assert "From the caption" in text
 
 
+def test_a_youtube_video_with_no_transcript_shows_its_title_and_calls_it_a_title(offline_run):
+    profile, run_dir = offline_run
+    data = load(run_dir)
+    for video in data["videos"]:
+        video.update(platform="youtube", hook_source="caption", transcript=None)
+    save(run_dir, data)
+    text = visible(rebuild(profile, run_dir))
+    assert "From the title" in text and "From the caption" not in text
+
+
 def test_low_sample_creators_are_marked(offline_run):
     _, run_dir = offline_run
     text = visible((run_dir / "report.html").read_text(encoding="utf-8"))

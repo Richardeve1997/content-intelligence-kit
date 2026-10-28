@@ -179,6 +179,8 @@ def _opening(video: dict) -> list[str]:
         if after:
             lines.append(f'   Then: "{common.words(after, 35)}"')
         return lines
+    if video.get("platform") == "youtube":  # a YouTube video's hook without a transcript is its title
+        return [f'   Title: "{hook}" (no transcript, so this is the video\'s title and not the spoken opening)']
     return [f'   Caption: "{hook}" (no transcript, so this is the caption and not the spoken opening)']
 
 
@@ -216,7 +218,8 @@ def hooks_brief(idea: dict, data: dict, *, run_label: str, voice_path: str = VOI
     if missing and not fallback:
         lines.append(f"({common.plural(missing, 'piece')} of evidence is not in items.json and is left out.)")
     if idea.get("hooks"):
-        lines += ["", "Hooks it already has (do not repeat them):"] + [f"- {hook}" for hook in idea["hooks"]]
+        lines += ["", "Hooks it already has (saving replaces them, so keep the strongest if it still wins and write the rest new):"]
+        lines += [f"- {hook}" for hook in idea["hooks"]]
     lines += [
         "",
         f"Write between {HOOKS_MIN} and {HOOKS_MAX} hooks for this idea in the creator's voice. Read {voice_path} first.",

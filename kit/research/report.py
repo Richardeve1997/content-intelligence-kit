@@ -248,6 +248,8 @@ def _video_row(p: Page, video: dict) -> str:
     if video.get("hook_source") == "transcript" and video.get("transcript"):
         rest = common.split_opening(video["transcript"])[1]
         after = f'<p class="then">Then: {E(common.words(rest, 30))}</p>' if rest else ""
+    elif video.get("platform") == "youtube":  # without a transcript, a YouTube video's hook is its title
+        after = '<p class="note">From the title. There is no transcript for this one.</p>'
     else:
         after = '<p class="note">From the caption. There is no transcript for this one.</p>'
     meta = [

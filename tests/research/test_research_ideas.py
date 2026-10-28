@@ -2,6 +2,7 @@
 
 import copy
 import json
+from pathlib import Path
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -196,7 +197,7 @@ def test_the_brief_puts_the_strongest_evidence_first():
     assert "between 5 and 10" in text
     assert "research/runs/2026-10-28" in text
     for existing in chosen["hooks"]:
-        assert existing in text  # so new hooks do not repeat them
+        assert existing in text  # so the writer keeps the strongest if it still wins and makes the rest new
 
 
 def test_the_brief_matches_evidence_by_address_not_by_spelling():
@@ -216,6 +217,23 @@ def test_a_video_with_no_transcript_shows_its_caption_and_says_so():
     chosen = idea(1, evidence=cited(("e", 5.0)))
     text = ideas.hooks_brief(chosen, data, run_label="run")
     assert "Caption line only." in text and "no transcript" in text
+
+
+def test_a_youtube_video_with_no_transcript_shows_its_title_and_calls_it_a_title():
+    data = {"videos": [video("y", 5.0, "Basil mistakes", platform="youtube", hook_source="caption", transcript="")],
+            "x_posts": []}
+    text = ideas.hooks_brief(idea(1, evidence=cited(("y", 5.0))), data, run_label="run")
+    assert 'Title: "Basil mistakes"' in text and "Caption:" not in text
+    assert "the video's title and not the spoken opening" in text
+
+
+def test_the_brief_and_the_skill_agree_about_the_hooks_an_idea_already_has():
+    text = ideas.hooks_brief(idea(1, evidence=cited(("b", 8.0))), DATA, run_label="run")
+    line = next(line for line in text.splitlines() if line.startswith("Hooks it already has"))
+    assert "do not repeat" not in line, "the skill keeps the strongest existing hook when it still wins"
+    assert "keep the strongest" in line and "still wins" in line
+    skill = (Path(__file__).resolve().parents[2] / ".claude" / "skills" / "research" / "SKILL.md").read_text(encoding="utf-8")
+    assert "keep the strongest existing hook if it still wins" in skill
 
 
 def test_a_low_sample_creator_is_flagged_in_the_brief():
