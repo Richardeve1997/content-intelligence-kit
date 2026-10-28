@@ -109,6 +109,17 @@ def test_the_posting_times_hint_fits_a_creator_who_posts_by_hand_too(example_me)
     assert "usual posting time for each platform" in said, said
 
 
+def test_the_hashtags_hint_does_not_promise_them_on_every_post(example_me):
+    # LinkedIn gets no hashtags, and profile errors repeat this hint to the creator.
+    schema = json.loads(config.SCHEMA_PATH.read_text())
+    hint = schema["properties"]["hashtags"]["properties"]["base"]["description"]
+    assert "every post" not in hint and "LinkedIn gets none" in hint
+
+    _edit(example_me, lambda data: data["hashtags"].update(base="#oneword"))
+    said = "\n".join(_problems(example_me))
+    assert "LinkedIn gets none" in said, said
+
+
 def test_platform_list_comes_from_the_schema():
     assert config.PLATFORMS == ("instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter")
 

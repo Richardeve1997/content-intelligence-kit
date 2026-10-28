@@ -259,7 +259,7 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/hashtag" },
-          "description": "a list of the hashtags that go on every post, each starting with # and with no spaces, such as #yourtag"
+          "description": "a list of the hashtags that go on your posts (LinkedIn gets none), each starting with # and with no spaces, such as #yourtag"
         }
       }
     },
