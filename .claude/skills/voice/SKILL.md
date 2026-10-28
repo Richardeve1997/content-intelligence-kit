@@ -48,4 +48,4 @@ Samples and the model stay in `me/`. Do not copy them anywhere else.
 
 ## Feedback
 
-When the creator corrects how this skill behaves, fix it now and record the rule with `kit.rules.add("voice", "<rule>")`. In a shell: `uv run python -m kit.rules add voice "<rule>"`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.
+When the creator corrects how this skill behaves, fix it now and record the rule with `kit.rules.add("voice", "<rule>")`. In a shell: `uv run python -m kit.rules add voice '<rule>'`. Write one or two plain sentences. If the rule contradicts an older one for this skill, remove the older one first. Say in one line what you recorded.
