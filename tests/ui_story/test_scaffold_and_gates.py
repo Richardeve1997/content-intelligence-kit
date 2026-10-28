@@ -152,6 +152,24 @@ def test_check_static_fails_a_canvas_that_holds_still(tmp_path, example_me):
     assert run_kit("check_static.py", moving, "--max", "3").returncode == 0
 
 
+def test_check_static_samples_the_frame_at_each_time_it_reports(tmp_path):
+    """A still run is reported by the times of its samples, so each sample must be the frame at that time."""
+    import subprocess
+
+    import numpy as np
+
+    static = load("check_static")
+    ramp = tmp_path / "ramp.mp4"  # brighter every frame, so each moment has its own grey
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=270x480:r=60:d=2", "-vf", "geq=lum='16+100*T':cb=128:cr=128",
+           "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv420p", ramp)
+    samples = static.frames(ramp, 5)
+    for k in range(5):
+        exact = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{k / 5:.3f}", "-i", str(ramp), "-frames:v", "1",
+                                "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+        grey = np.frombuffer(exact, np.uint8).astype(np.float32).mean()
+        assert abs(float(samples[k].mean()) - grey) < 4, f"the sample at {k / 5}s shows a later frame"
+
+
 def test_ig_safe_check_writes_the_marked_frames(tmp_path):
     clip = tmp_path / "final.mp4"
     ffmpeg("-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", clip)

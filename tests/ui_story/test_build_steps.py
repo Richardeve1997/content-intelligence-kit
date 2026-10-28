@@ -284,6 +284,19 @@ def test_seg_starts_finds_each_join(tmp_path):
     assert starts[0] == 0.0 and starts[1] == pytest.approx(1.0, abs=2 / 60)
 
 
+def test_measure_crowns_reads_the_crown_at_each_sample_time(tmp_path):
+    """The crowns are kept or dropped by the time of each sample, so each sample must be the frame at that time."""
+    measure = load("measure_crowns")
+    matte = tmp_path / "matte.mp4"  # the head sinks 100 px a second, so every moment has its own crown row
+    ffmpeg("-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=60:d=2",
+           "-vf", "geq=lum='if(gte(Y\\,200+100*T)\\,255\\,0)':cb=128:cr=128", "-c:v", "libx264", "-qp", "0",
+           "-pix_fmt", "yuv420p", matte)
+    found = measure.crowns(matte, 0.5)
+    assert [t for t, _ in found] == [0.0, 0.5, 1.0, 1.5]
+    for t, row in found:
+        assert abs(row - (200 + 100 * t)) <= 2, f"the sample at {t}s has the crown of a later frame (row {row})"
+
+
 def test_every_kit_script_answers_help():
     from uistory_helpers import KIT
 

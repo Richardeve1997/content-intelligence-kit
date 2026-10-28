@@ -30,9 +30,11 @@ INSET, RADIUS = 90, 56
 
 
 def crowns(matte, step):
-    """(time, crown row) for one matte frame every `step` seconds."""
-    proc = subprocess.Popen(["ffmpeg", "-nostdin", "-v", "error", "-i", str(matte), "-vf", f"fps=1/{step},format=gray",
-                             "-f", "rawvideo", "-"], stdout=subprocess.PIPE)
+    """(time, crown row) for one matte frame every `step` seconds, each the frame at its time, since the samples
+    are kept or dropped by that time. ffmpeg's fps filter rounds to the nearest slot by default and keeps the last
+    frame of each, which would make every sample nearly half a step later than its time."""
+    proc = subprocess.Popen(["ffmpeg", "-nostdin", "-v", "error", "-i", str(matte), "-vf",
+                             f"fps=1/{step}:round=up,format=gray", "-f", "rawvideo", "-"], stdout=subprocess.PIPE)
     out, k = [], 0
     try:
         while True:
