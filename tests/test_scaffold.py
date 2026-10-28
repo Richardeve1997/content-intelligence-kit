@@ -279,6 +279,13 @@ def test_readme_says_how_to_get_each_agent_before_the_clone():
     assert '"set me up"' in before_clone and "not into Terminal" in before_clone
 
 
+def test_readme_names_the_install_steps_no_clean_mac_has_tested():
+    section = _readme_section("### How the install is tested")
+    untested = next(line for line in section.splitlines() if "clean Mac has tested" in line)
+    assert "installing Homebrew itself" in untested
+    assert "`brew install uv`" in untested and "`brew install node`" in untested
+
+
 def test_readme_codex_section_explains_hooks_and_the_sandbox_in_plain_words():
     section = _readme_section("## Codex")
     assert "The kit sets up no hooks for Codex" in section

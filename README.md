@@ -68,6 +68,8 @@ Before each release:
 - A smoke job, `.github/workflows/smoke.yml`, installs the kit on a fresh GitHub macOS runner with an Apple silicon chip and renders a three second card. On the runner it installs ffmpeg with Homebrew, Python 3.11 and the Python tools (yt-dlp among them) with uv, HyperFrames with `npm ci`, Chromium and GSAP, then runs the machine check and the tests.
 - The whole kit runs end to end as a made-up creator, in Claude Code and in Codex: onboarding, research, both video styles and a posting dry run.
 
+No run on a clean Mac has tested three standard Homebrew steps that setup relies on: installing Homebrew itself, `brew install uv` and `brew install node`.
+
 ## Quick start
 
 Install Claude Code or Codex first, and sign in. For Claude Code, run `curl -fsSL https://claude.ai/install.sh | bash` in Terminal, as its [setup page](https://code.claude.com/docs/en/setup) shows, then run `claude` and log in through the browser prompts. For Codex, run `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, as its [CLI page](https://learn.chatgpt.com/docs/codex/cli) shows, then run `codex` and choose Sign in with ChatGPT. Whatever you say to the kit, "set me up" included, you type into that agent, not into Terminal.
