@@ -244,6 +244,8 @@ def _video_row(p: Page, video: dict) -> str:
         chips.append('<span class="chip quiet">Low sample</span>')
     if video.get("young"):
         chips.append('<span class="chip quiet">Still climbing</span>')
+    if video.get("paid") is True:
+        chips.append('<span class="chip">Paid partnership</span>')
     after = ""
     if video.get("hook_source") == "transcript" and video.get("transcript"):
         rest = common.split_opening(video["transcript"])[1]
@@ -268,8 +270,37 @@ def _video_row(p: Page, video: dict) -> str:
     )
 
 
+def _recent(p: Page) -> list[dict]:
+    return [v for v in p.data.get("videos", []) if v.get("set") == "recent"][:MAX_LISTED]
+
+
+def _older(p: Page) -> list[dict]:
+    older = [v for v in p.data.get("videos", []) if v.get("set") == "earlier" and (v.get("outlier") or 0) >= EARLIER_MIN_OUTLIER]
+    return older[:EARLIER_LIMIT]
+
+
+def _paid_note(p: Page) -> str:
+    """What the page knows about paid partnerships among the videos it lists, said once. A video whose data says
+    it was paid for carries a mark. Where the data does not say, the page says the kit cannot tell, so an ad's
+    angle is never taken for the creator's own."""
+    shown = _recent(p) + _older(p)
+    parts = []
+    if any(v.get("paid") is True for v in shown):
+        parts.append("Paid partnership marks a video a brand paid for, so its angle is an ad's, not proof of what the audience wants.")
+    unknown = {str(v.get("platform")) for v in shown if v.get("paid") is None}
+    order = [name for name in common.RESEARCH_PLATFORMS if name in unknown] + sorted(unknown - set(common.RESEARCH_PLATFORMS))
+    names = [common.PLATFORM_LABEL.get(name, name) for name in order]
+    if names:
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        parts.append(
+            f"The kit cannot tell whether the {listed} videos here are paid partnerships, because the data it gets "
+            "does not say. Check one before you copy its angle."
+        )
+    return f'<p class="note">{E(" ".join(parts))}</p>' if parts else ""
+
+
 def _videos_section(p: Page) -> str:
-    recent = [v for v in p.data.get("videos", []) if v.get("set") == "recent"][:MAX_LISTED]
+    recent = _recent(p)
     if not recent:
         return ""
     days = p.data.get("window_days", common.WINDOW_DAYS)
@@ -277,20 +308,20 @@ def _videos_section(p: Page) -> str:
     return (
         '<section id="videos"><div class="wrap"><h2>What is working</h2>'
         f'<p class="dek">Videos from the last {days} days, each scored against that creator\'s own normal. '
-        f"A score of 1{TIMES} is an ordinary video for them.</p>"
+        f"A score of 1{TIMES} is an ordinary video for them.</p>{_paid_note(p)}"
         f'<div class="section-body"><ol class="videos">{rows}</ol></div></div></section>'
     )
 
 
 def _earlier_section(p: Page) -> str:
-    older = [v for v in p.data.get("videos", []) if v.get("set") == "earlier" and (v.get("outlier") or 0) >= EARLIER_MIN_OUTLIER]
-    older = older[:EARLIER_LIMIT]
+    older = _older(p)
     if not older:
         return ""
     rows = "".join(_video_row(p, v) for v in older)
+    note = "" if _recent(p) else _paid_note(p)  # said once, in the first list on the page
     return (
         '<section id="earlier"><div class="wrap"><h2>Earlier standouts</h2>'
-        '<p class="dek">Older videos that ran well above normal, from this pull and from earlier runs.</p>'
+        f'<p class="dek">Older videos that ran well above normal, from this pull and from earlier runs.</p>{note}'
         f'<div class="section-body"><ol class="videos compact">{rows}</ol></div></div></section>'
     )
 

@@ -49,6 +49,12 @@ def test_a_later_run_updates_the_numbers_and_keeps_the_first_sighting(kit_tree):
     assert record["first_seen"] == "2026-10-20" and record["last_seen"] == "2026-10-28"
 
 
+def test_whether_a_video_was_a_paid_partnership_is_kept_for_later_runs(kit_tree):
+    brain.update([seen("a", paid=True), seen("b", paid=False), seen("c")], today="2026-10-28")
+    records = brain.load_history()[("instagram", "alpha")]
+    assert (records["ig:a"]["paid"], records["ig:b"]["paid"], records["ig:c"]["paid"]) == (True, False, None)
+
+
 def test_a_transcript_is_kept_when_a_later_run_has_none(kit_tree):
     said = "Water basil in the morning and never at night because the roots sit in cold water"
     brain.update([seen("a", transcript=said, transcript_source="YouTube captions")], today="2026-10-20")

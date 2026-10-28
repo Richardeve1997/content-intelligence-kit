@@ -139,6 +139,32 @@ def test_instagram_and_tiktok_come_back_as_plain_videos(profile, web):
     assert t["title"] == "Soil that never dries out 7000000000000000001"
 
 
+def test_a_paid_partnership_is_read_where_the_platform_says_so(profile, web):
+    # Instagram's scraper gives paidPartnership (its old isSponsored is always false now, so it says nothing).
+    # TikTok's gives isSponsored for a paid partnership and isAd for an ad.
+    apify(
+        web,
+        ig=[
+            ig_post("PAID01", paidPartnership=True, isSponsored=False),
+            ig_post("FREE01", paidPartnership=False),
+            ig_post("OLD001", isSponsored=False),  # only the field that no longer says anything
+        ],
+        tt=[
+            tt_post("7000000000000000011", isSponsored=True),
+            tt_post("7000000000000000012", isSponsored=False, isAd=True),
+            tt_post("7000000000000000013", isSponsored=False, isAd=False),
+            tt_post("7000000000000000014"),
+        ],
+    )
+    pull = scrape.pull(profile, WATCH, token=TOKEN)
+    paid = {i["id"]: i["paid"] for i in pull.items}
+    assert paid == {
+        "ig:PAID01": True, "ig:FREE01": False, "ig:OLD001": None,
+        "tt:7000000000000000011": True, "tt:7000000000000000012": True,
+        "tt:7000000000000000013": False, "tt:7000000000000000014": None,
+    }
+
+
 def test_the_token_travels_in_a_header_never_in_an_address(profile, web):
     apify(web, ig=[ig_post("AAA111")], tt=[tt_post("1")])
     scrape.pull(profile, WATCH, token=TOKEN)

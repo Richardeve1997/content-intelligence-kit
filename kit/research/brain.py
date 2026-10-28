@@ -18,7 +18,7 @@ VERSION = 1
 KEEP = 200  # videos kept for each creator, newest first
 MAX_TRANSCRIPT = 6000  # characters of transcript kept for one video
 
-_FIELDS = ("url", "title", "posted_at", "views", "likes", "comments", "duration")
+_FIELDS = ("url", "title", "posted_at", "views", "likes", "comments", "duration", "paid")
 
 
 def root() -> Path:

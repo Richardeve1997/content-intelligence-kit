@@ -123,6 +123,12 @@ def test_the_mix_rule_says_what_to_do_when_fewer_than_two_recent_videos_ran_2x(t
     assert "best-scoring recent videos" in mix and "`why`" in mix
 
 
+def test_the_skill_says_what_the_paid_flag_means_and_not_to_copy_an_ads_angle(text):
+    assert "`paid`" in sections(text)["Steps"], "step 4 names the field"
+    picking = sections(text)["Picking the five ideas"]
+    assert "`paid` is true" in picking and "paid partnership" in picking and "null" in picking
+
+
 def test_the_skill_says_the_first_transcription_downloads_a_speech_model(text):
     assert "downloads a speech model" in text
     assert "first time" in text

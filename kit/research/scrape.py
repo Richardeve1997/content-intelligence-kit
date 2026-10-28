@@ -199,6 +199,26 @@ def _stamp(value) -> str | None:
     return moment.isoformat() if moment else None
 
 
+def _flag(value) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _instagram_paid(post: dict) -> bool | None:
+    """Whether the post is a paid partnership, or None when the data does not say. Apify's Instagram scraper gives
+    it as paidPartnership. Its older isSponsored is always false now, so a false from it says nothing and it is
+    not read."""
+    return _flag(post.get("paidPartnership"))
+
+
+def _tiktok_paid(post: dict) -> bool | None:
+    """Whether the post is paid for, or None when the data does not say. Apify's TikTok scraper gives a paid
+    partnership as isSponsored and an ad as isAd, and either one counts."""
+    sponsored, ad = _flag(post.get("isSponsored")), _flag(post.get("isAd"))
+    if sponsored or ad:
+        return True
+    return False if sponsored is False else None
+
+
 def _instagram_items(raw: list, creators: list[str]) -> tuple[list[dict], list[dict]]:
     per = {name.lower(): {"creator": name.lower(), "videos": 0} for name in creators}
     items = []
@@ -223,6 +243,7 @@ def _instagram_items(raw: list, creators: list[str]) -> tuple[list[dict], list[d
                 "comments": _count(post.get("commentsCount")),
                 "duration": post.get("videoDuration"),
                 "video_url": post.get("videoUrl"),
+                "paid": _instagram_paid(post),
             }
         )
     return items, _creator_rows(per, _reasons(raw, creators))
@@ -254,6 +275,7 @@ def _tiktok_items(raw: list, creators: list[str]) -> tuple[list[dict], list[dict
                 "comments": _count(post.get("commentCount")),
                 "duration": meta.get("duration"),
                 "subtitle_url": english.get("downloadLink") or english.get("tiktokLink"),
+                "paid": _tiktok_paid(post),
             }
         )
     return items, _creator_rows(per, _reasons(raw, creators))

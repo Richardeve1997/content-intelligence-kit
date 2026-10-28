@@ -290,6 +290,36 @@ def test_a_youtube_video_with_no_transcript_shows_its_title_and_calls_it_a_title
     assert "From the title" in text and "From the caption" not in text
 
 
+def test_a_paid_partnership_is_marked_and_the_page_says_where_the_kit_cannot_tell(offline_run):
+    profile, run_dir = offline_run
+    data = load(run_dir)
+    recent = [v for v in data["videos"] if v["set"] == "recent"]
+    for video in data["videos"]:
+        video["paid"] = video["platform"] == "youtube" and None  # YouTube's data never says; the rest say no
+    recent[0]["paid"] = True
+    save(run_dir, data)
+
+    page = rebuild(profile, run_dir)
+    rows = page.split('<section id="videos">', 1)[1].split("</section>", 1)[0].split("<li>")[1:]
+    assert "Paid partnership" in visible(rows[0]) and not any("Paid partnership" in visible(row) for row in rows[1:])
+    text = visible(page)
+    assert "a brand paid for" in text, "the mark is explained once"
+    platforms = sorted({v["platform"] for v in data["videos"] if v["paid"] is None})
+    assert platforms, "the sample has YouTube videos"
+    assert "The kit cannot tell whether the YouTube videos here are paid partnerships" in text
+
+
+def test_where_no_source_says_the_page_says_the_kit_cannot_tell(offline_run):
+    profile, run_dir = offline_run
+    data = load(run_dir)
+    for video in data["videos"]:
+        video.pop("paid", None)
+    save(run_dir, data)
+    text = visible(rebuild(profile, run_dir))
+    assert "The kit cannot tell whether the" in text and "videos here are paid partnerships" in text
+    assert "Paid partnership" not in text.replace("paid partnerships", "")
+
+
 def test_low_sample_creators_are_marked(offline_run):
     _, run_dir = offline_run
     text = visible((run_dir / "report.html").read_text(encoding="utf-8"))
