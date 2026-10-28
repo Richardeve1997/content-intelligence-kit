@@ -28,10 +28,15 @@ Optional keys:
 
     python cut_base.py <raw take> <edl.json> <out.mp4> [--no-hwaccel]
 
+The frames go to a part file beside the output (base.part.mp4 for base.mp4), which takes the output's place
+only when ffmpeg finishes without an error. A cut that stops part way (ctrl-C, a crash, an ffmpeg that fails)
+leaves the earlier base as it was, or none, and never half a base that prep.py would take for a finished one.
+
 Check after: avg_frame_rate 60/1, nb_frames = round(duration x 60), and a frame reads upright.
 """
 import argparse
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -173,17 +178,25 @@ def main(argv=None):
 
     total = sum(e - s for s, e, _ in keep)
     print(f"[cut_base] {len(keep)} segments, {total:.2f}s kept, push-in {pushin} on segments {sorted(ramps)} -> {a.out}")
+    out = Path(a.out)
+    part = out.with_name(f"{out.stem}.part{out.suffix}")
     cmd += ["-filter_complex", "; ".join(parts), "-map", "[v]", "-map", "[a]", "-r", "60", "-fps_mode", "cfr",
             *media.encoder_args(bitrate="30M", crf=14), "-c:a", "aac", "-b:a", "256k", "-ar", "48000", "-ac", "2",
-            "-movflags", "+faststart", a.out]
+            "-movflags", "+faststart", str(part)]
+    rc = 1
     try:
-        with media.heavy_slot(label=f"cut_base {Path(a.out).name}"):
+        with media.heavy_slot(label=f"cut_base {out.name}"):
             rc = subprocess.run(cmd).returncode
     except config.KitError as problem:
         print(problem)
         return 1
+    finally:
+        if rc != 0:  # stopped, crashed or failed: the earlier base stays, and no half one is left beside it
+            part.unlink(missing_ok=True)
     if rc:
+        print(f"ffmpeg stopped with status {rc}, so {out.name} was not replaced.")
         return rc
+    os.replace(part, out)
     probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                             "stream=avg_frame_rate,nb_frames,width,height:format=duration", "-of", "default=nw=1", a.out],
                            capture_output=True, text=True).stdout

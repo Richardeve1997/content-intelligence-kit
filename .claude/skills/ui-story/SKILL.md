@@ -265,7 +265,7 @@ HyperFrames rules for the composition: one `index.html`, a transparent root, `da
 - When a chip replaces another in a face window, hide the first at least 0.1 s before the second appears.
 - The speech model cannot read digits well and can invent words in silence at a take join. Check the words file around numbers and joins, and drop invented words before building the captions. A word the model spells wrong goes in `build/captions/corrections.json` (`{"misheard": "correct"}`); cue phrases still use the spelling as heard.
 - A long render with transparency needs `--workers 1`: more workers try to keep every frame on disk first.
-- Stopping `cut_base.py` does not always stop its ffmpeg. Stop that too, delete the half-written base, and check a new one with `ffmpeg -v error -i base.mp4 -f null -` before matting it.
+- `cut_base.py` writes a new base to a part file (`base.part.mp4`) and swaps it in only when ffmpeg finishes, so a stopped cut leaves the earlier base as it was. Stopping the script does not always stop its ffmpeg: stop that too, and delete the part file it leaves.
 - Free disk before a render, not after. HyperFrames keeps a frame cache in the system temp folder (`hyperframes-extract-cache-*`) that is safe to delete when no render is running.
 
 ## Before handing over
