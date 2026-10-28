@@ -75,6 +75,7 @@ HOOKS
 
 - For "swap number 4", "move number 3 to the top" or "make number 2 a listicle", edit only what was asked in `ideas.json`. Keep `n` running from 1 with no gaps, apply the humanizer to any new text, then run `uv run python -m kit.research report`. Never make a second report.
 - Running again on the same day replaces the pull and the report and keeps the ideas already written. If the new pull changes the picture, say so and offer to rewrite them.
+- For "run my research again from what I have, without going online", read the newest real run in `research/runs/`, its `ideas.json` and `items.json`, answer from those, and offer `uv run python -m kit.research report` to rebuild the page. Never use `--offline` for this, because it runs on made-up videos.
 - `--date 2026-10-28` on `report` or `hooks` picks an earlier run.
 
 ## Feedback

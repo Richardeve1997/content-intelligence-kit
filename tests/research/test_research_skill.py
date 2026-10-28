@@ -136,6 +136,14 @@ def test_the_skill_says_a_sample_run_goes_where_no_idea_picker_looks(text):
     assert "reads" in offline, "it says that nothing picks ideas from there"
 
 
+def test_running_again_from_what_is_there_reads_the_newest_real_run_and_never_goes_offline(text):
+    again = sections(text)["Changing an idea, or running again"]
+    line = next(line for line in again.splitlines() if "without going online" in line)
+    for needed in ("`research/runs/`", "`ideas.json`", "`items.json`", "uv run python -m kit.research report"):
+        assert needed in line, needed
+    assert "never use `--offline`" in line.lower()
+
+
 def test_the_skill_says_the_first_transcription_downloads_a_speech_model(text):
     assert "downloads a speech model" in text
     assert "first time" in text
