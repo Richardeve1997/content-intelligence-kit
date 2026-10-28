@@ -5,7 +5,10 @@ Claude Code runs this when a turn ends and sends a JSON description of the sessi
 If the creator's latest message reads like a correction ("going forward", "never", "fix that" and so
 on) and the turn did not run the kit's rules command, the hook blocks the stop once. The reason it gives
 is fixed text that never repeats what the creator wrote. Claude then records the rule, and the next
-stop goes through, because Claude Code marks it with stop_hook_active.
+stop goes through, because Claude Code marks it with stop_hook_active. A second guard does not depend on
+that mark: reading back from the end, the hook stops at a Stop hook's own feedback (a meta entry that
+starts "Stop hook feedback") when it meets one before the creator's message, so it asks at most once
+after each message the creator sends.
 
 The hook writes nothing. Any problem at all (bad input, no transcript, a file it cannot read) means it
 prints nothing and exits 0, so a turn is never held up by this hook failing.
@@ -19,8 +22,8 @@ import re
 import sys
 
 REASON = (
-    "The creator just gave a correction. Record it with the kit's rules command for the skill it applies to, "
-    "then finish."
+    "The creator just gave a correction. If it is a lasting preference, record it with the kit's rules command "
+    "for the skill it applies to, then finish."
 )
 
 # Phrases that mark a correction. A space matches any run of white space, and an apostrophe may be curly.
@@ -34,6 +37,7 @@ CORRECTION = re.compile(
 )
 RECORDS_A_RULE = re.compile(r"kit\.rules\s+add\b|\brules\.add\(")
 SYSTEM_REMINDER = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+FEEDBACK = "Stop hook feedback"  # how Claude Code starts the entry that carries a Stop hook's reason
 
 SCAN_LIMIT = 64 * 1024 * 1024  # how far back from the end of the transcript to look, in bytes
 CHUNK = 1024 * 1024
@@ -60,9 +64,8 @@ def lines_from_the_end(path):
             yield pending
 
 
-def what_the_creator_typed(message):
-    """The text of a message the creator typed, or None for anything else (a tool result, an image alone,
-    a system reminder, the hook's own feedback)."""
+def message_text(message):
+    """The text of a message with any system reminder taken out, or None when it holds no text."""
     content = message.get("content")
     if isinstance(content, str):
         text = content
@@ -77,10 +80,22 @@ def what_the_creator_typed(message):
         text = "\n".join(pieces)
     else:
         return None
-    text = SYSTEM_REMINDER.sub("", text).strip()
-    if not text or text.startswith("Stop hook feedback"):
+    return SYSTEM_REMINDER.sub("", text).strip()
+
+
+def what_the_creator_typed(message):
+    """The text of a message the creator typed, or None for anything else (a tool result, an image alone,
+    a system reminder, the hook's own feedback)."""
+    text = message_text(message)
+    if not text or text.startswith(FEEDBACK):
         return None
     return text
+
+
+def is_stop_hook_feedback(message):
+    """True for the entry Claude Code adds when a Stop hook blocked a stop and gave its reason."""
+    text = message_text(message)
+    return bool(text) and text.startswith(FEEDBACK)
 
 
 def ran_the_rules_command(content):
@@ -100,7 +115,7 @@ def needs_a_rule(path):
     """True when the creator's latest message is a correction and nothing after it ran the rules command.
 
     The transcript is read from the end, so a long session costs little. If the creator's message is further
-    back than SCAN_LIMIT, the answer is False."""
+    back than SCAN_LIMIT, or a Stop hook's feedback comes after it, the answer is False."""
     recorded = False
     for line in lines_from_the_end(path):
         try:
@@ -114,7 +129,10 @@ def needs_a_rule(path):
             continue
         if entry.get("type") == "assistant":
             recorded = recorded or ran_the_rules_command(message.get("content"))
-        elif entry.get("type") == "user" and not entry.get("isMeta"):
+        elif entry.get("type") == "user" and entry.get("isMeta"):
+            if is_stop_hook_feedback(message):
+                return False  # already asked since the creator's last message
+        elif entry.get("type") == "user":
             text = what_the_creator_typed(message)
             if text is not None:
                 return not recorded and CORRECTION.search(text) is not None
