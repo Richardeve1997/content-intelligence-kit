@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -78,6 +78,9 @@ PASSED = (
     "The time you picked has passed or is too close to schedule. Pick a time at least five minutes from now, "
     "because Zernio posts at once when a time has passed."
 )
+# A dry run reads nothing from Zernio, so what only Zernio knows is shown with these.
+ACCOUNT_PLACEHOLDER = "<your {platform} account in Zernio>"
+MEDIA_PLACEHOLDER = "<the video, once it is uploaded>"
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,8 @@ class Result:
     url             the post's address once it is live
     reason          why it was skipped or failed, or a note about the post
     scheduled_for   the time it is set for, in the creator's own time zone
+    payload         in a dry run, the request that would be sent, with placeholders for the account and the
+                    uploaded video. It takes no part in comparing or hashing a Result.
     """
 
     platform: str
@@ -97,6 +102,12 @@ class Result:
     url: str | None = None
     reason: str | None = None
     scheduled_for: str | None = None
+    payload: dict | None = field(default=None, compare=False)
+
+
+def post_title(profile, platform: str, slug: str) -> str:
+    """The title a post is made under in Zernio, and found again by."""
+    return f"{profile.name} {platform} {slug}"
 
 
 # --- times -------------------------------------------------------------------------------------------
@@ -286,8 +297,11 @@ def _fenced(text: str) -> list[str]:
     return ["```text", text, "```"]
 
 
-def write_manual(slug: str, *, profile=None) -> Path:
-    """Write work/<slug>/post/manual.md: each platform's caption and the video's path, ready to post by hand."""
+def write_manual(slug: str, *, profile=None, times: Mapping[str, datetime] | None = None) -> Path:
+    """Write work/<slug>/post/manual.md: each platform's caption and the video's path, ready to post by hand.
+
+    `times` holds the day and time the creator asked for, by platform, and the file gives those. A platform
+    without one gets its usual time from the profile."""
     profile = profile or config.load_profile()
     folder = _folder(slug)
     data = captions.load(slug)
@@ -295,13 +309,20 @@ def write_manual(slug: str, *, profile=None) -> Path:
     if problems:
         raise CaptionProblems(problems)
     video = _video(folder, slug)
+    zone = ZoneInfo(profile.timezone)
+    asked = {name: f"{moment.astimezone(zone):%a %d %b %H:%M}" for name, moment in (times or {}).items()}
     lines = [f"# Post {slug} by hand", "", f"The video: {video}", ""]
-    if profile.posting_times:
+    if asked and all(name in asked for name in profile.platforms):
+        lines += [f"Post each one at the time in brackets, in {profile.timezone}.", ""]
+    elif asked:
+        lines += [f"Post each one at the time in brackets, in {profile.timezone}. A time with no day is your usual "
+                  "time for that platform.", ""]  # fmt: skip
+    elif profile.posting_times:
         lines += [f"Your usual time for each platform is in brackets, in {profile.timezone}.", ""]
     for platform in profile.platforms:
         entry = data[platform]
-        usual = profile.posting_times.get(platform)
-        lines += [f"## {captions.display_name(platform)}" + (f" ({usual})" if usual else ""), ""]
+        shown = asked.get(platform) or profile.posting_times.get(platform)
+        lines += [f"## {captions.display_name(platform)}" + (f" ({shown})" if shown else ""), ""]
         if platform == "youtube":
             lines += ["Title:", "", *_fenced(payloads.youtube_title(entry)), "", "Description:", ""]
         lines += [*_fenced(payloads.content_for(entry, platform)), ""]
@@ -364,7 +385,7 @@ class _Run:
 
     def _schedule(self, platform: str, account: dict) -> Result:
         path = self.post_dir / f"{platform}.json"
-        title = f"{self.profile.name} {platform} {self.slug}"
+        title = post_title(self.profile, platform, self.slug)
         receipt = store.read(path)
 
         if receipt.get("post_id"):
@@ -547,7 +568,9 @@ def schedule(
     one with a zone is the same moment wherever it is written. It has to be at least five minutes ahead,
     because Zernio publishes a post at once when its time has passed.
 
-    With dry_run nothing is sent, not even a read, and no key is needed: the Results say what would happen.
+    With dry_run nothing is sent, not even a read, and no key is needed: the Results say what would happen,
+    each with the request it would send as its payload. Facebook fails there, with the reason, when the video's
+    length cannot be read, as it would in a real post.
     Otherwise the creator must have approved the captions as they stand now (captions.approve), or it
     raises PostError before anything is sent. `client` is for tests and for callers that already hold
     one; by default the key comes from ZERNIO_API_KEY.
@@ -569,7 +592,25 @@ def schedule(
 
     if dry_run:
         note = f"Would schedule for {describe_time(when)}. Nothing was sent."
-        return [Result(name, "dry run", reason=note, scheduled_for=when.isoformat()) for name in names]
+        seconds, unmeasured = None, None
+        if "facebook" in names:  # only Facebook needs the length, read from the file here
+            try:
+                seconds = payloads.video_seconds(video)
+            except PostError as exc:
+                unmeasured = str(exc)  # Facebook fails with the reason, as a real post would; the others carry on
+        plan = []
+        for name in names:
+            if name == "facebook" and unmeasured:
+                plan.append(Result(name, "failed", reason=unmeasured, scheduled_for=when.isoformat()))
+                continue
+            plan.append(Result(name, "dry run", reason=note, scheduled_for=when.isoformat(),
+                               payload=payloads.build_body(
+                                   name, title=post_title(profile, name, slug), slug=slug, caption=data[name],
+                                   account_id=ACCOUNT_PLACEHOLDER.format(platform=captions.display_name(name)),
+                                   media_url=MEDIA_PLACEHOLDER, scheduled_for=when.isoformat(),
+                                   timezone=profile.timezone, seconds=seconds if name == "facebook" else None,
+                               )))
+        return plan
 
     # Nothing is sent, and no file for posting by hand is written, until the creator has read these exact
     # captions and said yes. Their yes to the TikTok caption is also the preview and consent TikTok asks for.
@@ -581,7 +622,7 @@ def schedule(
         try:
             client = zernio.Client.from_env()
         except zernio.NoZernio:
-            write_manual(slug, profile=profile)
+            write_manual(slug, profile=profile, times={name: when for name in names})
             raise zernio.NoZernio(
                 "No Zernio key is set, so nothing was scheduled. "
                 f"The captions and the video are in work/{slug}/post/manual.md, ready to post by hand."
@@ -612,7 +653,7 @@ def _adopt_interrupted(
     """
     if not receipt.get("create_attempted"):
         return Result(platform, "skipped", reason=f"Nothing is scheduled on {captions.display_name(platform)} for {slug}.")
-    title = receipt.get("title") or f"{profile.name} {platform} {slug}"
+    title = receipt.get("title") or post_title(profile, platform, slug)
     try:
         if _recover(client, receipt, path, title):
             return None

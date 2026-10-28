@@ -153,6 +153,16 @@ def test_a_dropped_recording_wins_over_elevenlabs(kit_home, example_me, recordin
     assert (config.work_dir("example-reel") / "vo.m4a").is_file()
 
 
+def test_a_voice_named_for_a_video_with_a_recording_says_the_recording_is_used(kit_home, example_me, recording, heard,
+                                                                               monkeypatch, capsys):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    monkeypatch.setattr(voice, "_request", lambda *a, **k: pytest.fail("a recording needs no ElevenLabs call"))
+    assert voice.main(["auto", "example-reel", "--voice", "Ash"]) == 0
+    said = [line for line in capsys.readouterr().out.splitlines() if "--voice" in line]
+    assert len(said) == 1 and "work/example-reel/take/" in said[0], said
+
+
 def test_record_with_nothing_dropped_asks_for_the_recording(kit_home, capsys, monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)  # a key alone does not override the creator's choice
     assert voice.main(["auto", "example-reel"]) == voice.WAITING
@@ -183,9 +193,14 @@ class FakeElevenLabs:
             return self.status, {"detail": {"status": "invalid_api_key", "message": "Invalid API key"}}, b""
         if path == "/v1/voices":
             return 200, {"voices": [
-                {"voice_id": "zz-premade", "name": "Zed", "category": "premade"},
-                {"voice_id": "aa-premade", "name": "Ash", "category": "premade"},
+                {"voice_id": "zz-premade", "name": "Zed - Calm, Low", "category": "premade",
+                 "labels": {"gender": "male", "age": "old", "accent": "british", "use_case": "narrative_story"},
+                 "preview_url": "https://previews.example.com/zed.mp3"},
+                {"voice_id": "aa-premade", "name": "Ash - Bright, Clear", "category": "premade",
+                 "labels": {"gender": "female", "age": "middle_aged", "accent": "irish", "descriptive": "warm"},
+                 "preview_url": "https://previews.example.com/ash.mp3"},
                 {"voice_id": "mine", "name": "My clone", "category": "cloned"},
+                {"voice_id": "studio-pro", "name": "Studio Pro", "category": "professional"},
             ]}, b""
         if path == "/v1/models":
             return 200, [{"model_id": m, "can_do_text_to_speech": True} for m in self.models], b""
@@ -346,3 +361,110 @@ def test_clone_with_no_copy_yet_stops_instead_of_using_a_stock_voice(kit_home, e
     assert voice.main(["auto", "example-reel"]) == voice.WAITING
     out = capsys.readouterr().out
     assert "copy of your voice" in out and "python -m kit.voice clone" in out and "work/example-reel/take/" in out
+
+
+def a_narration():
+    script = config.work_dir("example-reel") / "script.md"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# Basil\n\n## Narration\n\nFresh basil in March.\n")
+
+
+def spoken_by(api):
+    return [c["path"].rsplit("/", 1)[-1] for c in api.calls if "text-to-speech" in c["path"]]
+
+
+def test_with_no_pick_the_voice_step_says_which_voice_it_used_and_how_to_choose(kit_home, example_me, heard, monkeypatch,
+                                                                                  capsys):
+    """With no voice picked, the first stock voice by name reads it, as before, and one sentence says so and how
+    to choose another. A voice given by its id is named as such."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    a_narration()
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["auto", "example-reel"]) == 0
+    said = [line for line in capsys.readouterr().out.splitlines() if line.startswith("Read by")]
+    assert len(said) == 1 and "Read by ElevenLabs in the stock voice Ash - Bright, Clear" in said[0]
+    assert "python -m kit.voice voices" in said[0] and "python -m kit.voice pick" in said[0]
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["elevenlabs", "example-reel", "--voice-id", "mine"]) == 0
+    assert "Read by ElevenLabs in the voice you named." in capsys.readouterr().out
+
+
+def test_voices_lists_the_stock_voices_with_labels_and_previews_and_nothing_else(kit_home, example_me, monkeypatch,
+                                                                                capsys):
+    """Each stock voice by name, with what ElevenLabs says about it and a link to hear it. No voice id, and never a
+    copy of a voice or a professional one."""
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["voices"]) == 0
+    out = capsys.readouterr().out
+    assert "Ash - Bright, Clear: female, middle aged, irish, warm" in out and "https://previews.example.com/ash.mp3" in out
+    assert "Zed - Calm, Low: male, old, british, narrative story" in out and "https://previews.example.com/zed.mp3" in out
+    assert out.index("Ash") < out.index("Zed")
+    for hidden in ("aa-premade", "zz-premade", "My clone", "mine", "Studio Pro", "studio-pro", FAKE_KEY):
+        assert hidden not in out, hidden
+
+
+def test_a_picked_voice_is_saved_by_name_and_read_in_from_then_on(kit_home, example_me, heard, monkeypatch, capsys):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["pick", "zed"]) == 0, "the short name works, in any case"
+    assert "Zed - Calm, Low" in capsys.readouterr().out
+    saved = json.loads((example_me / "voice" / "elevenlabs.json").read_text())
+    assert saved == {"stock": "Zed - Calm, Low"}, "saved by name, never by id"
+    a_narration()
+    api = FakeElevenLabs()
+    monkeypatch.setattr(voice, "_request", api)
+    assert voice.main(["auto", "example-reel"]) == 0
+    assert spoken_by(api) == ["zz-premade"]
+    said = [line for line in capsys.readouterr().out.splitlines() if line.startswith("Read by")]
+    assert said == ["Read by ElevenLabs in the stock voice Zed - Calm, Low."]
+    assert json.loads((config.work_dir("example-reel") / "vo.json").read_text())["voice"] == "Zed - Calm, Low"
+
+
+def test_a_voice_named_for_one_video_wins_over_the_pick(kit_home, example_me, heard, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    (example_me / "voice").mkdir(parents=True, exist_ok=True)
+    (example_me / "voice" / "elevenlabs.json").write_text(json.dumps({"stock": "Zed - Calm, Low"}))
+    a_narration()
+    for command in (["auto", "example-reel", "--voice", "Ash"], ["elevenlabs", "example-reel", "--voice", "ash - bright, clear"]):
+        api = FakeElevenLabs()
+        monkeypatch.setattr(voice, "_request", api)
+        assert voice.main(command) == 0
+        assert spoken_by(api) == ["aa-premade"], command
+    assert json.loads((example_me / "voice" / "elevenlabs.json").read_text()) == {"stock": "Zed - Calm, Low"}
+
+
+@pytest.mark.parametrize("name", ["Nobody", "My clone", "Studio Pro"])
+def test_only_a_stock_voice_in_the_account_can_be_picked(kit_home, example_me, monkeypatch, capsys, name):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    assert voice.main(["pick", name]) == 1
+    out = capsys.readouterr().out
+    assert "no stock voice called" in out and "python -m kit.voice voices" in out
+    assert not (example_me / "voice" / "elevenlabs.json").exists()
+
+
+def test_a_saved_pick_the_account_no_longer_has_stops_with_a_sentence(kit_home, example_me, heard, monkeypatch, capsys):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "elevenlabs")
+    (example_me / "voice").mkdir(parents=True, exist_ok=True)
+    (example_me / "voice" / "elevenlabs.json").write_text(json.dumps({"stock": "Gone - Retired"}))
+    a_narration()
+    api = FakeElevenLabs()
+    monkeypatch.setattr(voice, "_request", api)
+    assert voice.main(["auto", "example-reel"]) == 1
+    assert "no stock voice called" in capsys.readouterr().out and spoken_by(api) == []
+
+
+def test_a_copy_of_the_voice_keeps_the_stock_pick(kit_home, example_me, tmp_path, monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", FAKE_KEY)
+    set_voice_over(example_me, "clone")
+    (example_me / "voice").mkdir(parents=True, exist_ok=True)
+    (example_me / "voice" / "elevenlabs.json").write_text(json.dumps({"stock": "Zed - Calm, Low"}))
+    monkeypatch.setattr(voice, "_request", FakeElevenLabs())
+    voice.clone("Example Studio", samples(tmp_path))
+    saved = json.loads((example_me / "voice" / "elevenlabs.json").read_text())
+    assert saved["stock"] == "Zed - Calm, Low" and saved["voice_id"] == "fake-voice-for-tests"

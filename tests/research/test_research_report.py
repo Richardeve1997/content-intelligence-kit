@@ -163,6 +163,27 @@ def test_the_report_names_the_creator_and_the_day(offline_run):
         assert heading in text
 
 
+def test_the_counts_at_the_top_match_what_the_run_printed(offline_run):
+    """The big numbers are the whole pull, the same ones the terminal printed. The sentence above them says how
+    many of those are from the last two weeks, so the page and the terminal never disagree."""
+    from kit.research import pipeline
+
+    profile, run_dir = offline_run
+    data = load(run_dir)
+    recent = [v for v in data["videos"] if v.get("set") == "recent"]
+    assert 0 < len(recent) < data["videos_total"], "the sample has videos both inside and outside the window"
+    printed: list[str] = []
+    pipeline._summarise(data, printed.append)
+    page = rebuild(profile, run_dir)
+    tiles = dict(re.findall(r"<dt>([^<]+)</dt><dd class=\"num\">([^<]+)</dd>", page))
+    per_platform = [re.match(r"\w+: (\d+) videos? from (\d+) creators?", line) for line in printed]
+    videos_printed = sum(int(m.group(1)) for m in per_platform if m)
+    creators_printed = sum(int(m.group(2)) for m in per_platform if m)
+    assert (tiles["Videos"], tiles["Creators"]) == (str(videos_printed), str(creators_printed)), (tiles, printed)
+    lede = visible(re.search(r'<p class="lede">(.*?)</p>', page, re.S).group(1))
+    assert f"{data['videos_total']} videos" in lede and f"{len(recent)} of them from the last" in lede, lede
+
+
 def test_the_offline_banner_is_shown(offline_run):
     _, run_dir = offline_run
     text = visible((run_dir / "report.html").read_text(encoding="utf-8"))

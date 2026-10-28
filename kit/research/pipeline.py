@@ -109,6 +109,7 @@ def run(*, offline: bool = False, no_apify: bool = False, no_transcribe: bool = 
             notices += brain.update(videos, today=day)
         notices += speech.notices
 
+        pulled = [v for v in videos if v.get("source") == "run"]
         creators = [
             {**c, "median_engagement": round(c["median_engagement"], 1), "best_outlier": None if c["best_outlier"] is None else round(c["best_outlier"], 2)}
             for c in scored.creators
@@ -126,7 +127,10 @@ def run(*, offline: bool = False, no_apify: bool = False, no_transcribe: bool = 
             "transcripts": {"brain": speech.brain, "captions": speech.captions, "local": speech.local, "missing": speech.missing},
             "creators": creators,
             "videos": [_trim(v) for v in videos[:MAX_VIDEOS]],
-            "videos_total": len(videos),
+            # this run's own videos, counted before the list is cut: the earlier standouts from past runs are not
+            # part of the pull the terminal reports, so they are left out of both numbers
+            "videos_total": len(pulled),
+            "videos_recent": sum(1 for v in pulled if v.get("set") == "recent"),
             "x_posts": posts,
             "notes": notes,
             "performance": results,
@@ -175,7 +179,8 @@ def _summarise(data: dict, say) -> None:
         say(f"Your results: {common.plural(performance_result['feed_reels'], 'feed Reel')} in the last six weeks")
     else:
         say(performance_result["message"])
-    scored = [v for v in data["videos"] if v.get("set") == "recent" and v.get("outlier") is not None]
+    scored = [v for v in data["videos"]
+              if v.get("set") == "recent" and v.get("outlier") is not None and v.get("source", "run") == "run"]
     if scored:
         best = scored[0]
         say(f"Best this time: {best['outlier']:.1f}x, @{best['creator']} on {common.PLATFORM_LABEL.get(best['platform'], best['platform'])}")

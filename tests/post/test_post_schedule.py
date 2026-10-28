@@ -289,6 +289,20 @@ def test_the_manual_file_gives_each_platforms_usual_time(reel, profile):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
+def test_with_no_key_the_manual_file_keeps_the_time_the_creator_asked_for(reel, when):
+    """Asked for 21:15 tomorrow, the file posted by hand says 21:15 on that day, not each platform's usual time.
+    Platforms that were not asked for keep their usual time, with no date."""
+    asked = when.replace(hour=21, minute=15)
+    captions.approve(reel.slug)
+    with pytest.raises(NoZernio):
+        post.schedule(reel.slug, ["instagram", "youtube"], asked)
+    text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
+    day = f"{asked:%a %d %b}"
+    assert f"## Instagram ({day} 21:15)" in text and f"## YouTube ({day} 21:15)" in text, text
+    assert "## TikTok (19:00)" in text and "## LinkedIn (08:30)" in text, text
+    assert "Europe/London" in text
+
+
 def test_the_manual_file_will_not_hold_a_caption_that_breaks_a_rule(reel):
     path = reel.folder / "captions.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -318,6 +332,44 @@ def test_dry_run_sends_nothing(reel, stub, when):
     assert all(r.post_id is None and "Nothing was sent" in r.reason for r in results)
     assert datetime.fromisoformat(results[0].scheduled_for) == when
     assert not (reel.folder / "post").exists()  # no receipt, no upload record and no lock file
+
+
+def test_a_dry_run_carries_each_platforms_post_as_it_would_go_out(reel, stub, when):
+    """The post each platform would get: the text with its tags, the YouTube title, the TikTok settings and the
+    time. The account and the uploaded video's address only exist in Zernio, so plain placeholders stand in."""
+    results = run(reel, stub, ["instagram", "tiktok", "youtube", "facebook", "linkedin"], when, dry_run=True)
+    assert stub.calls() == []
+    data = json.loads((reel.folder / "captions.json").read_text(encoding="utf-8"))
+    sent = {r.platform: r.payload for r in results}
+    for name, body in sent.items():
+        assert body["content"] == payloads.content_for(data[name], name)
+        assert datetime.fromisoformat(body["scheduledFor"]) == when and body["timezone"] == "Europe/London"
+        assert body["platforms"][0]["accountId"].startswith("<") and body["mediaItems"][0]["url"].startswith("<")
+    assert sent["youtube"]["platforms"][0]["platformSpecificData"]["title"] == "Why windowsill basil dies in week three"
+    assert sent["tiktok"]["tiktokSettings"] == payloads.TIKTOK_SETTINGS
+    assert sent["facebook"]["platforms"][0]["platformSpecificData"] == {"contentType": "reel"}
+    assert "#" not in sent["linkedin"]["content"]
+
+
+def test_a_dry_run_with_a_video_it_cannot_measure_fails_facebook_alone(reel, stub, when, monkeypatch):
+    """Facebook needs the video's length; the other platforms do not. A length that cannot be read fails Facebook
+    with the reason, as a real post would, and the rest of the plan still comes back."""
+    def cannot_measure(path):
+        raise PostError("The length of final.mp4 could not be read. Check that it plays and try again.")
+
+    monkeypatch.setattr(payloads, "video_seconds", cannot_measure)
+    results = by_platform(run(reel, stub, ["instagram", "facebook"], when, dry_run=True))
+    assert stub.calls() == []
+    assert results["instagram"].status == "dry run" and results["instagram"].payload["content"]
+    assert results["facebook"].status == "failed" and results["facebook"].payload is None
+    assert "could not be read" in results["facebook"].reason
+
+
+def test_a_result_without_a_payload_is_the_same_as_before():
+    plain = post.Result("instagram", "scheduled", post_id="post-1")
+    assert plain.payload is None
+    assert plain == post.Result("instagram", "scheduled", post_id="post-1", payload={"content": "text"})
+    assert hash(post.Result("instagram", "dry run", payload={"content": "text"}))
 
 
 def test_a_dry_run_needs_no_key_and_still_checks_the_captions(reel, when):
@@ -1137,11 +1189,11 @@ def test_the_public_names():
     assert schedule_module.schedule is post.schedule  # the package's `schedule` is the function
 
 
-def test_a_result_is_five_plain_fields_and_a_time():
-    result = post.Result("instagram", "scheduled", "post-1", None, None)
-    assert dataclasses.astuple(result) == ("instagram", "scheduled", "post-1", None, None, None)
+def test_a_result_is_five_plain_fields_a_time_and_an_optional_payload():
+    result = post.Result("instagram", "scheduled", "post-1", None, None)  # positional calls work as they always did
+    assert dataclasses.astuple(result) == ("instagram", "scheduled", "post-1", None, None, None, None)
     assert [f.name for f in dataclasses.fields(result)] == [
-        "platform", "status", "post_id", "url", "reason", "scheduled_for",
+        "platform", "status", "post_id", "url", "reason", "scheduled_for", "payload",
     ]
     with pytest.raises(dataclasses.FrozenInstanceError):
         result.status = "failed"

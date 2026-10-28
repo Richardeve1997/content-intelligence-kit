@@ -128,7 +128,7 @@ def test_items_json_has_the_agreed_shape(kit_tree):
     data = items_of(kit_tree)
     assert set(data) == {
         "version", "date", "generated_at", "timezone", "name", "mode", "window_days", "notices", "sources",
-        "transcripts", "creators", "videos", "videos_total", "x_posts", "notes", "performance",
+        "transcripts", "creators", "videos", "videos_total", "videos_recent", "x_posts", "notes", "performance",
     }
     assert data["version"] == 1 and data["name"] == "Example Studio" and data["window_days"] == 14
     needed = {"id", "platform", "creator", "url", "posted_at", "title", "views", "likes", "comments", "engagement", "outlier",
@@ -290,6 +290,31 @@ def test_the_brain_grows_and_gives_the_next_run_its_history(kit_tree, me, monkey
     assert second["creators"][0]["pulled"] == 2
     assert second["creators"][0]["on_record"] == 3  # a, b and c, with b counted once
     assert second["creators"][0]["low_sample"] is False
+
+
+def test_the_counts_leave_out_earlier_standouts_from_past_runs(kit_tree, me, monkeypatch):
+    """A second run lists a big video from the first run as an earlier standout. The page's numbers count only what
+    this run pulled, the same as the terminal: 5 pulled and 1 older standout is 5 videos, not 6."""
+    write_watchlist(me, youtube=["@example_channel"])
+    clock = {"now": NOW}
+    monkeypatch.setattr(common, "utcnow", lambda: clock["now"])
+    monkeypatch.setitem(sys.modules, "yt_dlp", make_yt_dlp({"example_channel": {"big": short_info("Big", likes=50000)}}))
+    pipeline.run(no_transcribe=True, say=lambda *a, **k: None)
+
+    clock["now"] = NOW + timedelta(days=1)
+    pulled = {f"v{n}": short_info(f"Video {n}", likes=100 + n, ts=int(NOW.timestamp()) - (1 + 20 * (n % 2)) * 86400)
+              for n in range(5)}
+    monkeypatch.setitem(sys.modules, "yt_dlp", make_yt_dlp({"example_channel": pulled}))
+    printed = []
+    pipeline.run(no_transcribe=True, say=printed.append)
+    data = items_of(kit_tree, "2026-10-29")
+    assert any(v.get("source") == "brain" for v in data["videos"]), "the first run's big video comes back as a standout"
+    assert any(line.startswith("YouTube: 5 videos from 1 creator") for line in printed), printed
+    assert data["videos_total"] == 5
+    recent_this_run = [v for v in data["videos"] if v.get("source") == "run" and v.get("set") == "recent"]
+    page = page_of(kit_tree, "2026-10-29")
+    assert '<dt>Videos</dt><dd class="num">5</dd>' in page
+    assert f"5 videos from 1 creator this time, {len(recent_this_run)} of them from the last" in visible(page)
 
 
 def test_a_transcript_found_once_is_not_fetched_again(kit_tree, me, web, monkeypatch):

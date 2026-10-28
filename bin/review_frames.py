@@ -32,6 +32,12 @@ def duration(path: Path) -> float:
     return float(out or 0)
 
 
+def stamp(t: float, fps: float = 1.0) -> str:
+    """A tile's time, never shared with another tile at this rate: whole seconds as "3s", others as "1.5s"."""
+    places = 1 if fps <= 10 else 2
+    return f"{t:.{places}f}".rstrip("0").rstrip(".") + "s"
+
+
 def label(tile, text):
     from PIL import ImageDraw, ImageFont
 
@@ -48,8 +54,13 @@ def label(tile, text):
 
 
 def frames_at_rate(video: Path, fps: float, folder: Path) -> list[Path]:
-    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(video), "-vf", f"fps={fps},scale={TILE_W}:-2",
-                    "-q:v", "3", str(folder / "f%04d.jpg")], check=True)
+    """One frame every 1/fps seconds, each the frame at its own time. ffmpeg's fps filter rounds to the nearest
+    slot by default, which hands each slot the last frame before the next half period: half a period late. It
+    also counts slots from the first picture, so a picture that starts a little after the sound would put every
+    tile a whole period late; start_time=0 counts them from the start of the file."""
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(video), "-vf",
+                    f"fps={fps}:round=up:start_time=0,scale={TILE_W}:-2", "-q:v", "3", str(folder / "f%04d.jpg")],
+                   check=True)
     return sorted(folder.glob("f*.jpg"))
 
 
@@ -59,10 +70,10 @@ def frame_at(video: Path, t: float, out: Path, width: int) -> Path | None:
     return out if out.is_file() else None
 
 
-def sheet(images: list[Path], times: list[float], cols: int, out: Path):
+def sheet(images: list[Path], times: list[float], cols: int, out: Path, fps: float = 1.0):
     from PIL import Image
 
-    tiles = [label(Image.open(p).convert("RGB"), f"{t:.0f}s" if t >= 1 else f"{t:.1f}s") for p, t in zip(images, times)]
+    tiles = [label(Image.open(p).convert("RGB"), stamp(t, fps)) for p, t in zip(images, times)]
     w, h = tiles[0].size
     rows = math.ceil(len(tiles) / cols)
     scale = min(1.0, MAX_HEIGHT / (rows * h))
@@ -98,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No frames could be read from {a.video}.")
             return 1
         times = [i / a.fps for i in range(len(tiles))]
-        sheet(tiles, times, a.cols, out / "sheet.jpg")
+        sheet(tiles, times, a.cols, out / "sheet.jpg", a.fps)
         opens, open_times = [], []
         for t in OPEN_TIMES:
             if t < length:

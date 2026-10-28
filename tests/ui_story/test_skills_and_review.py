@@ -121,6 +121,60 @@ def test_review_frames_takes_a_rate_and_rejects_a_missing_file(tmp_path):
     assert "Traceback" not in missing.stderr and "nope.mp4" in missing.stdout + missing.stderr
 
 
+def _review_frames():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("review_frames", ROOT / "bin" / "review_frames.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("fps", [1, 2, 3, 4, 10, 20])
+def test_every_tile_on_a_sheet_has_its_own_time(fps):
+    """At two frames a second the tiles at 1.5 s and 2 s must not both say 2s: the review names a moment by it."""
+    stamp = _review_frames().stamp
+    labels = [stamp(i / fps, fps) for i in range(int(fps * 6))]
+    assert len(set(labels)) == len(labels), labels
+    assert stamp(0.2, 1) == "0.2s" and stamp(3, 1) == "3s" and stamp(1.5, 2) == "1.5s"
+
+
+@pytest.mark.parametrize("fps", [0.5, 1, 2])
+def test_each_tile_shows_the_frame_at_its_time(tmp_path, fps):
+    """A tile stamped 1.5s shows the frame at 1.5 s, so a fix named by that time lands where the review saw it.
+    The test video's brightness is twice its frame number, so each tile says which frame it holds."""
+    from PIL import Image, ImageStat
+
+    video = tmp_path / "ramp.mp4"
+    ffmpeg("-f", "lavfi", "-i", "nullsrc=s=64x64:r=30:d=4,format=gray,geq=lum='N*2'", "-c:v", "libx264", "-qp", "0",
+           "-pix_fmt", "yuv420p", video)
+    tiles = _review_frames().frames_at_rate(video, fps, tmp_path)
+    assert len(tiles) >= 2
+    for index, tile in enumerate(tiles):
+        frame = ImageStat.Stat(Image.open(tile).convert("L")).mean[0] / 2
+        assert abs(frame - index / fps * 30) <= 1.5, (index, frame)
+
+
+@pytest.mark.parametrize("fps", [1, 2])
+def test_tiles_keep_their_times_when_the_picture_starts_after_the_sound(tmp_path, fps):
+    """In some files the first picture comes a frame after the sound. The tile stamped 0s is still that first
+    picture, not one a whole period later. Here the picture starts 1/60 s in and its brightness is its frame number."""
+    from PIL import Image, ImageStat
+
+    ramp, late = tmp_path / "ramp.mp4", tmp_path / "late.mp4"
+    ffmpeg("-f", "lavfi", "-i", "nullsrc=s=64x64:r=60:d=4,format=gray,geq=lum='N'", "-c:v", "libx264", "-qp", "0",
+           "-pix_fmt", "yuv420p", ramp)
+    ffmpeg("-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-itsoffset", "0.0166667", "-i", ramp,
+           "-map", "1:v", "-map", "0:a", "-t", "4", "-c:v", "copy", "-c:a", "aac", late)
+    folder = tmp_path / "tiles"
+    folder.mkdir()
+    tiles = _review_frames().frames_at_rate(late, fps, folder)
+    assert len(tiles) >= 4
+    for index, tile in enumerate(tiles):
+        frame = ImageStat.Stat(Image.open(tile).convert("L")).mean[0]
+        assert abs(frame - max(0.0, index / fps - 1 / 60) * 60) <= 2.0, (index, frame)
+
+
 # --- what this round of fixes added ------------------------------------------------------------------------
 
 

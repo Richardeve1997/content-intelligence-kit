@@ -72,15 +72,27 @@ def _plural_creators(count: int) -> str:
 
 
 def _hero(p: Page) -> str:
+    """The top of the page. Its big numbers are the whole pull, the same ones the run printed in the terminal; the
+    sentence above them says how many of those videos are from the last two weeks."""
     data = p.data
-    recent = [v for v in data.get("videos", []) if v.get("set") == "recent"]
-    creators = {(v["platform"], str(v["creator"]).lower()) for v in recent}
+    videos = data.get("videos", [])
+    this_run = [v for v in videos if v.get("source", "run") == "run"]  # not the earlier standouts from past runs
+    recent = [v for v in this_run if v.get("set") == "recent"]
+    if "videos_recent" in data:  # counted by the run before the list was cut short, as the terminal counts
+        total, recent_count = data.get("videos_total", 0), data["videos_recent"]
+    else:  # a run from before these counts: its total also counted the earlier standouts it listed
+        total = max(len(this_run), (data.get("videos_total") or 0) - (len(videos) - len(this_run)))
+        recent_count = len(recent)
+    total = total if this_run else 0
+    pulled = [c for c in data.get("creators", []) if c.get("pulled")]
     scored = [v for v in recent if v.get("outlier") is not None]
-    if recent:
-        lede = f"{common.plural(len(recent), 'video')} from {_plural_creators(len(creators))} in the last {data.get('window_days', common.WINDOW_DAYS)} days."
+    days = data.get("window_days", common.WINDOW_DAYS)
+    if total:
+        window = f"{recent_count} of them from the last {days} days" if recent_count else f"none of them from the last {days} days"
+        lede = f"{common.plural(total, 'video')} from {_plural_creators(len(pulled))} this time, {window}."
         if scored:
             top = max(scored, key=lambda v: v["outlier"])
-            lede += f" The strongest ran {top['outlier']:.1f} times that creator's normal."
+            lede += f" The strongest of those ran {top['outlier']:.1f} times that creator's normal."
             if top.get("low_sample"):
                 lede += " That creator has few videos on record, so treat the number as rough."
     else:
@@ -88,8 +100,8 @@ def _hero(p: Page) -> str:
     posts = data.get("x_posts", [])
     read = sum(1 for post in posts if post.get("status") == "read")
     stats = [
-        ("Videos", str(len(recent))),
-        ("Creators", str(len(creators))),
+        ("Videos", str(total)),
+        ("Creators", str(len(pulled))),
         ("X posts", f"{read} of {len(posts)}" if posts else "0"),
         ("Ideas", str(len(p.ideas)) if p.ideas else "0"),
     ]

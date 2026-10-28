@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -68,6 +69,8 @@ def _line(result: post.Result, zone: ZoneInfo) -> str:
 def _print_results(results: list[post.Result], zone: ZoneInfo) -> int:
     for result in results:
         print(_line(result, zone))
+        if result.payload is not None:  # a dry run: the request as it would be sent, indented under its line
+            print(textwrap.indent(json.dumps(result.payload, indent=2, ensure_ascii=False), "  "))
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
@@ -124,8 +127,19 @@ def _times(profile, args, platforms: list[str]) -> dict[datetime, list[str]]:
 # --- the commands ------------------------------------------------------------------------------------------
 
 
+NO_KEY_CHECK = (
+    "There is no Zernio key, so you post by hand: each video gets a file with its captions and times. "
+    "To have the kit schedule posts instead, add a line ZERNIO_API_KEY=your key to the .env file in the kit folder."
+)
+
+
 def _check(args) -> int:
-    for name, state in post.accounts_check().items():
+    try:
+        states = post.accounts_check()
+    except post.NoZernio:
+        print(NO_KEY_CHECK)  # posting by hand is a choice the creator made, so this is an answer, not a failure
+        return 0
+    for name, state in states.items():
         print(f"{post.captions.display_name(name)}: {state}")
     return 0
 
@@ -184,6 +198,8 @@ def _schedule(args) -> int:
     except post.NoZernio as exc:
         if results:
             raise
+        # the first group wrote the file with its own time, so write it again with every group's time
+        post.write_manual(args.video, profile=profile, times={name: when for when, group in groups.items() for name in group})
         print(exc)  # the manual file is written, and that is the answer
         return 0
     except KitError as exc:

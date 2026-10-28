@@ -10,7 +10,7 @@ import errno
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -59,9 +59,10 @@ def test_check_lists_each_platform_and_nothing_private(keyed, capsys):
 
 
 def test_check_without_a_key_says_so_in_one_sentence(studio, capsys):
+    """Posting by hand is a choice, not a failure: one sentence, and exit 0 so a script reads it as an answer."""
     status, out, err = say(capsys, "check")
-    assert status == 1 and out == ""
-    assert "ZERNIO_API_KEY" in err and err.count("\n") == 1
+    assert status == 0 and err == ""
+    assert "ZERNIO_API_KEY" in out and "by hand" in out and out.count("\n") == 1
 
 
 def test_lines_gives_each_platform_its_call_to_action_and_tags(reel, capsys):
@@ -177,9 +178,33 @@ def test_a_dry_run_needs_no_approval_and_sends_nothing(keyed, reel, capsys):
     status, out, _ = say(capsys, "schedule", reel.slug, "--on", "tomorrow", "--time", "18:00", "--dry-run")
     assert status == 0 and keyed.calls() == []
     lines = out.splitlines()
-    assert [line.split(":")[0] for line in lines[:6]] == ["Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"]
-    assert all("dry run" in line and "Would schedule for" in line for line in lines[:6])
+    heads = [line for line in lines if not line.startswith(" ") and "dry run" in line]
+    assert [line.split(":")[0] for line in heads] == ["Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"]
+    assert all("Would schedule for" in line for line in heads)
     assert lines[-1].startswith("Nothing was sent.")
+
+
+def test_a_dry_run_prints_each_post_as_it_would_go_out(keyed, reel, capsys):
+    """Under each platform's line, indented: the request that would be sent, with placeholders for the account
+    and the uploaded video, which only Zernio knows."""
+    status, out, _ = say(capsys, "schedule", reel.slug, "--platforms", "tiktok", "youtube", "--on", "tomorrow",
+                         "--time", "18:00", "--dry-run")
+    assert status == 0 and keyed.calls() == []
+    blocks, current = {}, None
+    for line in out.splitlines():
+        if line.startswith(("TikTok:", "YouTube:")):
+            current = line.split(":")[0]
+            blocks[current] = []
+        elif line.startswith("  ") and current:
+            blocks[current].append(line)
+    tiktok, youtube = (json.loads("\n".join(blocks[name])) for name in ("TikTok", "YouTube"))
+    assert tiktok["tiktokSettings"]["privacy_level"] == "PUBLIC_TO_EVERYONE" and "#basil" in tiktok["content"]
+    assert youtube["platforms"][0]["platformSpecificData"]["title"] == "Why windowsill basil dies in week three"
+    day = datetime.strptime(tomorrow(), "%Y-%m-%d").date()
+    assert datetime.fromisoformat(youtube["scheduledFor"]) == datetime.combine(day, time(18, 0), tzinfo=ZoneInfo("Europe/London"))
+    assert youtube["timezone"] == "Europe/London" and tiktok["scheduledFor"] == youtube["scheduledFor"]
+    assert youtube["platforms"][0]["accountId"] == "<your YouTube account in Zernio>"
+    assert youtube["mediaItems"] == [{"type": "video", "url": "<the video, once it is uploaded>"}]
 
 
 def test_a_failed_platform_makes_the_exit_status_1(keyed, reel, capsys):
@@ -219,6 +244,36 @@ def test_no_key_writes_the_manual_file_and_says_so_in_one_sentence(reel, capsys)
         f"work/{reel.slug}/post/manual.md, ready to post by hand."
     )
     assert (reel.folder / "post" / "manual.md").is_file()
+
+
+def test_with_no_key_the_manual_file_gives_the_day_and_time_of_every_post(reel, capsys):
+    say(capsys, "approve", reel.slug)
+    day = datetime.strptime(tomorrow(), "%Y-%m-%d").strftime("%a %d %b")
+    assert say(capsys, "schedule", reel.slug, "--on", "tomorrow", "--time", "21:15")[0] == 0
+    text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
+    for name in ("Instagram", "TikTok", "YouTube", "Facebook", "LinkedIn", "X"):
+        assert f"## {name} ({day} 21:15)" in text, (name, text)
+    assert say(capsys, "schedule", reel.slug, "--on", "tomorrow")[0] == 0, "no time: each platform's usual time"
+    text = (reel.folder / "post" / "manual.md").read_text(encoding="utf-8")
+    assert f"## Instagram ({day} 18:00)" in text and f"## LinkedIn ({day} 08:30)" in text and f"## X ({day} 12:00)" in text
+
+
+def test_a_video_it_cannot_measure_still_lets_the_other_platforms_go_out(keyed, reel, capsys, monkeypatch):
+    """The real schedule makes its plan first, and the plan asks for the length only for Facebook. A length that
+    cannot be read fails Facebook alone; Instagram is still scheduled."""
+    from kit.post import payloads
+    from kit.post.errors import PostError
+
+    def cannot_measure(path):
+        raise PostError("The length of final.mp4 could not be read. Check that it plays and try again.")
+
+    monkeypatch.setattr(payloads, "video_seconds", cannot_measure)
+    say(capsys, "approve", reel.slug)
+    status, out, _ = say(capsys, "schedule", reel.slug, "--platforms", "instagram", "facebook", "--on", tomorrow(),
+                         "--time", "18:00")
+    assert status == 1, out
+    assert out.startswith("Instagram: scheduled for ") and "Facebook: failed." in out and "could not be read" in out
+    assert len(keyed.creates()) == 1
 
 
 def test_the_manual_command_writes_the_same_file(reel, capsys):

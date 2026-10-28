@@ -217,6 +217,12 @@ For mini me, hand over to the `character` skill now. If `.claude/skills/characte
 
 The handover is done when the pack is made and the check ends with "all passed". If they would rather build the character later, that is fine too: they say "make my character" whenever they are ready.
 
+When `voice_over` is `elevenlabs` and the key is in `.env`, choose the voice before the test clips, which read in it:
+
+1. List the account's stock voices: `uv run python -m kit.voice voices`. Each comes with what ElevenLabs says about it (gender, age, accent, what it suits) and a link to hear it.
+2. From that list, offer two or three that suit the character's description, each with its link, and recommend one in a sentence that says why.
+3. Save the one they choose by name: `uv run python -m kit.voice pick '<name>'`. Every voice-over reads in it from then on, until they pick another. With no pick, the kit uses the account's first stock voice by name and says so each time.
+
 ### Step 9: Test clip
 
 Make a short clip in their brand for each style they chose, with one command:
