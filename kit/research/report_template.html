@@ -9,10 +9,13 @@
 {{TOKENS}}
 </style>
 <style>
-/* Every colour comes from the creator's tokens above. Muted text and lines are mixed from the ink and
-   the canvas, so they follow the brand. The only literal colours here are greys. */
+/* Every colour comes from the creator's tokens above. --text is the colour words take on the surface under
+   them: the ink on the canvas, and on a card on the light field the colour that reads there (--on-field-light),
+   as on a mini me light page. Muted text and lines are mixed from the text colour and its surface, so they follow
+   the brand. The only literal colours here are greys. */
 :root {
   color-scheme: light;
+  --text: var(--ink);
   --muted: color-mix(in srgb, var(--ink) 64%, var(--canvas));
   --line: color-mix(in srgb, var(--ink) 16%, var(--canvas));
   --soft: color-mix(in srgb, var(--ink) 6%, var(--canvas));
@@ -24,13 +27,20 @@ html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   background: var(--canvas);
-  color: var(--ink);
+  color: var(--text);
   font-family: var(--font-body);
   font-size: 17px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
-a { color: var(--ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+/* The cards on the light field: the idea cards, the X posts that were read and the creator's own results. */
+.idea, .post, .mine li {
+  --text: var(--on-field-light);
+  --muted: color-mix(in srgb, var(--on-field-light) 64%, var(--field-light));
+  --line: color-mix(in srgb, var(--on-field-light) 16%, var(--field-light));
+  color: var(--text);
+}
+a { color: var(--text); text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { text-decoration-thickness: 2px; }
 a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 ul, ol { margin: 0; padding: 0; list-style: none; }
@@ -66,7 +76,7 @@ h2 { font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 
 .notices li { padding: 12px 16px; background: var(--soft); border-left: 4px solid var(--accent); border-radius: 6px; }
 
 /* Chips */
-.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--ink); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--text); border-radius: 6px; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
 .chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .chip.quiet { border-color: var(--line); color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -80,7 +90,7 @@ h2 { font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 
 h4 { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
 .evidence, .hooklist { margin-top: 22px; }
 .evidence li { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
-.evidence .x, .score { font-family: var(--font-display); font-weight: 600; color: var(--ink); }
+.evidence .x, .score { font-family: var(--font-display); font-weight: 600; color: var(--text); }
 .evidence .x, .score.strong { color: var(--accent); }
 .evidence .x { font-size: 22px; }
 .hooklist ol { counter-reset: hook; }
@@ -98,7 +108,7 @@ h4 { font-family: var(--font-mono); font-size: 12px; font-weight: 500; letter-sp
 .then { color: var(--muted); margin-top: 8px; }
 .note { color: var(--muted); font-size: 15px; margin-top: 8px; }
 .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 15px; margin-top: 10px; }
-.meta .who { color: var(--ink); font-weight: 600; }
+.meta .who { color: var(--text); font-weight: 600; }
 .side { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .compact li { grid-template-columns: 90px minmax(0, 1fr) 170px; padding: 14px 0; }
 .compact .score { font-size: 34px; }

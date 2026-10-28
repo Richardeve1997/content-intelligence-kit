@@ -526,3 +526,58 @@ def test_a_different_brand_gives_a_different_page(offline_run, example_me):
     page = rebuild(config.load_profile(), run_dir)
     assert "#8a2be2" in TOKENS_BLOCK.search(page).group(1).lower()
     assert "#177245" not in page.lower()
+
+
+def _rgb(css: str) -> tuple[float, float, float]:
+    """A computed colour as 0 to 255 channels, from rgb(r, g, b) or the color(srgb r g b) that color-mix gives."""
+    numbers = [float(n) for n in re.findall(r"[\d.]+", css)[:3]]
+    return tuple(n * 255 for n in numbers) if css.startswith("color(") else tuple(numbers)
+
+
+def test_cards_on_a_mid_grey_light_field_take_the_text_colour_that_reads_there(offline_run, example_me):
+    """The idea, X post and result cards sit on the light field. A mid grey one takes white text, as a mini me light
+    page does, and the muted text and the lines inside the card are mixed from that colour, not from the ink."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    _, run_dir = offline_run
+    colours = {**json.loads((example_me / "profile.json").read_text(encoding="utf-8"))["colours"], "field_light": "#707070"}
+    write_profile(example_me, colours=colours)
+    profile = config.load_profile()
+    assert brand.colour_tokens(profile)["on-field-light"] == "#ffffff", "white reads 4.9:1 on this grey, the ink 3.2:1"
+    data = load(run_dir)
+    write_ideas(run_dir, [an_idea(1, "Idea about soil", data["videos"][0]["url"], outlier=6.3)])
+    data["x_posts"] = [{
+        "url": "https://x.com/example_account/status/9", "status": "read", "handle": "example_account",
+        "author_name": "Example Account", "text": "Nobody tells you this about basil.", "views": 120000, "likes": 3400,
+        "reposts": 500, "replies": 210, "created_at": "2026-10-27T10:00:00+00:00", "via": "fxtwitter",
+    }]
+    data["performance"] = {
+        "status": "ok", "handle": "examplestudio", "followers": 1200, "window_from": "2026-09-16", "window_to": "2026-10-28",
+        "median_engagement": 953, "median_views": 11500, "feed_reels": 8, "trial_reels": 1, "young": [], "patterns": [],
+        "top": [{"id": "me:A3", "url": "https://www.instagram.com/reel/A3/", "title": "Reel A3 about basil",
+                 "posted_at": "2026-10-21T10:00:00Z", "views": 22000, "saves": 700, "multiple": 1.4}],
+    }
+    save(run_dir, data)
+    page, _ = report.write(profile, run_dir)
+
+    with sync_api.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as problem:  # noqa: BLE001
+            pytest.skip(f"no browser for the page check: {problem}")
+        try:
+            tab = browser.new_page()
+            tab.goto(page.as_uri())
+
+            def colour(selector: str, prop: str = "color") -> tuple[float, float, float]:
+                return _rgb(tab.evaluate(f"getComputedStyle(document.querySelector({selector!r}))[{prop!r}]"))
+
+            white, field = (255.0, 255.0, 255.0), (112.0, 112.0, 112.0)
+            for selector in (".idea h3", ".idea .evidence a", ".post .text", ".mine .title", ".mine .score"):
+                assert colour(selector) == white, selector
+            for selector in (".idea h4", ".post .numbers", ".mine .note"):
+                assert all(c > f + 50 for c, f in zip(colour(selector), field)), f"{selector} is muted white, not muted ink"
+            line = colour(".idea .evidence li", "borderTopColor")
+            assert all(c > f for c, f in zip(line, field)), "a line inside a card is mixed from the card's text colour"
+            assert colour(".sources li .name") != white, "text on the canvas keeps the ink"
+        finally:
+            browser.close()
