@@ -584,29 +584,298 @@ def test_a_failed_write_never_leaves_a_profile_that_says_setup_is_done(me, monke
 
     assert "No space left on device" in str(caught.value)
     assert "Free some disk space" in str(caught.value)
-    assert files_under(me) == [".onboarding.json", "brand/tokens.css"], "the profile is the one file that is missing"
+    assert files_under(me) == [".onboarding.json"], "nothing was replaced, and no temporary file is left"
     with pytest.raises(NotOnboarded):
         config.load_profile()
 
 
-def test_the_profile_is_written_last_so_a_half_finished_run_is_still_not_set_up(me, monkeypatch):
+def test_a_failure_on_the_very_last_rename_still_leaves_no_profile(me, monkeypatch):
     state = fill(State())
-    order = []
     real_replace = os.replace
-    real_write = brand.write_tokens
 
-    def spy_replace(source, target):
-        order.append(Path(target).name)
+    def fail_for_the_profile(source, target):
+        if Path(target).name == "profile.json":
+            raise OSError(28, "No space left on device")
         return real_replace(source, target)
 
-    def spy_tokens(profile, out):
-        order.append(Path(out).name)
-        return real_write(profile, out)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail_for_the_profile)
+        with pytest.raises(KitError):
+            state.finish()
+
+    assert files_under(me) == [".onboarding.json", "brand/tokens.css"], "the tokens landed, the profile did not, nothing is left over"
+    with pytest.raises(NotOnboarded):
+        config.load_profile()
+
+
+def test_finish_stages_both_files_before_it_replaces_either_and_the_profile_goes_last(me, monkeypatch):
+    state = fill(State())
+    seen = []
+    real_replace = os.replace
+
+    def spy_replace(source, target):
+        seen.append((Path(target).name, Path(source).name.endswith(".tmp"), sorted(p.name for p in me.rglob("*.tmp"))))
+        return real_replace(source, target)
 
     monkeypatch.setattr(os, "replace", spy_replace)
-    monkeypatch.setattr(brand, "write_tokens", spy_tokens)
     state.finish()
-    assert order == ["tokens.css", "profile.json"]
+
+    assert [name for name, _, _ in seen] == ["tokens.css", "profile.json"]
+    assert all(from_temp for _, from_temp, _ in seen), "both are renamed into place from staged temporary files"
+    first_name, _, staged_at_first_rename = seen[0]
+    assert len(staged_at_first_rename) == 2, "the profile is staged before the tokens are renamed"
+    assert files_under(me) == [".onboarding.json", "brand/tokens.css", "profile.json"]
+
+
+def test_a_failing_tokens_write_leaves_no_profile_and_no_temporary_file(me, monkeypatch):
+    state = fill(State())
+
+    def fail_halfway(profile, out):
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_text("half a file", encoding="utf-8")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(brand, "write_tokens", fail_halfway)
+    with pytest.raises(KitError) as caught:
+        state.finish()
+
+    assert "Free some disk space" in str(caught.value)
+    assert files_under(me) == [".onboarding.json"], "no profile, no tokens, and the half-written temporary file is gone"
+    with pytest.raises(NotOnboarded):
+        config.load_profile()
+
+
+def test_a_failing_tokens_write_leaves_an_existing_profile_and_tokens_as_they_were(me, monkeypatch):
+    fill(State()).finish()
+    profile_before = (me / "profile.json").read_bytes()
+    tokens_before = (me / "brand" / "tokens.css").read_bytes()
+    state = State()
+    state.save("look", {"colours": {**EXAMPLE["colours"], "accent": "#123456"}})
+
+    def fail(profile, out):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(brand, "write_tokens", fail)
+    with pytest.raises(KitError):
+        state.finish()
+
+    assert (me / "profile.json").read_bytes() == profile_before
+    assert (me / "brand" / "tokens.css").read_bytes() == tokens_before
+    assert files_under(me) == [".onboarding.json", "brand/tokens.css", "profile.json"]
+
+
+PERMISSION = (
+    "not allowed to write in your me folder. Check that the folder belongs to you and is not read-only, then try again."
+)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [PermissionError(13, "Permission denied"), OSError(1, "Operation not permitted"), OSError(30, "Read-only file system")],
+    ids=["permission-denied", "not-permitted", "read-only"],
+)
+def test_a_permission_problem_has_its_own_sentence_and_never_blames_the_disk(me, monkeypatch, error):
+    state = fill(State())
+    sentences = []
+
+    def refuse(*args, **kwargs):
+        raise error
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", refuse)
+        for action in (lambda: state.finish(), lambda: state.save("tour", {}), lambda: onboarding.preview(LOOK)):
+            with pytest.raises(KitError) as caught:
+                action()
+            sentences.append(str(caught.value))
+
+    for sentence in sentences:
+        assert sentence.startswith("Setup could not save ") and sentence.endswith(PERMISSION)
+        assert "disk space" not in sentence and "No space" not in sentence
+    assert [s.split(",")[0] for s in sentences] == [
+        "Setup could not save your files",
+        "Setup could not save your progress",
+        "Setup could not save the preview",
+    ]
+
+
+def test_another_failure_to_write_is_named_and_not_called_a_full_disk(me, monkeypatch):
+    state = fill(State())
+
+    def fail(*args, **kwargs):
+        raise OSError(5, "Input/output error")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail)
+        with pytest.raises(KitError) as caught:
+            state.finish()
+    assert str(caught.value) == (
+        "Setup could not save your files (Input/output error). Try again, and tell your agent if it keeps failing."
+    )
+
+
+# --- platform names ------------------------------------------------------------------------------------------
+
+NAMES = 'The platform names are instagram, tiktok, youtube, facebook, linkedin and twitter. X is saved as "twitter".'
+
+
+@pytest.mark.parametrize(
+    "answers, start",
+    [
+        ({"platforms": ["instagram", "x"]}, 'platforms has "x", which is not a platform name the kit knows.'),
+        ({"platforms": ["Instagram"]}, 'platforms has "Instagram", which is not a platform name the kit knows.'),
+        ({"platforms": ["myspace", "orkut"]}, 'platforms has "myspace" and "orkut", which are not platform names the kit knows.'),
+        ({"platforms": ["a", "b", "c"]}, 'platforms has "a", "b" and "c", which are not platform names the kit knows.'),
+        ({"platforms": ["x", "x"]}, 'platforms has "x", which is not a platform name the kit knows.'),
+        ({"handles": {"x": "@examplestudio"}}, 'handles has "x", which is not a platform name the kit knows.'),
+        ({"handles": {"instagram": "@examplestudio", "Twitter": "@examplestudio"}}, 'handles has "Twitter", which is not a platform name the kit knows.'),
+        ({"posting_times": {"X": "18:00"}}, 'posting_times has "X", which is not a platform name the kit knows.'),
+        (
+            {"cta": {"type": "comment", "keyword": "GROW", "comment_platforms": ["x"]}},
+            'cta.comment_platforms has "x", which is not a platform name the kit knows.',
+        ),
+        ({"platforms": [5]}, "platforms has 5, which is not a platform name the kit knows."),
+    ],
+)
+def test_save_rejects_names_that_are_not_platforms_and_lists_the_right_ones(me, answers, start):
+    state = State()
+    state.save("welcome", {})
+    before = (me / ".onboarding.json").read_bytes()
+
+    with pytest.raises(ValueError) as caught:
+        state.save("who", answers)
+
+    message = str(caught.value)
+    assert message.startswith(start)
+    assert message.endswith(NAMES)
+    assert "Traceback" not in message and EM_DASH not in message and EN_DASH not in message
+    assert (me / ".onboarding.json").read_bytes() == before
+    assert state.done == ["welcome"] and state.answers == {}
+
+
+def test_save_reports_every_answer_that_has_a_wrong_platform_name_in_one_message(me):
+    state = State()
+    with pytest.raises(ValueError) as caught:
+        state.save("who", {"platforms": ["x"], "handles": {"x": "@a"}, "cta": {"type": "comment", "comment_platforms": ["X"]}})
+    assert str(caught.value) == (
+        'platforms has "x", which is not a platform name the kit knows. '
+        'handles has "x", which is not a platform name the kit knows. '
+        'cta.comment_platforms has "X", which is not a platform name the kit knows. ' + NAMES
+    )
+
+
+def test_save_accepts_all_six_platform_names_in_every_answer_that_holds_them(me):
+    names = list(config.PLATFORMS)
+    assert names == ["instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter"]
+    state = State()
+    state.save(
+        "who",
+        {
+            "platforms": names,
+            "handles": {name: "@examplestudio" for name in names},
+            "posting_times": {name: "18:00" for name in names},
+            "cta": {"type": "comment", "keyword": "GROW", "comment_platforms": names},
+        },
+    )
+    assert state.answers["platforms"] == names
+
+
+def test_save_leaves_other_kinds_of_value_for_finish_to_report(me):
+    state = State()
+    state.save("who", {"platforms": "instagram", "handles": ["instagram"], "posting_times": 5, "cta": "follow"})
+    assert state.answers["platforms"] == "instagram"
+    with pytest.raises(ProfileError) as caught:
+        State().finish()
+    assert any(problem.startswith("platforms has the wrong kind of value") for problem in caught.value.problems)
+
+
+def test_a_platform_name_problem_on_the_command_line_is_one_sentence_with_exit_1(me, capsys):
+    code, out, err = run(["save", "who", '{"platforms": ["instagram", "x"]}'], capsys)
+    assert (code, out) == (1, "")
+    assert err == 'platforms has "x", which is not a platform name the kit knows. ' + NAMES + "\n"
+    assert not (me / ".onboarding.json").exists()
+
+
+# --- clearing a group that was saved wrong ---------------------------------------------------------------------
+
+
+def test_saving_a_group_again_keeps_an_entry_the_new_one_leaves_out(me):
+    state = State()
+    state.save("posting", {"posting_times": {"instagram": "18:00", "tiktok": "19:00"}})
+    state.save("posting", {"posting_times": {"instagram": "17:00"}})
+    assert state.answers["posting_times"] == {"instagram": "17:00", "tiktok": "19:00"}
+
+
+def test_a_group_saved_as_null_and_then_in_full_holds_only_the_full_group(me, capsys):
+    state = State()
+    state.save("posting", {"posting_times": {"instagram": "18:00", "tiktok": "19:00"}})
+
+    state.save("posting", {"posting_times": None})
+    assert state.answers["posting_times"] is None
+    state.save("posting", {"posting_times": {"instagram": "17:00"}})
+
+    assert state.answers["posting_times"] == {"instagram": "17:00"}
+    assert State().answers["posting_times"] == {"instagram": "17:00"}, "and that is what the file holds"
+
+
+def test_the_same_reset_works_on_the_command_line_and_reaches_the_profile(me, capsys):
+    fill(State(), answers_for(posting_times={"instagram": "18:00", "tiktok": "19:00"}))
+    assert run(["save", "posting", '{"posting_times": null}'], capsys)[0] == 0
+    assert run(["save", "posting", '{"posting_times": {"instagram": "17:00"}}'], capsys)[0] == 0
+
+    profile = State().finish()
+
+    assert profile.posting_times == {"instagram": "17:00"}
+    assert json.loads((me / "profile.json").read_text(encoding="utf-8"))["posting_times"] == {"instagram": "17:00"}
+
+
+def test_an_answer_saved_as_null_counts_as_not_answered_yet(me):
+    state = fill(State())
+    state.save("who", {"handles": None, "cta": None})
+    assert state.missing_answers() == ["handles", "cta"]
+    with pytest.raises(ProfileError) as caught:
+        state.finish()
+    assert [p.split(" ")[0] for p in caught.value.problems] == ["handles", "cta"]
+    assert all(" is missing" in p for p in caught.value.problems)
+    assert files_under(me) == [".onboarding.json"]
+
+
+def test_an_optional_answer_saved_as_null_falls_back_to_its_default(me):
+    state = fill(State(), answers_for(posting_times={"instagram": "18:00"}, voice_over="elevenlabs"))
+    state.save("posting", {"posting_times": None})
+    state.save("styles", {"voice_over": None})
+    profile = state.finish()
+    assert profile.posting_times == {} and profile.voice_over == "record"
+
+
+# --- saying that a profile was replaced -------------------------------------------------------------------------
+
+
+def test_finish_says_so_when_it_replaces_a_profile_that_was_already_there(me, capsys):
+    fill(State())
+    first = run(["finish"], capsys)[1].splitlines()
+    second = run(["finish"], capsys)[1].splitlines()
+
+    assert first == ["Wrote me/profile.json and me/brand/tokens.css."]
+    assert second == [
+        "Wrote me/profile.json and me/brand/tokens.css.",
+        "It replaced the me/profile.json that was already there.",
+    ]
+
+
+def test_finish_says_so_for_a_profile_that_setup_did_not_write(me, capsys):
+    write_profile(me)
+    fill(State())
+    lines = run(["finish"], capsys)[1].splitlines()
+    assert lines[1] == "It replaced the me/profile.json that was already there."
+
+
+def test_the_state_remembers_whether_finish_replaced_a_profile(me):
+    state = fill(State())
+    assert state.replaced_profile is False
+    state.finish()
+    assert state.replaced_profile is False
+    state.finish()
+    assert state.replaced_profile is True
 
 
 # --- the cross-field rules in the loader ----------------------------------------------------------------------
@@ -637,7 +906,7 @@ def test_the_example_profile_passes_the_cross_field_rules(me):
 def test_a_comment_platform_that_is_not_a_posting_platform_is_a_problem(me):
     write_profile(
         me,
-        platforms=["instagram", "tiktok", "youtube", "facebook", "linkedin", "twitter"][:2],
+        platforms=["instagram", "tiktok"],
         handles={"instagram": "@examplestudio", "tiktok": "@examplestudio"},
         cta={"type": "comment", "keyword": "GROW", "payload": "the checklist", "comment_platforms": ["instagram", "facebook"]},
     )
@@ -673,8 +942,7 @@ def test_a_platform_without_a_handle_is_a_problem(me, empty):
 
 
 def test_a_handle_for_a_platform_you_do_not_post_on_is_fine(me):
-    write_profile(me, platforms=["instagram"])
-    # the example comments on facebook too, so that goes
+    # the example profile still has handles for all six platforms, and it comments on facebook too, so that goes
     write_profile(
         me,
         platforms=["instagram"],
@@ -1125,6 +1393,25 @@ def test_each_step_section_names_what_it_runs_and_says_so_when_a_piece_is_missin
     assert ".claude/skills/mini-me/kit/test_clip.py" in test_clip
     assert "not there yet" in test_clip
     assert "run my research" in found[10][1]
+
+
+def test_the_skill_says_in_steps_3_and_7_that_x_is_saved_as_twitter():
+    found = step_sections(read(SKILLS / "onboard" / "SKILL.md"))
+    for number in (3, 7):
+        assert 'X is saved as "twitter"' in found[number][1], number
+    assert found[3][1].count('X is saved as "twitter"') == 1 and found[7][1].count('X is saved as "twitter"') == 1
+
+
+def test_the_skill_has_the_recipe_for_clearing_a_group():
+    body = read(SKILLS / "onboard" / "SKILL.md")
+    section = body.split("## Fixing a saved answer", 1)[1].split("\n## ", 1)[0]
+    assert "save it as null, then save the full group" in section
+    assert 'save posting \'{"posting_times": null}\'' in section
+    assert 'save posting \'{"posting_times": {"instagram": "17:00"}}\'' in section
+    assert sections(body).index("Fixing a saved answer") < sections(body).index("Coming back later")
+    # the commands in the recipe are real: run them
+    for line in re.findall(r"^uv run python -m kit\.onboarding (save posting .+)$", section, re.M):
+        assert line.startswith("save posting '{") and line.endswith("}'")
 
 
 def test_the_onboard_skill_keeps_keys_out_of_the_conversation():

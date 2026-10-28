@@ -72,6 +72,8 @@ Ask in this order, one question at a time:
 6. Who the videos are for, and what that audience wants from them.
 7. How their videos end. Either a plain follow, or a comment keyword: the word (such as GROW), what they send to people who comment, and the platforms where they or a tool really do reply to those comments. List a platform only if something answers the comments there, because the kit never writes a keyword call to action for a platform where nothing replies.
 
+Platform names are saved in lower case, and X is saved as "twitter".
+
 Keep their wording. If you shorten or join their answers, run the sentences through the `humanizer` skill in embedded mode and keep every fact.
 
 ```bash
@@ -151,6 +153,8 @@ Both ways, ask for two more things:
 - Their time zone. Run `readlink /etc/localtime`. The part after `zoneinfo/` is the zone name, such as Europe/London. Confirm it with them.
 - Three to five base hashtags that fit their niche. Each starts with # and has no spaces. They go on every post except LinkedIn, which gets none.
 
+The posting times use the same names, and X is saved as "twitter" here too.
+
 ```bash
 uv run python -m kit.onboarding save posting - <<'EOF'
 {"timezone": "Europe/London", "posting_times": {"instagram": "18:00", "tiktok": "18:00"}, "hashtags": {"base": ["#balconygarden", "#growyourown"]}}
@@ -220,6 +224,17 @@ Save the last step, then tell them what to say next: "run my research".
 ```bash
 uv run python -m kit.onboarding save tour
 ```
+
+## Fixing a saved answer
+
+Saving merges groups, so a wrong entry inside a saved group stays when you save that group again. To clear a group, save it as null, then save the full group:
+
+```bash
+uv run python -m kit.onboarding save posting '{"posting_times": null}'
+uv run python -m kit.onboarding save posting '{"posting_times": {"instagram": "17:00"}}'
+```
+
+A value that is only wrong, such as a mistyped handle, is fixed by saving the right one over it. A save with a platform name that is not one of the six is refused, and the message lists the right names. `status` lists an answer saved as null as still needed.
 
 ## Coming back later
 

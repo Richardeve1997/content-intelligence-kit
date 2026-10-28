@@ -34,6 +34,7 @@ import argparse
 import contextlib
 import copy
 import dataclasses
+import errno
 import html
 import json
 import os
@@ -137,13 +138,39 @@ def _reason(exc: OSError) -> str:
     return exc.strerror or type(exc).__name__
 
 
-def _write_text(path: Path, text: str) -> None:
-    """Write a file in one step, so a run that stops never leaves half a file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+def _save_problem(exc: OSError, what: str) -> str:
+    """One plain sentence for a write that failed: not allowed, out of room, or some other reason."""
+    if isinstance(exc, PermissionError) or exc.errno in (errno.EACCES, errno.EPERM, errno.EROFS):
+        return (
+            f"Setup could not save {what}, because it is not allowed to write in your me folder. "
+            "Check that the folder belongs to you and is not read-only, then try again."
+        )
+    if exc.errno == errno.ENOSPC:
+        return f"Setup could not save {what} ({_reason(exc)}). Free some disk space and try again."
+    return f"Setup could not save {what} ({_reason(exc)}). Try again, and tell your agent if it keeps failing."
+
+
+def _temp_beside(path: Path) -> Path:
+    return path.with_name(f"{path.name}.{os.getpid()}.tmp")
+
+
+def _stage(path: Path, text: str) -> Path:
+    """Write `text` to a temporary file beside `path` and return its name. Nothing at `path` changes yet."""
+    temp = _temp_beside(path)
+    temp.parent.mkdir(parents=True, exist_ok=True)
     try:
         with temp.open("w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+    return temp
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Write a file in one step, so a run that stops never leaves half a file."""
+    temp = _stage(path, text)
+    try:
         os.replace(temp, path)
     except BaseException:
         temp.unlink(missing_ok=True)
@@ -205,6 +232,45 @@ def _creator_folder(folder: Path) -> Iterator[None]:
             os.environ["KIT_ME"] = previous
 
 
+_PLATFORM_LIST = ", ".join(config.PLATFORMS[:-1]) + " and " + config.PLATFORMS[-1]
+
+
+def _platform_fields(answers: Mapping[str, Any]) -> list[tuple[str, list[Any]]]:
+    """The answers that hold platform names, as (where, the names they hold)."""
+    found: list[tuple[str, list[Any]]] = []
+    platforms = answers.get("platforms")
+    if isinstance(platforms, (list, tuple)):
+        found.append(("platforms", list(platforms)))
+    for field in ("handles", "posting_times"):
+        group = answers.get(field)
+        if isinstance(group, Mapping):
+            found.append((field, list(group)))
+    cta = answers.get("cta")
+    comment = cta.get("comment_platforms") if isinstance(cta, Mapping) else None
+    if isinstance(comment, (list, tuple)):
+        found.append(("cta.comment_platforms", list(comment)))
+    return found
+
+
+def _platform_name_problem(answers: Mapping[str, Any]) -> str | None:
+    """One message about every platform name the kit does not know, or None when all of them are right."""
+    sentences = []
+    for where, names in _platform_fields(answers):
+        unknown: list[Any] = []
+        for name in names:
+            if name not in config.PLATFORMS and name not in unknown:
+                unknown.append(name)
+        if not unknown:
+            continue
+        shown = [json.dumps(name, ensure_ascii=False) for name in unknown]
+        listing = shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]
+        what = "is not a platform name" if len(shown) == 1 else "are not platform names"
+        sentences.append(f"{where} has {listing}, which {what} the kit knows.")
+    if not sentences:
+        return None
+    return " ".join(sentences) + f' The platform names are {_PLATFORM_LIST}. X is saved as "twitter".'
+
+
 def _profile_written(me: Path) -> bool:
     try:
         stored = json.loads((me / "profile.json").read_text(encoding="utf-8-sig"))
@@ -229,6 +295,7 @@ class State:
         self.step = 0
         self.done: list[str] = []
         self.answers: dict[str, Any] = {}
+        self.replaced_profile = False  # set by finish(): did it replace a me/profile.json that was already there?
         self._read()
 
     @classmethod
@@ -282,8 +349,8 @@ class State:
         return DONE
 
     def missing_answers(self) -> list[str]:
-        """The answers the profile needs that nobody has saved yet, in profile order."""
-        return [name for name in REQUIRED if name not in self.answers]
+        """The answers the profile needs that nobody has saved yet, in profile order. An answer saved as null is not saved."""
+        return [name for name in REQUIRED if self.answers.get(name) is None]
 
     # saving
 
@@ -306,6 +373,9 @@ class State:
             raise ValueError(
                 f"The answers for {step} can only hold plain text, numbers, true or false, lists and groups of answers."
             ) from None
+        unknown_names = _platform_name_problem(answers)
+        if unknown_names:
+            raise ValueError(unknown_names)
 
         merged = copy.deepcopy(self.answers)
         _merge(merged, answers)
@@ -314,9 +384,7 @@ class State:
         try:
             _write_text(self.path, json.dumps(stored, indent=2, ensure_ascii=False) + "\n")
         except OSError as exc:
-            raise StateError(
-                f"Setup could not save your progress ({_reason(exc)}). Free some disk space and try again."
-            ) from None
+            raise StateError(_save_problem(exc, "your progress")) from None
         self.step, self.done, self.answers = stored["step"], done, merged
 
     # finishing
@@ -324,7 +392,7 @@ class State:
     def _candidate(self) -> dict[str, Any]:
         data = copy.deepcopy(_DEFAULTS)
         for field in _PROFILE_FIELDS:
-            if field in self.answers:
+            if self.answers.get(field) is not None:  # an answer saved as null counts as not given
                 data[field] = copy.deepcopy(self.answers[field])
         data["version"] = 1
         data["onboarded"] = True
@@ -348,15 +416,27 @@ class State:
         else:
             written.pop("research")
         text = json.dumps(written, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+
+        tokens_path = self.me / "brand" / "tokens.css"
+        profile_path = self.me / "profile.json"
+        replaced = profile_path.exists()
+        staged: list[Path] = []
         try:
             with _creator_folder(self.me):
                 brand.tokens_css(profile)  # a dry run, so a problem here is found before anything is written
-                brand.write_tokens(profile, self.me / "brand" / "tokens.css")
-            _write_text(self.me / "profile.json", text)  # last: until it exists, setup still counts as unfinished
+                staged.append(_temp_beside(tokens_path))
+                brand.write_tokens(profile, staged[0])  # written beside the real file, then renamed into place
+            staged.append(_stage(profile_path, text))
+            # Both files are ready. The renames are all that is left, and the profile goes last: until it
+            # exists, setup still counts as unfinished.
+            os.replace(staged[0], tokens_path)
+            os.replace(staged[1], profile_path)
         except OSError as exc:
-            raise StateError(
-                f"Setup could not save your files ({_reason(exc)}). Free some disk space and try again."
-            ) from None
+            raise StateError(_save_problem(exc, "your files")) from None
+        finally:
+            for temp in staged:
+                temp.unlink(missing_ok=True)
+        self.replaced_profile = replaced
         return profile
 
 
@@ -489,7 +569,7 @@ def preview(look: Mapping[str, Any] | None = None, *, name: str | None = None) -
     try:
         _write_text(out, page)
     except OSError as exc:
-        raise StateError(f"The preview could not be saved ({_reason(exc)}).") from None
+        raise StateError(_save_problem(exc, "the preview")) from None
     return out, warnings
 
 
@@ -500,7 +580,7 @@ def rewrite_tokens() -> tuple[Path, list[str]]:
     try:
         brand.write_tokens(profile, out)
     except OSError as exc:
-        raise StateError(f"The tokens could not be saved ({_reason(exc)}).") from None
+        raise StateError(_save_problem(exc, "the brand tokens")) from None
     return out, brand.check(profile)
 
 
@@ -566,8 +646,11 @@ def _run(args: argparse.Namespace) -> int:
         print("Wrote me/brand/preview.html. Open it in a browser to see the card.")
         print("\n".join(_warning_lines(warnings, "Hard to read:")) or "Every colour pair is easy to read.")
     elif args.command == "finish":
-        profile = State().finish()
+        state = State()
+        profile = state.finish()
         print("Wrote me/profile.json and me/brand/tokens.css.")
+        if state.replaced_profile:
+            print("It replaced the me/profile.json that was already there.")
         lines = _warning_lines(brand.check(profile), "Heads up, these colours are hard to read together:")
         if lines:
             print("\n".join(lines))
