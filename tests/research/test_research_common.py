@@ -267,6 +267,20 @@ def test_a_failed_download_leaves_nothing_behind(monkeypatch, tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_a_kit_error_is_shown_whole_and_without_a_class_name():
+    # these are plain sentences written for the creator, so they are never cut and never prefixed
+    sentence = "No speech model is installed. Install the video tools with: uv sync --group video"
+    assert len(sentence) == 81  # one past the 80 characters other reasons are cut to
+    assert common.why(config.KitError(sentence)) == sentence
+    long = "Only 3.2 GB free on this disk, and a heavy job needs at least 5 GB. " * 4
+    assert common.why(config.KitError(long)) == long.strip()
+    assert common.why(config.NotOnboarded()) == "The kit has not been set up yet. Say: set me up."
+
+
+def test_other_reasons_are_still_short_and_named():
+    assert common.why(RuntimeError("x" * 200)) == "RuntimeError: " + "x" * 80
+
+
 def test_reasons_never_carry_an_address_or_a_key():
     assert common.why(common.HttpError(402, "HTTP 402")) == "HTTP 402"
     assert common.why(RuntimeError("failed at https://example.com/x?token=not-a-real-key")) == "RuntimeError: failed at <url>"

@@ -7,6 +7,7 @@ from datetime import timedelta
 import pytest
 
 from kit import config
+from kit.config import KitError
 from kit.research import performance
 from research_helpers import NOW, write_profile
 
@@ -202,6 +203,15 @@ def test_a_zernio_error_is_explained_without_the_key(profile, fake_zernio):
     assert result["status"] == "skipped"
     assert result["message"] == "Performance skipped: Zernio did not answer (Zernio returned HTTP 401: the key <key> is not valid)"
     assert KEY not in repr(result)
+
+
+def test_zernios_own_sentence_is_shown_as_it_is(profile, fake_zernio):
+    # kit.zernio raises a KitError whose message is already one plain sentence, so nothing is added to it
+    fake_zernio.pages = KitError(f"Zernio returned HTTP 401: the key {KEY} was not accepted.")
+    result = performance.collect(profile, key=KEY, now=NOW)
+    assert result == {"status": "skipped", "message": "Performance skipped: Zernio returned HTTP 401: the key <key> was not accepted."}
+    fake_zernio.pages = KitError("Zernio did not answer in time.")
+    assert performance.collect(profile, key=KEY, now=NOW)["message"] == "Performance skipped: Zernio did not answer in time."
 
 
 def test_a_copy_of_the_kit_without_zernio_carries_on(profile, monkeypatch):

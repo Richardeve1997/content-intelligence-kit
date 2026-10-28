@@ -173,6 +173,10 @@ def fake_speech(monkeypatch):
     media.require_free = require_free
     monkeypatch.setitem(sys.modules, "kit.transcribe", transcribe)
     monkeypatch.setitem(sys.modules, "kit.media", media)
+    try:
+        import numpy  # noqa: F401  the real speech tools need it, so the check for the tools looks for it too
+    except ImportError:
+        monkeypatch.setitem(sys.modules, "numpy", types.ModuleType("numpy"))
     return recorder
 
 

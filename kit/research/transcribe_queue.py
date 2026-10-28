@@ -10,7 +10,9 @@ For each recent video from this run, in order of its score:
    Only the strongest few are transcribed this way, and the disk is checked before the first one.
 
 A step that cannot run (the speech tools are missing, the disk is nearly full) leaves a plain sentence
-and the run carries on with the transcripts it has.
+and the run carries on with the transcripts it has. The speech tools come with the video group, so a
+research-only install does not have them: that is checked before the first download, and a first answer
+of "not installed" from the tools stops the queue after one video, not after twelve.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from kit.config import KitError
 from kit.research import common
 from kit.research.common import is_usable
 
@@ -31,6 +34,9 @@ LOCAL_LIMIT = 12  # videos transcribed on this machine in one run
 FREE_LIMIT = 40  # caption files fetched in one run
 MAX_FAILS_IN_A_ROW = 3
 CAPTION_BYTES = 2_000_000
+SKIPPED = "Speech to text skipped:"
+INSTALL_VIDEO_TOOLS = f"{SKIPPED} install the video tools with uv sync --group video --inexact"
+NOT_IN_THIS_COPY = f"{SKIPPED} the kit's transcription tools are not available in this copy"
 
 
 @dataclass
@@ -133,7 +139,7 @@ def fetch_audio(item: dict, workdir) -> Path | None:
 
 
 def _sentence(exc: BaseException) -> str:
-    return str(exc).strip().rstrip(".") or type(exc).__name__
+    return str(exc).strip() or type(exc).__name__
 
 
 def _order(video: dict) -> float:
@@ -158,50 +164,74 @@ def _fetch_caption(video: dict) -> tuple[dict, str, str] | None:
     return (video, text, source) if is_usable(text) else None
 
 
-def _transcribe_here(todo: list[dict], workdir: Path, fetch, outcome: Outcome) -> None:
+def _speech_tools():
+    """(kit.transcribe, kit.media) when the speech tools can be imported, else (None, the sentence to show).
+
+    The real kit.transcribe imports fine without numpy and only reaches for it once it holds a video, so
+    numpy is looked for here, before anything is downloaded. A missing piece of the kit itself is a
+    different problem from a missing library, and gets its own sentence.
+    """
     try:
         transcribe = importlib.import_module("kit.transcribe")
         media = importlib.import_module("kit.media")
-    except ImportError:
-        outcome.notices.append("Speech to text skipped: the kit's transcription tools are not available in this copy")
+        importlib.import_module("numpy")
+    except ImportError as exc:
+        if (getattr(exc, "name", None) or "kit").split(".")[0] == "kit":
+            return None, NOT_IN_THIS_COPY
+        return None, INSTALL_VIDEO_TOOLS
+    return (transcribe, media), None
+
+
+def _transcribe_here(todo: list[dict], workdir: Path, fetch, outcome: Outcome) -> None:
+    tools, problem = _speech_tools()
+    if problem:
+        outcome.notices.append(problem)
         return
+    transcribe, media = tools
     try:
         media.require_free()
     except Exception as exc:
-        outcome.notices.append(f"Speech to text skipped: {_sentence(exc)}")
+        outcome.notices.append(f"{SKIPPED} {_sentence(exc)}")
         return
 
     shutil.rmtree(workdir, ignore_errors=True)  # anything here is left over from a run that was stopped
     workdir.mkdir(parents=True, exist_ok=True)
-    failed, in_a_row, last_reason = 0, 0, ""
+    working = False  # becomes True once the speech tools have turned one video into text
+    failed = in_a_row = no_download = 0
+    last_reason = ""
     for video in todo:
-        audio = None
         try:
             audio = fetch(video, workdir)
-            if audio is None:
-                raise _CouldNotFetch("the video could not be downloaded")
+        except Exception:
+            audio = None
+        if audio is None:
+            no_download += 1  # a video that cannot be had says nothing about the speech tools
+            continue
+        try:
             with media.heavy_slot():
                 spoken = transcribe.words(audio, align=False)
             text = " ".join(word.text.strip() for word in spoken if word.text.strip())
+        except (ImportError, KitError) as exc:
+            if not working:  # the very first answer was "not installed", or "no room": it will be the same for every video
+                outcome.notices.append(INSTALL_VIDEO_TOOLS if isinstance(exc, ImportError) else f"{SKIPPED} {_sentence(exc)}")
+                return
+            failed, in_a_row, last_reason = failed + 1, in_a_row + 1, common.why(exc)
+        except Exception as exc:
+            failed, in_a_row, last_reason = failed + 1, in_a_row + 1, common.why(exc)
+        else:
+            working, in_a_row = True, 0
             if is_usable(text):
                 video["transcript"], video["transcript_source"] = text, "local transcription"
                 outcome.local += 1
-            in_a_row = 0
-        except Exception as exc:
-            failed, in_a_row = failed + 1, in_a_row + 1
-            last_reason = str(exc) if isinstance(exc, _CouldNotFetch) else common.why(exc)
-            if in_a_row >= MAX_FAILS_IN_A_ROW:
-                outcome.notices.append(f"Speech to text stopped after {MAX_FAILS_IN_A_ROW} videos in a row failed ({last_reason})")
-                return
         finally:
-            if audio is not None:
-                Path(audio).unlink(missing_ok=True)
+            Path(audio).unlink(missing_ok=True)
+        if in_a_row >= MAX_FAILS_IN_A_ROW:
+            outcome.notices.append(f"Speech to text stopped after {MAX_FAILS_IN_A_ROW} videos in a row failed ({last_reason})")
+            return
     if failed:
         outcome.notices.append(f"Speech to text failed for {common.plural(failed, 'video')} ({last_reason})")
-
-
-class _CouldNotFetch(Exception):
-    """The sound of a video could not be had."""
+    if no_download:
+        outcome.notices.append(f"{common.plural(no_download, 'video')} could not be downloaded")
 
 
 def attach(videos: list[dict], known: dict, *, local: bool = True, limit: int = LOCAL_LIMIT, workdir, fetch=None) -> Outcome:

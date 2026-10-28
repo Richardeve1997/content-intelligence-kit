@@ -335,9 +335,14 @@ def http_download(url, dest, *, timeout=60, limit=VIDEO_BYTES):
 
 
 def why(exc: BaseException) -> str:
-    """A short plain reason for a failure. Addresses are cut out, because they can carry keys."""
+    """A short plain reason for a failure. Addresses are cut out, because they can carry keys.
+
+    A KitError is already one plain sentence written for the creator, so it is shown whole, with no class name.
+    """
     if isinstance(exc, HttpError):
         return str(exc)
+    if isinstance(exc, config.KitError):
+        return str(exc).strip() or type(exc).__name__
     if isinstance(exc, TimeoutError):
         return str(exc)[:80] or "timed out"
     message = re.sub(r"https?://\S+", "<url>", str(exc)).strip()

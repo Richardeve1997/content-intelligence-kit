@@ -14,6 +14,7 @@ import importlib
 import re
 from datetime import timedelta
 
+from kit.config import KitError
 from kit.research import common, rank
 
 PERF_DAYS = 42  # six weeks of Reels
@@ -45,6 +46,8 @@ def collect(profile, *, key, offline: bool = False, now=None) -> dict:
         raw = fetch(zernio, profile, key)
     except Exception as exc:
         reason = common.redact(str(exc).strip() or type(exc).__name__, key)
+        if isinstance(exc, KitError):  # Zernio's own errors: it did answer, and the message is already one plain sentence
+            return _skipped(reason)
         return _skipped(f"Zernio did not answer ({reason})")
     return analyse(raw, profile, now=now)
 

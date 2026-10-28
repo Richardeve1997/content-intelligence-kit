@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from kit.config import KitError
 from kit.research import common, rank, transcribe_queue as queue
+
+INSTALL = "Speech to text skipped: install the video tools with uv sync --group video --inexact"
+NO_MODEL = "No speech model is installed. Install the video tools with: uv sync --group video"  # as the real kit.transcribe words it
 
 LONG = "Water basil in the morning and never at night because the roots sit in cold water until sunrise"
 
@@ -180,6 +184,110 @@ def test_leftovers_from_a_run_that_was_stopped_are_cleared_first(tmp_path, fake_
     assert not workdir.exists()
 
 
+# --- the speech tools are missing: found before any download, or after the first ------------------------
+
+
+def test_missing_numpy_is_found_before_anything_is_downloaded(tmp_path, fake_speech, monkeypatch):
+    # A research-only install has no numpy, and the real tools only reach for it once they hold a video.
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    calls = []
+    outcome = queue.attach([clip("a"), clip("b"), clip("c")], {}, workdir=tmp_path / "media", fetch=stub_fetch(calls))
+    assert calls == []  # not one video was downloaded
+    assert fake_speech.events == [] and fake_speech.free_calls == []
+    assert outcome.notices == [INSTALL]
+    assert outcome.local == 0 and outcome.missing == 3
+    assert not (tmp_path / "media").exists()
+
+
+def test_a_speech_model_that_is_missing_is_reported_whole_after_one_download(tmp_path, fake_speech, monkeypatch):
+    assert len(NO_MODEL) == 81  # the real sentence is one character past what a reason is cut to
+
+    def words(audio, *, align=True):
+        raise KitError(NO_MODEL)
+
+    monkeypatch.setattr(sys.modules["kit.transcribe"], "words", words)
+    calls = []
+    outcome = queue.attach([clip(f"v{n}") for n in range(8)], {}, workdir=tmp_path / "media", fetch=stub_fetch(calls))
+    assert calls == ["ig:v0"]  # the first video found out, and the other seven were left alone
+    assert outcome.notices == [f"Speech to text skipped: {NO_MODEL}"]
+    assert "KitError" not in outcome.notices[0]
+    assert not (tmp_path / "media").exists()
+
+
+def test_a_speech_library_that_will_not_import_gets_the_install_sentence(tmp_path, fake_speech, monkeypatch):
+    def words(audio, *, align=True):
+        raise ModuleNotFoundError("No module named 'faster_whisper'", name="faster_whisper")
+
+    monkeypatch.setattr(sys.modules["kit.transcribe"], "words", words)
+    calls = []
+    outcome = queue.attach([clip("a"), clip("b")], {}, workdir=tmp_path / "media", fetch=stub_fetch(calls))
+    assert calls == ["ig:a"]
+    assert outcome.notices == [INSTALL]
+
+
+def test_a_full_disk_found_by_the_heavy_slot_stops_the_queue_with_its_own_words(tmp_path, fake_speech, monkeypatch):
+    sentence = "Only 3.2 GB free on this disk, and a heavy job needs at least 5 GB. Free some space (empty the Trash, or delete old renders in work/), then try again."
+    from contextlib import contextmanager
+
+    @contextmanager
+    def full():
+        raise KitError(sentence)
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(sys.modules["kit.media"], "heavy_slot", full)
+    calls = []
+    outcome = queue.attach([clip("a"), clip("b")], {}, workdir=tmp_path / "media", fetch=stub_fetch(calls))
+    assert calls == ["ig:a"]
+    assert outcome.notices == [f"Speech to text skipped: {sentence}"]
+
+
+def test_a_problem_with_one_video_after_the_tools_have_worked_does_not_stop_the_rest(tmp_path, fake_speech, monkeypatch):
+    spoken = types.SimpleNamespace
+
+    def words(audio, *, align=True):
+        if audio.name == "ig_b.wav":
+            raise KitError("ig_b.wav has no sound ffmpeg can read.")
+        return [spoken(text=w, start=0.0, end=0.0) for w in LONG.split()]
+
+    monkeypatch.setattr(sys.modules["kit.transcribe"], "words", words)
+    videos = [clip("a", 9.0), clip("b", 8.0), clip("c", 7.0)]
+    outcome = queue.attach(videos, {}, workdir=tmp_path / "media", fetch=stub_fetch())
+    assert [bool(v.get("transcript")) for v in videos] == [True, False, True]
+    assert outcome.local == 2
+    assert outcome.notices == ["Speech to text failed for 1 video (ig_b.wav has no sound ffmpeg can read.)"]
+
+
+def test_failed_downloads_never_stop_the_queue(tmp_path, fake_speech):
+    calls = []
+
+    def fetch(item, workdir):
+        calls.append(item["id"])
+        return None if len(calls) <= 5 else stub_fetch()(item, workdir)
+
+    videos = [clip(f"v{n}", float(20 - n)) for n in range(8)]
+    outcome = queue.attach(videos, {}, workdir=tmp_path / "media", fetch=fetch)
+    assert len(calls) == 8  # five downloads failed in a row and it still tried the next
+    assert outcome.local == 3
+    assert outcome.notices == ["5 videos could not be downloaded"]
+
+
+def test_when_every_download_fails_it_says_so_and_never_asks_the_speech_tools(tmp_path, fake_speech):
+    outcome = queue.attach([clip("a"), clip("b")], {}, workdir=tmp_path / "media", fetch=lambda item, folder: None)
+    assert outcome.notices == ["2 videos could not be downloaded"]
+    assert [e for e in fake_speech.events if e.startswith("words")] == []
+    assert outcome.local == 0 and outcome.missing == 2
+
+
+def test_a_download_that_blows_up_is_just_a_failed_download(tmp_path, fake_speech):
+    def fetch(item, workdir):
+        if item["id"] == "ig:a":
+            raise OSError("disk went away")
+        return stub_fetch()(item, workdir)
+
+    outcome = queue.attach([clip("a", 9.0), clip("b", 8.0)], {}, workdir=tmp_path / "media", fetch=fetch)
+    assert outcome.local == 1 and outcome.notices == ["1 video could not be downloaded"]
+
+
 def test_only_the_strongest_videos_are_transcribed_locally(tmp_path, fake_speech):
     videos = [clip(f"v{n}", float(n)) for n in range(15, 0, -1)]  # best first, as the ranking leaves them
     calls = []
@@ -196,6 +304,7 @@ def test_a_video_that_cannot_be_downloaded_is_skipped_and_the_rest_carry_on(tmp_
     outcome = queue.attach(videos, {}, workdir=tmp_path / "media", fetch=fetch)
     assert "transcript" not in videos[0] and videos[1]["transcript"]
     assert outcome.local == 1 and outcome.missing == 1
+    assert outcome.notices == ["1 video could not be downloaded"]
 
 
 def test_three_failures_in_a_row_stop_the_queue(tmp_path, fake_speech, monkeypatch):
