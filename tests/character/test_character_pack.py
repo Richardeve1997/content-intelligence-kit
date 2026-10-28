@@ -205,6 +205,45 @@ def test_the_redraw_note_reaches_the_prompt(built, tmp_path):
     assert "1. wave: " in seen["prompt"] and "Open the hand wider." in seen["prompt"]
 
 
+def test_the_held_card_is_the_largest_clear_rectangle_of_one_light_colour_below_the_head():
+    """The card a pose holds up is a patch of one light colour below the head that the idle drawing does not have
+    there (so a light top is never taken for a card); its clear face is the largest rectangle inside the patch,
+    which leaves out the thumb holding it."""
+    from character_sprites import CARD, draw_figure
+
+    idle, _ = draw_figure("idle")
+    held, _ = draw_figure("hold_card")
+    face = faces.locate(idle)
+    found = poses.held_card(held, idle, face, (0, 0))
+    assert found is not None
+    x, y, w, h = found
+    assert (held[y : y + h, x : x + w, :3] == CARD).all() and (held[y : y + h, x : x + w, 3] == 255).all()
+    assert w * h >= 0.7 * 23 * 21, "the clear face is most of the 23 x 21 card"
+    assert poses.held_card(idle, idle, face, (0, 0)) is None, "the idle drawing holds no card"
+
+
+def test_the_hold_card_pose_carries_the_clear_face_of_its_card(built):
+    """The pack measures the card the hold_card pose holds up and stores its clear face in the manifest, so a
+    video can write on it. No other pose carries one."""
+    folder, _, manifest_path = built
+    manifest = json.loads(manifest_path.read_text())
+    card = manifest["poses"]["hold_card"]["frame_info"][0]["card"]
+    assert card and len(card) == 4, card
+    x, y, w, h = card
+    assert w >= 12 and h >= 8, card
+    canvas = _rgba(folder / "poses" / "hold_card.png")
+    face = canvas[y : y + h, x : x + w]
+    colours = {tuple(int(v) for v in c) for c in face[..., :3].reshape(-1, 3)}
+    assert len(colours) == 1 and (face[..., 3] == 255).all(), "the card's face is one flat colour"
+    assert min(next(iter(colours))) >= 200, "the card is light"
+    assert y >= store.load(folder)["face"]["neck"], "the card sits below the head"
+    for name in CORE:
+        if name != "hold_card":
+            assert manifest["poses"][name]["frame_info"][0]["card"] is None, name
+    for name in ("talking", "point_left", "point_right", "point_up"):
+        assert all(info["card"] is None for info in manifest["moves"][name]["frame_info"]), name
+
+
 def _packed_creator(built, tmp_path, monkeypatch) -> Path:
     folder, _, _ = built
     me = tmp_path / "me"
@@ -228,6 +267,16 @@ def test_a_face_change_after_packing_packs_the_character_again(built, tmp_path, 
     assert packed == {name: [r["w"], r["h"]] for name, r in patches.items()}
     assert packed != before, "the new face reached the pack"
     assert "Packed the character again" in said
+
+
+def test_the_pack_says_what_card_the_hold_card_pose_holds(built, tmp_path, monkeypatch, capsys):
+    from kit.character import __main__ as cli
+
+    copy = _packed_creator(built, tmp_path, monkeypatch)
+    assert cli.main(["pack"]) == 0
+    said = capsys.readouterr().out
+    card = json.loads((copy / "manifest.json").read_text())["poses"]["hold_card"]["frame_info"][0]["card"]
+    assert f"holds a card {card[2]} x {card[3]} cells" in said and "write" in said, said
 
 
 def test_a_face_change_on_a_character_that_cannot_be_packed_now_says_the_pack_is_old(built, tmp_path, monkeypatch, capsys):

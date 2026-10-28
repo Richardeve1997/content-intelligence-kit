@@ -7,14 +7,15 @@ pack(folder) writes, inside the character folder:
                            numbers only.
   strips/pose_<name>.png   one drawing per core pose, for holding a pose (`pose:<name>`)
   manifest.json            the moves (kind, fps, loop or one-shot, sequence of [drawing, ticks], the hold
-                           entry, per-drawing mouth, eye and hand anchors), the poses, the face patch sizes
-                           and the locked palette
+                           entry, per-drawing mouth, eye and hand anchors, and on hold_card the clear face of
+                           the card it holds up), the poses, the face patch sizes and the locked palette
   manifest.js              the same data as window.CHARACTER_MANIFEST, because a HyperFrames page loads
                            data with a script tag, not a fetch
 
 The face patches themselves stay in faces/. An anchor is where the top-left of a patch goes on a drawing.
 It exists only on drawings that carry the front view's face, so the runtime never moves a mouth that is
-not there.
+not there. The card is measured on the hold_card drawing (kit.character.poses.held_card), so a video can
+write on it; it is None when no plain card was found.
 
 The heavy imports wait inside pack(), so `import kit.character` works without the character group.
 """
@@ -69,7 +70,7 @@ def pack(me_character: Path) -> Path:
 
     from kit.character import art, store
     from kit.character.faces import FaceBox
-    from kit.character.poses import LABELS, MOVE_NAMES, POSE_NAMES
+    from kit.character.poses import LABELS, MOVE_NAMES, POSE_NAMES, held_card
     from kit.config import KitError
 
     folder = Path(me_character)
@@ -81,14 +82,15 @@ def pack(me_character: Path) -> Path:
     rects = json.loads((folder / "faces" / "faces.json").read_text(encoding="utf-8"))["patches"]
     face = FaceBox.from_dict(state["face"])
 
-    def anchors(offset, hand) -> dict[str, Any]:
+    def anchors(offset, hand, card=None) -> dict[str, Any]:
         if offset is None:
-            return {"mouth": None, "eyes": None, "hand": hand}
+            return {"mouth": None, "eyes": None, "hand": hand, "card": card}
         ox, oy = offset
         return {
             "mouth": [rects["mouth_closed"]["x"] + ox, rects["mouth_closed"]["y"] + oy],
             "eyes": [rects["eyes_open"]["x"] + ox, rects["eyes_open"]["y"] + oy],
             "hand": hand,
+            "card": card,
         }
 
     def ref_col(canvas: np.ndarray, offset) -> float:
@@ -111,14 +113,16 @@ def pack(me_character: Path) -> Path:
             "ref_col": ref_col(frames[0], info[0]["offset"]), "label": label, "status": "approved",
             "notes": notes,
             "sequence": sequence, "hold": hold, "loop": None, "travel_px_per_frame": 0,
-            "frame_info": [anchors(i["offset"], i.get("hand")) for i in info], **(extra or {}),
+            "frame_info": [anchors(i["offset"], i.get("hand"), i.get("card")) for i in info], **(extra or {}),
         }  # fmt: skip
 
     poses: dict[str, Any] = {}
+    idle = art.load_rgba(folder / "poses" / "idle.png")
     for name in POSE_NAMES:
         record = state["poses"][name]
         canvas = art.load_rgba(folder / "poses" / f"{name}.png")
-        info = [{"offset": record.get("offset"), "hand": record.get("hand")}]
+        card = held_card(canvas, idle, face, record.get("offset")) if name == "hold_card" else None
+        info = [{"offset": record.get("offset"), "hand": record.get("hand"), "card": card}]
         poses[name] = entry("pose", [canvas], [[0, 1]], 0, info, f"strips/pose_{name}.png", LABELS[name],
                             "a still drawing, held until the next item", {"face": record.get("face"), "approved": True})  # fmt: skip
 

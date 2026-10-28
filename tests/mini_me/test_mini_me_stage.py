@@ -21,7 +21,7 @@ pytest.importorskip("PIL")
 playwright = pytest.importorskip("playwright.sync_api")
 
 from mini_me_helpers import (  # noqa: E402
-    BIG_HEAD, PAGES, ROOT, SECONDS, SPOKEN, build_project, load, make_character, needs_node,
+    BIG_HEAD, PAGES, ROOT, SECONDS, SPOKEN, STANDARD_CARD, build_project, load, make_character, needs_node,
 )
 from PIL import Image  # noqa: E402
 
@@ -414,6 +414,80 @@ def test_a_count_in_the_teens_shows_whole(stage):
         page.seek(round(1.0 + k / 60, 4))
         seen.add(page.js("document.getElementById('mm-test-12').textContent"))
     assert seen == {"12"}, seen
+
+
+# --- the card the character holds up --------------------------------------------------------------------------------
+
+HELD_PAGES = [
+    {"t": 0.0, "text": "BASIL *DIES*", "pose": "point_up", "field": "dark", "prop": "card: Week three"},
+    {"t": 1.6, "text": "THE PLAN", "pose": "hold_card", "field": "light", "prop": "card: Water early, then move it"},
+    {"t": 3.4, "text": "COMMENT GROW", "pose": "point_up", "field": "dark", "prop": "cta"},
+]
+HELD_SPOKEN = "Basil dies in week three. Here is the plan. Comment GROW and I'll send you the checklist."
+
+
+def held_project(tmp_path, monkeypatch, browser, build="standard", pages=HELD_PAGES):
+    root, me = tmp_path / "kit", tmp_path / "me"
+    shutil.copytree(ROOT / "me.example", me)
+    monkeypatch.setenv("KIT_ME", str(me))
+    monkeypatch.setattr(config, "kit_root", lambda: root)
+    hf = build_project(root, me, spoken=HELD_SPOKEN, build=build, pages=pages)
+    return Page(browser, hf), brand.colour_tokens(config.load_profile())
+
+
+def test_a_card_on_a_hold_card_page_is_written_on_the_card_the_character_holds(tmp_path, monkeypatch, browser):
+    """The hold_card pose holds up a plain card, measured when the character was packed. The page's card words go
+    on that card, fitted to its clear face at a readable size, instead of a second card dropping in beside it."""
+    page, tokens = held_project(tmp_path, monkeypatch, browser)
+    assert page.errors == []
+    info = page.js("Stage.audit()")
+    assert [p for p in info["problems"] if not p.startswith("note:")] == []
+    held, char = info["pages"][1]["held"], info["pages"][1]["char"]
+    assert held and held["w"] >= 200 and held["h"] >= 150, held
+    sc = char["scale"]  # the card's box on screen is the manifest's box at the character's scale and place
+    cx, cy, cw, ch = STANDARD_CARD
+    assert (held["left"], held["top"]) == (char["x"] + (cx - 122) * sc, char["y"] + (cy - 280) * sc), (held, char)
+    assert (held["w"], held["h"]) == (cw * sc, ch * sc)
+    page.seek(2.6)
+    shown = page.js("""(() => { const h = document.querySelector('#mm-p2 .mm-held'); if (!h) return null;
+        const o = h.getBoundingClientRect();
+        return {text: h.textContent, size: parseFloat(getComputedStyle(h.querySelector('span')).fontSize),
+                left: o.left, top: o.top, right: o.right, bottom: o.bottom}; })()""")
+    assert shown and shown["text"] == "Water early, then move it", shown
+    assert shown["size"] >= 26, shown
+    assert held["left"] <= shown["left"] and shown["right"] <= held["left"] + held["w"] + 1, (held, shown)
+    assert held["top"] <= shown["top"] and shown["bottom"] <= held["top"] + held["h"] + 1, (held, shown)
+    assert page.js("document.querySelectorAll('#mm-p2 .mm-card').length") == 0, "a second card dropped in"
+    frame = np.asarray(Image.open(page.shot(2.6, tmp_path / "held.png")).convert("RGB"))
+    x0, y0 = held["left"], held["top"]
+    assert near(frame[y0 + 4, x0 + 4], (255, 255, 255), 6), "the card's face shows round the words"
+    inside = frame[y0 : y0 + held["h"], x0 : x0 + held["w"]].reshape(-1, 3).astype(int)
+    assert (np.abs(inside - np.array(rgb(tokens["ink"]))).max(1) <= 12).any(), "no ink words on the card"
+    page.page.close()
+
+
+def test_a_hold_card_page_without_a_measured_card_drops_its_card_and_says_so(tmp_path, monkeypatch, browser):
+    """A character packed with no plain card in its hold_card drawing keeps the card dropping in, and the check
+    says why the held card stays blank."""
+    page, _ = held_project(tmp_path, monkeypatch, browser, build="big_head")
+    info = page.js("Stage.audit()")
+    assert info["pages"][1]["held"] is None
+    assert page.js("document.querySelectorAll('#mm-p2 .mm-card').length") == 1
+    notes = [p for p in info["problems"] if "hold_card" in p and "blank" in p]
+    assert len(notes) == 1 and notes[0].startswith("note: page 2"), info["problems"]
+    page.page.close()
+
+
+def test_a_hold_card_page_with_nothing_to_write_is_noted(tmp_path, monkeypatch, browser):
+    """A hold_card page whose prop is not a card holds a blank card up, which the check points out."""
+    pages = [dict(p) for p in HELD_PAGES]
+    pages[1]["prop"] = "none"
+    page, _ = held_project(tmp_path, monkeypatch, browser, pages=pages)
+    info = page.js("Stage.audit()")
+    assert page.js("document.querySelectorAll('#mm-p2 .mm-held').length") == 0
+    notes = [p for p in info["problems"] if "hold_card" in p and "blank" in p]
+    assert len(notes) == 1 and "card" in notes[0], info["problems"]
+    page.page.close()
 
 
 def profile_with(me, **handles):

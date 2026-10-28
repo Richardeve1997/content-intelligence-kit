@@ -89,6 +89,19 @@ def _face_lines(folder: Path, note: str | None = None) -> None:
               "and the neck line just under the chin.")  # fmt: skip
 
 
+def _card_line(manifest: Path) -> str:
+    """What the pack found on the hold_card pose: the clear face of the card it holds up, which a video writes on."""
+    import json
+
+    data = json.loads(Path(manifest).read_text(encoding="utf-8"))
+    card = data["poses"]["hold_card"]["frame_info"][0].get("card")
+    if card:
+        return f"The hold_card pose holds a card {card[2]} x {card[3]} cells, which a video can write its words on."
+    return ("No plain card was found on the hold_card pose, so a video cannot write on it: a card on that page drops in "
+            "beside the character instead. For words on the card, draw hold_card again with a large plain white card, "
+            "then pack again.")
+
+
 def _pack_again(folder: Path) -> None:
     """Pack again after the face changed. The pack holds each face patch's size and its place on every drawing, so
     an older pack would draw the new face stretched and out of place."""
@@ -101,6 +114,7 @@ def _pack_again(folder: Path) -> None:
               "Then run: uv run python -m kit.character pack")  # fmt: skip
         return
     print(f"Packed the character again, so the videos use the new face: {_shown(manifest)}")
+    print(_card_line(manifest))
 
 
 def _status(folder: Path) -> int:
@@ -226,6 +240,7 @@ def _run(args: argparse.Namespace) -> int:
 
         manifest = pack(folder)
         print(f"Packed the character: {_shown(manifest)}")
+        print(_card_line(manifest))
         return 0
     raise AssertionError(args.command)
 

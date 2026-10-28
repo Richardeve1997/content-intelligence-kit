@@ -52,10 +52,14 @@ REDRAW_GROUP = 3  # poses drawn again are batched in threes
 MATCH_DE = 20.0  # the mean colour distance under which a pose's head counts as the front view's head
 AIR_SLACK = 3  # a figure this close to the ground line is standing on it
 HAND_MIN_CELLS = 12  # a patch of bare skin smaller than this is a speck or a bit of ear, not a hand
+CARD_MIN = (12, 8)  # the clear face of a held card is at least this many cells wide and tall, so words fit on it
+CARD_LIGHT = 70.0  # Lab lightness: a card is light enough for ink to read on
+CARD_SAME = 0.5  # a light patch the idle drawing has in the same place (a light top) is not a card
 
 __all__ = [
     "POSE_NAMES", "MOVE_NAMES", "LABELS", "FACE_MODE", "BATCHES", "Result", "Match", "match_face", "head_lock",
-    "front_view", "fix_figure", "snap_strip", "hand_patches", "hand_anchor", "make", "approve", "redraw", "board",
+    "front_view", "fix_figure", "snap_strip", "hand_patches", "hand_anchor", "held_card", "make", "approve", "redraw",
+    "board",
 ]  # fmt: skip
 
 
@@ -199,6 +203,71 @@ def hand_anchor(canvas: np.ndarray, rule: str | None, skin: set, face: FaceBox, 
         return None
     pick = {"left": int(np.argmin(xs)), "right": int(np.argmax(xs)), "up": int(np.argmin(ys))}[rule]
     return [int(xs[pick]), int(ys[pick])]
+
+
+def _largest_rectangle(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    """The largest rectangle of true cells in a grid, as (x, y, w, h), or None when there is none."""
+    rows, cols = mask.shape
+    heights = np.zeros(cols, int)
+    best = (0, 0, 0, 0, 0)  # area, x, y, w, h
+    for y in range(rows):
+        heights = np.where(mask[y], heights + 1, 0)
+        stack: list[int] = []  # columns whose heights rise
+        for x in range(cols + 1):
+            current = int(heights[x]) if x < cols else 0
+            while stack and int(heights[stack[-1]]) >= current:
+                top = stack.pop()
+                height = int(heights[top])
+                left = stack[-1] + 1 if stack else 0
+                if height * (x - left) > best[0]:
+                    best = (height * (x - left), left, y - height + 1, x - left, height)
+            stack.append(x)
+    return None if best[0] == 0 else best[1:]
+
+
+def held_card(canvas: np.ndarray, idle: np.ndarray, face: FaceBox, offset: Sequence[int] | None) -> list[int] | None:
+    """The clear face of the card a pose holds up, as [x, y, w, h] in canvas cells, or None when the drawing holds
+    no card worth writing on.
+
+    A card is a patch of one light colour below the head that the idle drawing does not have in the same place, so
+    a light top is never taken for one. Its clear face is the largest rectangle inside the patch, which leaves out
+    the thumbs holding it where they cut into its edges. The biggest clear face wins, when it is at least CARD_MIN
+    cells wide and tall."""
+    solid = canvas[..., 3] > 0
+    if not solid.any():
+        return None
+    colours, inverse = np.unique(canvas[..., :3].reshape(-1, 3), axis=0, return_inverse=True)
+    grid = np.where(solid, inverse.reshape(canvas.shape[:2]), -1)
+    labs = art.lab_of(colours.astype(np.float64))
+    if offset is not None:
+        oy = int(offset[1])
+    else:  # an own-face pose: line the front view's head up with the top of this figure
+        box = art.content_box(canvas)
+        oy = (box[1] - face.top) if box else 0
+    head_end = max(0, face.neck + oy)
+    best, best_area = None, 0
+    for index in np.nonzero(labs[:, 0] >= CARD_LIGHT)[0]:
+        cells = grid == index
+        cells[:head_end] = False
+        if cells.sum() < CARD_MIN[0] * CARD_MIN[1]:
+            continue
+        patches, count = ndimage.label(cells)
+        for k in range(1, count + 1):
+            patch = patches == k
+            if patch.sum() < CARD_MIN[0] * CARD_MIN[1]:
+                continue
+            found = _largest_rectangle(patch)
+            if found is None:
+                continue
+            x, y, w, h = found
+            if w < CARD_MIN[0] or h < CARD_MIN[1] or w * h <= best_area:
+                continue
+            there = idle[y : y + h, x : x + w]
+            same = (there[..., :3] == colours[index]).all(2) & (there[..., 3] > 0)
+            if same.mean() >= CARD_SAME:
+                continue
+            best, best_area = [int(x), int(y), int(w), int(h)], w * h
+    return best
 
 
 # --- drawing and fixing a pose ----------------------------------------------------------------------------------------

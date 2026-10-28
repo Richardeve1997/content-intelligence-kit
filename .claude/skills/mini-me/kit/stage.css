@@ -45,6 +45,12 @@
 .light .mm-chip { box-shadow: 0 0 0 3px var(--ink); }
 .mm-chip.acc { background: var(--accent); color: var(--on-accent); }
 
+/* the card the character holds up (hold_card): the page's words on its clear face, in the character's layer */
+.mm-held { position: absolute; display: flex; align-items: center; justify-content: center; text-align: center; overflow: hidden;
+  color: var(--ink); font-family: var(--font-body); font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.mm-held > span { display: block; width: 100%; white-space: normal; }
+.mm-held.img img { display: block; width: 100%; height: 100%; object-fit: contain; }
+
 /* stamps: a filled accent sticker with a white edge, like the character's outline */
 .mm-stamp { position: absolute; padding: 6px 30px 12px; background: var(--accent); color: var(--on-accent);
   border: 9px solid #ffffff; border-radius: 22px; font-family: var(--font-display); font-weight: var(--mm-head-weight, 900);
