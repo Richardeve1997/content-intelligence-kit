@@ -118,9 +118,9 @@ def _card_line(manifest: Path) -> str:
     card = data["poses"]["hold_card"]["frame_info"][0].get("card")
     if card:
         return f"The hold_card pose holds a card {card[2]} x {card[3]} cells, which a video can write its words on."
-    return ("No plain card was found on the hold_card pose, so a video cannot write on it: a card on that page drops in "
-            "beside the character instead. For words on the card, draw hold_card again with a large plain white card, "
-            "then pack again.")
+    return ("No plain card was found on the hold_card pose, so a video cannot write on it, and a mini me page that shows "
+            "a card uses another pose. Draw hold_card again with a large plain white card and pack again, and the "
+            "page's words go on the card it holds.")
 
 
 def _pack_again(folder: Path) -> None:

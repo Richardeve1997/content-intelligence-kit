@@ -332,6 +332,20 @@ def test_the_pack_says_what_card_the_hold_card_pose_holds(built, tmp_path, monke
     assert f"holds a card {card[2]} x {card[3]} cells" in said and "write" in said, said
 
 
+
+def test_the_pack_says_a_page_with_a_card_uses_another_pose_when_it_found_no_card(tmp_path):
+    """A mini me page that pairs hold_card with a card is refused when no card was measured, so the pack's
+    message no longer promises a card dropping in beside the character."""
+    from kit.character import __main__ as cli
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"poses": {"hold_card": {"frame_info": [{"card": None}]}}}))
+    said = cli._card_line(manifest)
+    assert "drops in" not in said, said
+    assert "another pose" in said and "draw hold_card again with a large plain white card" in said.lower(), said
+    assert "words go on the card" in said, said
+
+
 def test_a_face_change_on_a_character_that_cannot_be_packed_now_says_the_pack_is_old(built, tmp_path, monkeypatch, capsys):
     from kit.character import __main__ as cli
 

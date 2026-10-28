@@ -79,3 +79,12 @@ def test_the_runtime_keeps_to_the_seek_safe_rules():
     assert "window.Character = " in code
     for name in ("ready", "mount", "walkTime", "at", "script", "speak"):
         assert re.search(rf"\b{name}: {name}\b", code), name
+
+
+def test_step_9_says_a_page_with_a_card_uses_another_pose_when_the_pack_found_none():
+    """A hold_card page with a card and no measured card is refused, so the old fallback (a card dropping in
+    beside the character) no longer happens. Step 9 says what does."""
+    body = SKILL.read_text(encoding="utf-8")
+    step = next(line for line in body.splitlines() if line.startswith("9. Pack the character"))
+    assert "drops its card in" not in step, step
+    assert "another pose" in step and "large plain white card" in step and "words go on the card" in step, step
