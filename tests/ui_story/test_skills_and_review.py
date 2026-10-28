@@ -155,6 +155,26 @@ def test_each_tile_shows_the_frame_at_its_time(tmp_path, fps):
         assert abs(frame - index / fps * 30) <= 1.5, (index, frame)
 
 
+@pytest.mark.parametrize("fps", [1, 2])
+def test_tiles_keep_their_times_when_the_picture_starts_after_the_sound(tmp_path, fps):
+    """In some files the first picture comes a frame after the sound. The tile stamped 0s is still that first
+    picture, not one a whole period later. Here the picture starts 1/60 s in and its brightness is its frame number."""
+    from PIL import Image, ImageStat
+
+    ramp, late = tmp_path / "ramp.mp4", tmp_path / "late.mp4"
+    ffmpeg("-f", "lavfi", "-i", "nullsrc=s=64x64:r=60:d=4,format=gray,geq=lum='N'", "-c:v", "libx264", "-qp", "0",
+           "-pix_fmt", "yuv420p", ramp)
+    ffmpeg("-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono", "-itsoffset", "0.0166667", "-i", ramp,
+           "-map", "1:v", "-map", "0:a", "-t", "4", "-c:v", "copy", "-c:a", "aac", late)
+    folder = tmp_path / "tiles"
+    folder.mkdir()
+    tiles = _review_frames().frames_at_rate(late, fps, folder)
+    assert len(tiles) >= 4
+    for index, tile in enumerate(tiles):
+        frame = ImageStat.Stat(Image.open(tile).convert("L")).mean[0]
+        assert abs(frame - max(0.0, index / fps - 1 / 60) * 60) <= 2.0, (index, frame)
+
+
 # --- what this round of fixes added ------------------------------------------------------------------------
 
 
