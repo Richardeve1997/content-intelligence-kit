@@ -149,6 +149,36 @@ def test_a_stopped_run_keeps_the_matte_that_was_there(tmp_path, monkeypatch):
     assert out.read_bytes() == before
 
 
+def test_a_video_that_stops_decoding_part_way_leaves_no_matte(tmp_path, monkeypatch):
+    """When the ffmpeg reading the video dies part way, the frames simply end. That is a failure, not a short
+    matte: a short matte at the path would pass for a finished one."""
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", FakeSegmenter)
+    real_popen = subprocess.Popen
+
+    def popen(cmd, *args, **kwargs):
+        if "rgb24" in cmd:  # the reader: two frames of a 96x160 picture, then an error exit
+            cmd = [sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes(96 * 160 * 3 * 2)); sys.exit(1)"]
+        return real_popen(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(matte.subprocess, "Popen", popen)
+    out = tmp_path / "matte.mp4"
+    with pytest.raises(matte.KitError) as caught:
+        matte.matte(tiny_clip(tmp_path / "take.mp4"), out)
+    assert "take.mp4" in str(caught.value)
+    assert not out.exists()
+    assert not list(tmp_path.glob("matte*")), "no part-written file is left either"
+
+
+def test_a_leftover_part_file_is_replaced_by_a_good_run(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setattr(matte, "_mediapipe_segmenter", FakeSegmenter)
+    (tmp_path / "matte.part.mp4").write_bytes(b"left by a run that was stopped")
+    out = matte.matte(tiny_clip(tmp_path / "take.mp4"), tmp_path / "matte.mp4")
+    assert frames(out) == (5, 96, 160)
+    assert not (tmp_path / "matte.part.mp4").exists()
+
+
 def test_the_model_cache_is_outside_the_repo(monkeypatch, tmp_path):
     from kit import config
 

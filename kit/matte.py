@@ -225,6 +225,10 @@ def matte(video: Path, out: Path, *, backend: str = "auto", downsample: float = 
             encoder.wait()
             if not read_all:
                 part.unlink(missing_ok=True)
+    if decoder.returncode != 0:  # the frames ended because reading the video failed, not because it ended
+        part.unlink(missing_ok=True)
+        raise KitError(f"ffmpeg stopped reading {video.name} part way, so its matte was not written. "
+                       "Check that the video plays to the end, then run the matte again.")
     if encoder.returncode != 0 or count == 0:
         part.unlink(missing_ok=True)
         raise KitError(f"The matte for {video.name} could not be written.")
