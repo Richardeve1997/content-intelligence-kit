@@ -460,6 +460,18 @@ def test_no_apify_with_a_token_leaves_apify_alone(kit_tree, me, web, monkeypatch
     assert web.calls == []
 
 
+def test_a_run_takes_neither_key_from_the_environment(kit_tree, me, web, youtube, fake_zernio, monkeypatch, capsys):
+    # The run reads APIFY_TOKEN and ZERNIO_API_KEY from .env alone: a shell that carries them changes nothing.
+    monkeypatch.setenv("APIFY_TOKEN", TOKEN)
+    monkeypatch.setenv("ZERNIO_API_KEY", TOKEN)
+    write_watchlist(me, instagram=["@example_gardener_one"], youtube=["@example_channel"])
+    pipeline.run(no_transcribe=True, say=lambda *a, **k: None)
+    data = items_of(kit_tree)
+    assert MISSING in data["notices"]
+    assert data["performance"]["message"] == "Performance skipped: add ZERNIO_API_KEY to .env to include your own results"
+    assert [u for u in web.urls() if "apify" in u] == [] and fake_zernio.keys == [] and fake_zernio.calls == []
+
+
 # --- the creator's own results ------------------------------------------------------------------------------------
 
 

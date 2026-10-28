@@ -758,6 +758,14 @@ def test_the_footer_lists_only_the_keys_that_are_not_set_and_never_a_value(docto
 ENV_NOTE_END = "but not in .env, and the kit uses .env only."
 
 
+def test_the_doctor_knows_the_same_keys_as_the_kit(doctor):
+    # The doctor runs on a Mac's own Python before the kit's environment exists, so it holds its own copy of the
+    # names. This ties that copy to the kit's list.
+    from kit import config
+
+    assert tuple(doctor.KNOWN_KEYS) == config.KEYS
+
+
 def test_a_key_only_in_the_environment_is_not_set_and_gets_one_note(doctor, fake, capsys):
     # The kit reads its keys from .env alone, so a key an agent's shell happens to carry is not set for the kit.
     probe = fake()
