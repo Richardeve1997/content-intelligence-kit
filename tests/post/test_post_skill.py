@@ -156,6 +156,22 @@ def test_the_skill_claims_no_more_than_the_code_guarantees():
     assert "reach a post whose create was interrupted" in body
 
 
+def section(title: str) -> str:
+    return text().split(f"## {title}", 1)[1].split("\n## ", 1)[0]
+
+
+def test_the_skill_says_what_a_refused_resend_that_keeps_its_record_means():
+    failing = section("When something fails")
+    line = next(line for line in failing.splitlines() if schedule_module.EARLIER_ATTEMPT.split(",")[0] in line)
+    assert "record" in line and "on purpose" in line, "the record is kept, and the skill says why"
+    assert "same `schedule` command" in line and "never delete" in line.lower()
+
+
+def test_the_skill_says_list_finds_a_post_whose_create_was_interrupted():
+    after = section("After it is scheduled")
+    assert "`list`" in after and "interrupted" in after and "found" in after
+
+
 def test_the_skill_describes_the_caption_rules_the_check_enforces():
     body = text()
     assert "no hashtag in it" in body  # the YouTube title

@@ -48,6 +48,7 @@ You drive the kit with `uv run python -m kit.post <command>`. A command prints p
 - Skipped with "not connected in Zernio": the creator connects that platform inside Zernio and asks again. The other platforms are not affected.
 - A dropped connection: run the same `schedule` command again. The kit first looks in Zernio for a post with that title and uses it if it finds one. If it finds none, it sends the same request again, and Zernio treats a repeat of that request as one post for 24 hours. After 23 hours with no post found, the kit stops and says to check Zernio, because sending it again could make a second post.
 - Zernio gives its own reason in the sentence, such as an account that needs reconnecting or a video it will not take. Pass it on in plain words.
+- A line that ends "An earlier attempt may already have made this post, so the next run looks for it before it sends anything" means Zernio refused or turned away a resend. The kit keeps the record in `work/<slug>/post/` on purpose, because the first attempt may have made the post. Run the same `schedule` command again later: it looks for that post first, and a resend uses the same request, so Zernio answers with the post it has. Never delete the record to make it go through.
 - "Already scheduled" means an earlier run made the post and nothing was repeated. When the line also says Zernio still holds the earlier text, the caption was edited after the post was made. Cancel that post and schedule it again to use the new words.
 - A post that failed inside Zernio has to be cancelled before it is scheduled again.
 
@@ -56,7 +57,7 @@ You drive the kit with `uv run python -m kit.post <command>`. A command prints p
 - `uv run python -m kit.post list <slug>` shows each platform as Zernio reports it now, with the address once a post is live.
 - `uv run python -m kit.post reschedule <slug> tiktok --on 2026-10-30 --time 09:00` moves one post. Only a post that has not started to publish can move.
 - `uv run python -m kit.post cancel <slug> tiktok` cancels one. Scheduling it again afterwards makes a fresh post.
-- `reschedule` and `cancel` also reach a post whose create was interrupted, by finding it in Zernio under its title. If Zernio has no post with that title, they say so and change nothing.
+- `reschedule` and `cancel` also reach a post whose create was interrupted, by finding it in Zernio under its title. If Zernio has no post with that title, they say so and change nothing. `list` looks the same way, and says when it found a post after an interrupted attempt.
 - To change the words of a scheduled post, cancel it, edit `captions.json`, show the creator, approve and schedule again.
 
 ## Without a Zernio key
