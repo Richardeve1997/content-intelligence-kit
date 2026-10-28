@@ -73,20 +73,31 @@ def test_a_chunk_heard_as_punctuation_alone_gives_no_word(tmp_path, monkeypatch)
     assert [w.text for w in transcribe.words(audio)] == ["Fresh", "basil,", "37"]
 
 
-def _stand_in_models(monkeypatch, cached: bool):
-    """A stand-in for the model hub and mlx-whisper: records how the model was looked up and what was loaded."""
+def _stand_in_models(monkeypatch, request, tmp_path, here: str):
+    """A stand-in for the model hub and mlx-whisper. `here` is what this Mac holds of the model: "whole" (its config
+    and weights), "half" (a download that stopped after the config) or "none". It records how the model was looked
+    up and which folder mlx-whisper was handed, and clears the kit's cached answer again when the test ends, so no
+    later test is handed this stand-in's folder."""
     import types
 
     seen = {"lookups": [], "model": None}
+    on_this_mac, downloaded = tmp_path / "hub" / "on-this-mac", tmp_path / "hub" / "downloaded"
+    held = {"whole": ("config.json", "weights.safetensors"), "half": ("config.json",), "none": ()}[here]
+    for folder, files in ((on_this_mac, held), (downloaded, ("config.json", "weights.npz"))):
+        folder.mkdir(parents=True)
+        for name in files:
+            (folder / name).write_text("{}")
 
     class NotHereYet(Exception):
         pass
 
     def snapshot_download(repo_id, local_files_only=False, **kwargs):
         seen["lookups"].append(local_files_only)
-        if local_files_only and not cached:
+        if not local_files_only:
+            return str(downloaded)
+        if here == "none":
             raise NotHereYet(repo_id)
-        return "/models/a-copy-on-this-mac"
+        return str(on_this_mac)
 
     def mlx_transcribe(samples, *, path_or_hf_repo, **kwargs):
         seen["model"] = path_or_hf_repo
@@ -96,30 +107,42 @@ def _stand_in_models(monkeypatch, cached: bool):
     monkeypatch.setitem(sys.modules, "mlx_whisper", types.SimpleNamespace(transcribe=mlx_transcribe))
     monkeypatch.setattr(transcribe, "_use_mlx", lambda: True)
     monkeypatch.delenv("KIT_ASR_MODEL", raising=False)
-    getattr(transcribe, "_mlx_model", None) and transcribe._mlx_model.cache_clear()
-    return seen
+    transcribe._mlx_model.cache_clear()
+    request.addfinalizer(transcribe._mlx_model.cache_clear)
+    return seen, str(on_this_mac), str(downloaded)
 
 
-def test_a_speech_model_already_here_loads_with_no_download_bar(monkeypatch, capsys):
-    """Given a model's name, mlx-whisper looks it up online and draws a "Fetching 4 files" bar on every run. The
-    kit hands it the folder of the copy already on this Mac, found without going online, and says nothing."""
+def _listen_once(times=1):
     import numpy as np
 
-    seen = _stand_in_models(monkeypatch, cached=True)
-    transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
-    assert seen["model"] == "/models/a-copy-on-this-mac" and seen["lookups"] == [True]
+    for _ in range(times):
+        transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
+
+
+def test_a_speech_model_already_here_loads_with_no_download_bar(monkeypatch, request, tmp_path, capsys):
+    """Given a model's name, mlx-whisper looks it up online and draws a "Fetching 4 files" bar on every run. The
+    kit hands it the folder of the copy already on this Mac, found without going online, and says nothing."""
+    seen, on_this_mac, _ = _stand_in_models(monkeypatch, request, tmp_path, "whole")
+    _listen_once()
+    assert seen["model"] == on_this_mac and seen["lookups"] == [True]
     assert capsys.readouterr().out == ""
 
 
-def test_a_speech_model_not_here_yet_is_downloaded_once_with_one_sentence(monkeypatch, capsys):
-    import numpy as np
-
-    seen = _stand_in_models(monkeypatch, cached=False)
-    transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
-    transcribe._asr(np.zeros(transcribe.SR, np.float32), word_times=True)
-    assert seen["model"] == "/models/a-copy-on-this-mac" and seen["lookups"] == [True, False]
+def test_a_speech_model_not_here_yet_is_downloaded_once_with_one_sentence(monkeypatch, request, tmp_path, capsys):
+    seen, _, downloaded = _stand_in_models(monkeypatch, request, tmp_path, "none")
+    _listen_once(times=2)
+    assert seen["model"] == downloaded and seen["lookups"] == [True, False]
     out = capsys.readouterr().out
     assert out.count("\n") == 1 and "speech model" in out and "once" in out
+
+
+def test_a_download_that_stopped_halfway_is_finished_not_used(monkeypatch, request, tmp_path, capsys):
+    """A first download cut off after the config leaves a folder the hub still finds on this Mac. Without its
+    weights mlx-whisper cannot load it, so the kit downloads the rest instead of handing it over."""
+    seen, _, downloaded = _stand_in_models(monkeypatch, request, tmp_path, "half")
+    _listen_once()
+    assert seen["model"] == downloaded and seen["lookups"] == [True, False]
+    assert "speech model" in capsys.readouterr().out
 
 
 def test_words_writes_the_shape_the_kit_reads(tmp_path, monkeypatch):

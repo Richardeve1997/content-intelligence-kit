@@ -162,17 +162,26 @@ def _use_mlx() -> bool:
 @functools.lru_cache(maxsize=2)
 def _mlx_model(name: str) -> str:
     """Where the mlx speech model is. Given a name, mlx-whisper looks the model up online on every run and draws a
-    download bar while it does. A copy already on this Mac is found without going online and used from its
-    folder, so nothing is drawn; a model that is not here yet is downloaded once, after one sentence saying so."""
+    download bar while it does. A whole copy already on this Mac is found without going online and used from its
+    folder, so nothing is drawn. A model that is not here yet, or whose first download stopped before the weights,
+    is downloaded once, after one sentence saying so."""
     if Path(name).exists():
         return name
     from huggingface_hub import snapshot_download
 
     try:
-        return snapshot_download(repo_id=name, local_files_only=True)
+        found = snapshot_download(repo_id=name, local_files_only=True)
     except Exception:  # not on this Mac yet
-        print(DOWNLOADING, flush=True)
-        return snapshot_download(repo_id=name)
+        found = None
+    if found and _whole_model(Path(found)):
+        return found
+    print(DOWNLOADING, flush=True)
+    return snapshot_download(repo_id=name)
+
+
+def _whole_model(folder: Path) -> bool:
+    """A model folder mlx-whisper can load: its config and its weights, in either of the files it reads."""
+    return (folder / "config.json").is_file() and any((folder / w).is_file() for w in ("weights.safetensors", "weights.npz"))
 
 
 @functools.lru_cache(maxsize=2)
