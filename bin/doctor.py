@@ -110,7 +110,9 @@ FIX_OUTSIDE_SANDBOX = (
 )
 SANDBOX_NOTE = (
     "Some rows cannot be checked inside Codex's sandbox. One run of python3 bin/doctor.py outside the sandbox "
-    "gives the full check. Inside the sandbox, start the kit's uv commands with UV_NO_CACHE=1."
+    "gives the full check. When Codex cannot ask you to approve that, as in a codex exec run, it does not look for "
+    "another way out of the sandbox: it asks you to run python3 bin/doctor.py in Terminal, which settles those rows. "
+    "Inside the sandbox, start the kit's uv commands with UV_NO_CACHE=1."
 )
 
 # The optional keys. The names that count come from .env.example, and these are the ones to use when that file cannot be read.

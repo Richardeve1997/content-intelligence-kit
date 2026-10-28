@@ -550,6 +550,14 @@ def test_inside_codex_sandbox_the_rows_it_cannot_check_are_warnings_that_say_so(
     assert "UV_NO_CACHE=1" in text, "it says how the kit's uv commands run inside the sandbox"
 
 
+def test_the_sandbox_note_says_what_to_do_when_codex_cannot_ask_for_approval(doctor, fake, capsys):
+    assert doctor.main([], probe=sandboxed(fake)) == 0
+    note = capsys.readouterr().out.strip().splitlines()[-1]
+    assert "cannot ask" in note and "codex exec" in note
+    assert "another way out of the sandbox" in note
+    assert "python3 bin/doctor.py in Terminal" in note
+
+
 def test_inside_codex_sandbox_what_can_be_seen_on_disk_is_still_missing(doctor, fake):
     probe = sandboxed(fake)
     probe.sizes.pop("node_modules/hyperframes/package.json", None)

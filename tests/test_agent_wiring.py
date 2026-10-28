@@ -412,6 +412,16 @@ def test_agents_md_says_what_cannot_run_inside_codex_sandbox():
     assert "can write only in this folder and the temporary folder" in agents
 
 
+def test_agents_md_says_what_to_do_when_codex_cannot_ask_for_approval():
+    # A headless codex exec run has no way to ask, and one such run reached for computer use to open Terminal.
+    agents = text(ROOT / "AGENTS.md")
+    line = next(line for line in agents.splitlines() if "cannot ask" in line)
+    assert "`codex exec`" in line
+    for ruled_out in ("another way out of the sandbox", "computer use", "no other app", "no other tool"):
+        assert ruled_out in line, ruled_out
+    assert "Terminal" in line and "`python3 bin/doctor.py`" in line and "HyperFrames" in line and "Chromium" in line
+
+
 # --- the three skills this task adds --------------------------------------------------------------------------------------
 
 
