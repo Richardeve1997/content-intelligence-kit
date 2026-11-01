@@ -5,6 +5,7 @@ Python and HyperFrames stay pinned, every dependency group is declared up front,
 and the licence names its holder.
 """
 
+import hashlib
 import json
 import re
 import shutil
@@ -35,6 +36,14 @@ README_HEADINGS = [
     "Updating",
     "Credits",
 ]
+
+# The credit lines are checked by their SHA-256, so the holder's name appears only in LICENSE and README.md.
+LICENSE_CREDIT_SHA256 = "37682c6bf43b3f87c0bc71e242c7c2d4a6afdebf4599400d92fdfd62699aa463"
+README_CREDIT_SHA256 = "f79e3e2a81584de86e429fa754d4ce2e975395e37c52224fdf11fdee158c4ba4"
+
+
+def _sha256(line: str) -> str:
+    return hashlib.sha256(line.encode("utf-8")).hexdigest()
 
 
 def _pyproject() -> dict:
@@ -196,9 +205,8 @@ def test_pytest_markers_registered(pytestconfig):
 
 def test_license_holder():
     text = (ROOT / "LICENSE").read_text()
-    # The holder is written backwards so the name appears in plain text only in LICENSE.
-    holder = "evE drahciR"[::-1]
-    assert f"Copyright (c) 2026 {holder}" in text.splitlines()
+    holders = [line for line in text.splitlines() if line.startswith("Copyright (c)")]
+    assert [_sha256(line) for line in holders] == [LICENSE_CREDIT_SHA256]
     assert text.startswith("MIT License")
     assert "Permission is hereby granted, free of charge" in text
     assert 'THE SOFTWARE IS PROVIDED "AS IS"' in text
@@ -224,10 +232,8 @@ def test_readme_says_how_to_start_and_carries_the_credit_line_once():
     assert "Clone it, don't fork it" in sub_headings and "This repo takes no pull requests" in sub_headings
     assert "git clone https://github.com/" in text and 'say "set me up"' in text
     assert "Use this template" in text and "npm ci" in text
-    # The holder and handle are written backwards so they appear in plain text only in README.md and LICENSE.
-    holder, handle = "evE drahciR"[::-1], "ia.elbissopehtfotra"[::-1]
-    credit = f"Built by {holder} ([@{handle}](https://www.instagram.com/{handle}/))."
-    assert text.splitlines().count(credit) == 1
+    credits = [line for line in text.splitlines() if line.startswith("Built by ")]
+    assert [_sha256(line) for line in credits] == [README_CREDIT_SHA256]
 
 
 def _readme_section(heading: str) -> str:

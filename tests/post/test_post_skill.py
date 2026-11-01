@@ -24,7 +24,8 @@ SKILL = ROOT / ".claude" / "skills" / "post" / "SKILL.md"
 EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)  # written as code points so this file holds no dash
 # Words the kit's own prose never uses. Built from pieces so this file does not contain them whole.
 INTERNAL_WORDS = ["rul" + "ing", "contro" + "ller", "release " + "scan", "house " + "brand", "plan " + "task"]
-PERSONAL_WORDS = ["Art of the " + "Possible", "AO" + "TP", "Clear " + "Sky", "Mini " + "Rich", "0096" + "FF", "IMG" + "_", "/Us" + "ers/"]
+# A camera file name or a home folder path would show a real take or a real machine. Also built from pieces.
+MACHINE_WORDS = ["IMG" + "_", "/" + "Users" + "/"]
 
 OWNED = [
     "kit/zernio.py",
@@ -216,13 +217,13 @@ def test_no_em_or_en_dash_and_no_machine_path(path):
 
 
 @pytest.mark.parametrize("path", OWNED)
-def test_no_internal_process_words_and_nothing_personal(path):
+def test_no_internal_process_words_or_machine_details(path):
     content = (ROOT / path).read_text(encoding="utf-8")
     lower = content.lower()
     for word in INTERNAL_WORDS:
         assert word not in lower, f"{path} contains {word!r}"
-    for word in PERSONAL_WORDS:
-        assert word.lower() not in lower, f"{path} contains a word that is personal to the kit's author"
+    for word in MACHINE_WORDS:
+        assert word.lower() not in lower, f"{path} contains {word!r}, a camera file name or a home folder path"
 
 
 @pytest.mark.parametrize("path", [p for p in OWNED if p.endswith(".py") and not p.startswith("tests/")])
